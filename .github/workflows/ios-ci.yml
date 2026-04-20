@@ -1,0 +1,41 @@
+name: Webtoon Lens iOS CI
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+jobs:
+  simulator-tests:
+    name: Generate project and run simulator tests
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Apple toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: |
+          brew update
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run tests
+        run: bash ci/test.sh
+
+      - name: Upload xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebtoonLens.xcresult
+          path: build/TestResults/WebtoonLens.xcresult
+          if-no-files-found: ignore

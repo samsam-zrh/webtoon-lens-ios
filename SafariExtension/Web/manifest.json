@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Webtoon Lens",
+  "version": "0.1.0",
+  "description": "Traduit les images de webtoon visibles dans Safari.",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Webtoon Lens",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

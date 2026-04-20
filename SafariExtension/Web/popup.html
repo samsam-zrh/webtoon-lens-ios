@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      width: 260px;
+      margin: 0;
+      padding: 14px;
+      color: #111;
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+    button {
+      width: 100%;
+      min-height: 38px;
+      margin-top: 8px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: #111;
+      font-weight: 700;
+    }
+    label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    p {
+      margin: 10px 0 0;
+      color: #555;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+  </style>
+</head>
+<body>
+  <h1>Webtoon Lens</h1>
+  <button id="translate">Traduire les images visibles</button>
+  <label>
+    <input id="autoMode" type="checkbox">
+    Mode auto sur ce navigateur
+  </label>
+  <p>Les images restent locales pour l'OCR. Le backend recoit seulement le texte OCR et les coordonnees.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
