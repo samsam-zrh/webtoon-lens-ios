@@ -1,12 +1,17 @@
 name: Webtoon Lens TestFlight Archive
+run-name: Webtoon Lens TestFlight Archive
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   archive:
     name: Archive signed iOS app
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
 
     steps:
