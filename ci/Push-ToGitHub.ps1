@@ -46,6 +46,16 @@ try {
         git init
     }
 
+    if ([string]::IsNullOrWhiteSpace((git config user.name))) {
+        $githubUser = gh api user --jq .login
+        git config user.name $githubUser
+    }
+
+    if ([string]::IsNullOrWhiteSpace((git config user.email))) {
+        $githubUser = git config user.name
+        git config user.email "$githubUser@users.noreply.github.com"
+    }
+
     git add .
 
     $hasCommit = (Invoke-AllowFailure { git rev-parse --verify HEAD *> $null }) -eq 0
