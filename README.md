@@ -25,10 +25,11 @@ No Mac? Use [WINDOWS_NO_MAC.md](WINDOWS_NO_MAC.md). The repository includes GitH
 If GitHub billing blocks Actions, use the local phone preview:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File .\ci\Install-PhonePreviewAI.ps1
 powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
 ```
 
-The preview serves the mobile UI and a mock `POST /v1/webtoon/translate` backend on the same local URL.
+The preview serves the mobile UI and a local OCR/translation backend on the same local URL. It uses EasyOCR/Tesseract for OCR and Argos Translate for offline JP/KO/ZH/EN -> FR translation. It no longer returns fake `[fr]` translations.
 
 Before running on a real device, replace the sample bundle identifiers and App Group in:
 
@@ -49,7 +50,7 @@ POST /v1/webtoon/translate
 
 The payload includes source language `auto`, target language `fr`, OCR segments, reading boxes, series id, style prompt, and locked glossary terms. The response returns translated segments and optional glossary updates.
 
-If no backend URL is configured, the app uses a local preview client that echoes detected text with a `[fr]` prefix. That keeps OCR, overlays, Safari messaging, and Shortcuts testable before the server exists.
+If no backend URL is configured, the native app now shows a clear setup error instead of generating fake translations. For local testing from Windows, run the phone preview server and use its LAN URL as the backend.
 
 ## What is intentionally not implemented
 

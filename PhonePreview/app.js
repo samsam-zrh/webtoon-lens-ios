@@ -5,24 +5,28 @@ const overlay = document.getElementById("overlay");
 const stage = document.getElementById("stage");
 const imageReader = document.getElementById("imageReader");
 const translateButton = document.getElementById("translateButton");
-const sourceText = document.getElementById("sourceText");
 const backendUrl = document.getElementById("backendUrl");
 const statusLine = document.getElementById("statusLine");
 const webtoonUrl = document.getElementById("webtoonUrl");
 const openUrlButton = document.getElementById("openUrlButton");
-
-const boxes = [
-  { x: 0.12, y: 0.14, width: 0.42, height: 0.09 },
-  { x: 0.48, y: 0.39, width: 0.36, height: 0.1 },
-  { x: 0.16, y: 0.68, width: 0.46, height: 0.1 }
-];
+const capabilityLine = document.getElementById("capabilityLine");
+const readerSummary = document.getElementById("readerSummary");
+const ocrLanguage = document.getElementById("ocrLanguage");
 
 backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
 webtoonUrl.value = localStorage.getItem("webtoonLensUrl") || "";
+ocrLanguage.value = localStorage.getItem("webtoonLensOcrLanguage") || "auto";
+
+let loadedImages = 0;
+let failedImages = 0;
+let currentPageUrl = "";
+let currentCaptureDataUrl = "";
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
+
+loadCapabilities();
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files && imageInput.files[0];
@@ -30,13 +34,16 @@ imageInput.addEventListener("change", () => {
 
   const reader = new FileReader();
   reader.onload = () => {
+    resetReaderCounters();
     stage.classList.remove("feed-mode");
     imageReader.innerHTML = "";
-    previewImage.src = String(reader.result);
+    currentCaptureDataUrl = String(reader.result);
+    previewImage.src = currentCaptureDataUrl;
     previewImage.style.display = "block";
     emptyState.style.display = "none";
     overlay.innerHTML = "";
-    statusLine.textContent = "Capture chargee.";
+    readerSummary.textContent = "Capture chargee depuis ton telephone.";
+    statusLine.textContent = "Image chargee. Appuie sur Traduire pour lancer OCR + traduction locale.";
   };
   reader.readAsDataURL(file);
 });
@@ -50,33 +57,26 @@ backendUrl.addEventListener("input", () => {
   localStorage.setItem("webtoonLensBackend", backendUrl.value.trim());
 });
 
+ocrLanguage.addEventListener("change", () => {
+  localStorage.setItem("webtoonLensOcrLanguage", ocrLanguage.value);
+});
+
 translateButton.addEventListener("click", async () => {
   translateButton.disabled = true;
-  translateButton.textContent = "Traduction...";
+  translateButton.textContent = "Verification...";
 
   try {
     if (stage.classList.contains("feed-mode")) {
-      const count = await translateReaderImages();
-      statusLine.textContent = `OK: ${count} images annotees.`;
+      await translateReaderImages();
       return;
     }
 
-    const lines = sourceText.value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+    if (previewImage.style.display === "block") {
+      await translateCapture();
+      return;
+    }
 
-    const segments = lines.map((line, index) => ({
-      id: `preview-${index}`,
-      text: line,
-      boundingBox: boxes[index % boxes.length],
-      confidence: 0.9,
-      readingOrder: index
-    }));
-
-    const translated = await translateSegments(segments);
-    render(translated);
-    statusLine.textContent = `OK: ${translated.length} bulles traduites.`;
+    statusLine.textContent = "Ouvre un lien webtoon ou choisis une image avant de traduire.";
   } catch (error) {
     statusLine.textContent = error && error.message ? error.message : String(error);
   } finally {
@@ -94,15 +94,20 @@ async function openWebtoonUrl() {
 
   openUrlButton.disabled = true;
   openUrlButton.textContent = "Ouverture...";
-  statusLine.textContent = "Extraction des images...";
+  readerSummary.textContent = "";
+  statusLine.textContent = "Extraction des images visibles dans la page...";
 
   try {
     const normalized = value.includes("://") ? value : `https://${value}`;
     webtoonUrl.value = normalized;
     localStorage.setItem("webtoonLensUrl", normalized);
+    currentPageUrl = normalized;
 
     const response = await fetch(`/v1/webtoon/extract?url=${encodeURIComponent(normalized)}`);
-    if (!response.ok) throw new Error(`Extraction impossible (${response.status})`);
+    if (!response.ok) {
+      const message = await readError(response);
+      throw new Error(message || `Extraction impossible (${response.status})`);
+    }
     const payload = await response.json();
     renderImageFeed(payload.images || []);
   } catch (error) {
@@ -114,6 +119,7 @@ async function openWebtoonUrl() {
 }
 
 function renderImageFeed(images) {
+  resetReaderCounters();
   stage.classList.add("feed-mode");
   previewImage.style.display = "none";
   overlay.innerHTML = "";
@@ -122,8 +128,9 @@ function renderImageFeed(images) {
   if (!images.length) {
     emptyState.style.display = "grid";
     emptyState.querySelector("strong").textContent = "Aucune image trouvee";
-    emptyState.querySelector("span").textContent = "Certains sites chargent les images apres connexion ou bloquent l'extraction.";
-    statusLine.textContent = "Aucune image trouvee sur cette page.";
+    emptyState.querySelector("span").textContent = "Certains sites chargent les images avec JavaScript, demandent une connexion, ou bloquent le proxy local.";
+    readerSummary.textContent = "0 image extraite.";
+    statusLine.textContent = "Essaie un lien direct d'episode avec images publiques, ou choisis une capture.";
     return;
   }
 
@@ -132,121 +139,207 @@ function renderImageFeed(images) {
     const page = document.createElement("article");
     page.className = "reader-page";
     page.dataset.index = String(index);
+    page.dataset.sourceUrl = image.url;
+
+    const badge = document.createElement("div");
+    badge.className = "page-badge";
+    badge.textContent = `Image ${index + 1}`;
 
     const img = document.createElement("img");
-    img.src = `/v1/webtoon/image?url=${encodeURIComponent(image.url)}`;
+    img.src = proxyImageUrl(image.url);
     img.alt = image.alt || `Image webtoon ${index + 1}`;
     img.loading = index < 2 ? "eager" : "lazy";
+    img.addEventListener("load", () => {
+      loadedImages += 1;
+      page.dataset.loaded = "true";
+      updateReaderStatus(images.length);
+    });
+    img.addEventListener("error", () => {
+      failedImages += 1;
+      page.classList.add("load-error");
+      badge.textContent = `Image ${index + 1} bloquee`;
+      updateReaderStatus(images.length);
+    });
 
     const pageOverlay = document.createElement("div");
     pageOverlay.className = "overlay";
     pageOverlay.setAttribute("aria-live", "polite");
 
-    page.append(img, pageOverlay);
+    page.append(img, badge, pageOverlay);
     imageReader.appendChild(page);
   }
 
-  statusLine.textContent = `${images.length} images chargees. Appuie sur Traduire.`;
+  readerSummary.textContent = `${images.length} images trouvees. Chargement en cours...`;
+  statusLine.textContent = "Le lecteur charge les images. Appuie sur Traduire pour lancer OCR + traduction locale.";
 }
 
-async function translateSegments(segments) {
-  const baseUrl = backendUrl.value.trim();
-  if (!baseUrl) {
-    return segments.map((segment) => ({
-      id: segment.id,
-      translatedText: localPreviewTranslate(segment.text),
-      boundingBox: segment.boundingBox
-    }));
-  }
-
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/webtoon/translate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sourceLanguage: "auto",
-      targetLanguage: "fr",
-      seriesID: "phone-preview",
-      style: "Traduction naturelle en francais, adaptee aux webtoons.",
-      glossary: [
-        { id: "astra", source: "Astra", translation: "Astra", category: "power", isLocked: true },
-        { id: "north-blade", source: "Lame du nord", translation: "Lame du Nord", category: "power", isLocked: true }
-      ],
-      segments
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend ${response.status}`);
-  }
-
-  const payload = await response.json();
-  return payload.segments || [];
-}
-
-function localPreviewTranslate(text) {
-  return text
-    .replace(/lame du nord/gi, "Lame du Nord")
-    .replace(/astra/gi, "Astra")
-    .replace(/^(.+)$/, "[fr] $1");
-}
-
-function render(segments) {
-  overlay.innerHTML = "";
-
-  for (const segment of segments) {
-    const box = segment.boundingBox || boxes[0];
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = segment.translatedText || segment.text || "";
-    bubble.style.left = `${box.x * 100}%`;
-    bubble.style.top = `${box.y * 100}%`;
-    bubble.style.width = `${box.width * 100}%`;
-    bubble.style.minHeight = `${Math.max(42, box.height * overlay.clientHeight)}px`;
-    overlay.appendChild(bubble);
-  }
+function proxyImageUrl(url) {
+  const params = new URLSearchParams({ url });
+  if (currentPageUrl) params.set("referer", currentPageUrl);
+  return `/v1/webtoon/image?${params.toString()}`;
 }
 
 async function translateReaderImages() {
-  const pages = Array.from(document.querySelectorAll(".reader-page"));
-  let translatedCount = 0;
-
-  for (const [pageIndex, page] of pages.entries()) {
-    const pageOverlay = page.querySelector(".overlay");
-    if (!pageOverlay) continue;
-
-    const lines = sourceText.value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    const segments = lines.map((line, index) => ({
-      id: `page-${pageIndex}-segment-${index}`,
-      text: line,
-      boundingBox: boxes[index % boxes.length],
-      confidence: 0.9,
-      readingOrder: index
-    }));
-
-    const translated = await translateSegments(segments);
-    renderIntoOverlay(pageOverlay, translated);
-    translatedCount += 1;
+  const pages = Array.from(document.querySelectorAll(".reader-page[data-loaded='true']"));
+  if (!pages.length) {
+    statusLine.textContent = "Aucune image chargee. Attends le chargement, descends un peu, ou choisis une capture.";
+    return;
   }
 
-  return translatedCount;
+  let translatedPages = 0;
+  for (const [index, page] of pages.entries()) {
+    const pageOverlay = page.querySelector(".overlay");
+    const imageUrl = page.dataset.sourceUrl || "";
+    if (!pageOverlay || !imageUrl) continue;
+
+    renderNotice(pageOverlay, `OCR ${index + 1}/${pages.length}...`);
+    statusLine.textContent = `OCR + traduction image ${index + 1}/${pages.length}...`;
+
+    const ocr = await ocrImage({ imageUrl, referer: currentPageUrl, language: ocrLanguage.value });
+    if (!ocr.length) {
+      renderNotice(pageOverlay, "Aucun texte detecte");
+      continue;
+    }
+
+    const translated = await translateSegments(ocr);
+    renderIntoOverlay(pageOverlay, translated);
+    translatedPages += 1;
+  }
+
+  statusLine.textContent = translatedPages
+    ? `OK: ${translatedPages} images traduites avec OCR local.`
+    : "OCR termine, mais aucun texte lisible n'a ete detecte.";
+}
+
+async function translateCapture() {
+  if (!currentCaptureDataUrl) {
+    statusLine.textContent = "Choisis une capture avant de traduire.";
+    return;
+  }
+
+  renderNotice(overlay, "OCR...");
+  statusLine.textContent = "OCR + traduction de la capture...";
+  const ocr = await ocrImage({ imageData: currentCaptureDataUrl, language: ocrLanguage.value });
+  if (!ocr.length) {
+    renderNotice(overlay, "Aucun texte detecte");
+    statusLine.textContent = "OCR termine, mais aucun texte lisible n'a ete detecte.";
+    return;
+  }
+
+  const translated = await translateSegments(ocr);
+  renderIntoOverlay(overlay, translated);
+  statusLine.textContent = `OK: ${translated.length} lignes traduites avec OCR local.`;
+}
+
+async function ocrImage(payload) {
+  const result = await postJSON("/v1/webtoon/ocr", payload);
+  return result.segments || [];
+}
+
+async function translateSegments(segments) {
+  const payload = await postJSON("/v1/webtoon/translate", {
+    sourceLanguage: ocrLanguage.value,
+    targetLanguage: "fr",
+    seriesID: "phone-preview",
+    style: "Traduction naturelle en francais, adaptee aux webtoons. Garde les noms propres et les pouvoirs coherents.",
+    glossary: [
+      { id: "astra", source: "Astra", translation: "Astra", category: "power", isLocked: true },
+      { id: "north-blade", source: "Lame du nord", translation: "Lame du Nord", category: "power", isLocked: true }
+    ],
+    segments
+  });
+  return payload.segments || [];
+}
+
+async function postJSON(path, payload) {
+  const response = await fetch(`${backendBaseUrl()}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const message = await readError(response);
+    throw new Error(message || `Backend ${response.status}`);
+  }
+  return response.json();
+}
+
+function backendBaseUrl() {
+  return (backendUrl.value.trim() || window.location.origin).replace(/\/$/, "");
 }
 
 function renderIntoOverlay(targetOverlay, segments) {
   targetOverlay.innerHTML = "";
 
   for (const segment of segments) {
-    const box = segment.boundingBox || boxes[0];
+    const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.textContent = segment.translatedText || segment.text || "";
+    bubble.title = segment.sourceText || "";
     bubble.style.left = `${box.x * 100}%`;
     bubble.style.top = `${box.y * 100}%`;
-    bubble.style.width = `${box.width * 100}%`;
-    bubble.style.minHeight = `${Math.max(42, box.height * targetOverlay.clientHeight)}px`;
+    bubble.style.width = `${Math.max(0.24, box.width) * 100}%`;
+    bubble.style.minHeight = `${Math.max(34, box.height * targetOverlay.clientHeight)}px`;
     targetOverlay.appendChild(bubble);
+  }
+}
+
+function renderNotice(targetOverlay, text) {
+  targetOverlay.innerHTML = "";
+
+  const notice = document.createElement("div");
+  notice.className = "ocr-notice";
+  notice.textContent = text;
+  targetOverlay.appendChild(notice);
+}
+
+function updateReaderStatus(total) {
+  const pending = Math.max(0, total - loadedImages - failedImages);
+  const chunks = [`${loadedImages}/${total} images chargees`];
+  if (pending) chunks.push(`${pending} en attente`);
+  if (failedImages) chunks.push(`${failedImages} bloquees`);
+  readerSummary.textContent = chunks.join(" - ");
+
+  if (failedImages && loadedImages === 0) {
+    statusLine.textContent = "Toutes les images sont bloquees par le site ou le reseau. Essaie un autre lien ou une capture.";
+    return;
+  }
+
+  statusLine.textContent = "Images visibles dans le lecteur. Appuie sur Traduire pour OCR + traduction locale.";
+}
+
+function resetReaderCounters() {
+  loadedImages = 0;
+  failedImages = 0;
+}
+
+async function loadCapabilities() {
+  try {
+    const response = await fetch("/v1/webtoon/capabilities");
+    if (!response.ok) throw new Error(`Capabilities ${response.status}`);
+    const capabilities = await response.json();
+    if (capabilities.ocr && capabilities.translation) {
+      capabilityLine.textContent = "OCR EasyOCR/Tesseract + traduction Argos prets en local.";
+    } else if (capabilities.ocr) {
+      capabilityLine.textContent = "OCR local pret. Traduction locale non installee.";
+    } else {
+      capabilityLine.textContent = "Preview web: lecteur d'images OK, OCR/IA non connectee.";
+    }
+  } catch {
+    capabilityLine.textContent = "Preview web locale. OCR/IA non connectee.";
+  }
+}
+
+async function readError(response) {
+  try {
+    const payload = await response.json();
+    return payload.error || payload.message || "";
+  } catch {
+    try {
+      return await response.text();
+    } catch {
+      return "";
+    }
   }
 }

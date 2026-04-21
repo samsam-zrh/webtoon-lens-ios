@@ -47,6 +47,7 @@ public struct TranslationResponse: Codable, Hashable, Sendable {
 public enum TranslationClientError: Error, LocalizedError {
     case invalidResponse
     case serverError(Int)
+    case missingBackend
 
     public var errorDescription: String? {
         switch self {
@@ -54,6 +55,8 @@ public enum TranslationClientError: Error, LocalizedError {
             return "Le serveur de traduction a renvoye une reponse invalide."
         case .serverError(let statusCode):
             return "Le serveur de traduction a renvoye le statut \(statusCode)."
+        case .missingBackend:
+            return "Configure un backend de traduction dans les reglages. L'app ne genere plus de fausses traductions locales."
         }
     }
 }
@@ -101,29 +104,7 @@ public final class WebtoonTranslationClient: TranslationClientProtocol {
 public final class LocalPreviewTranslationClient: TranslationClientProtocol {
     public init() {}
 
-    public func translate(_ request: TranslationRequest) async throws -> TranslationResponse {
-        let lockedTerms = Dictionary(uniqueKeysWithValues: GlossaryResolver.lockedInstructions(from: request.glossary).map { ($0.source, $0.translation) })
-
-        let translated = request.segments.map { segment in
-            var text = segment.text
-            for (source, translation) in lockedTerms {
-                text = text.replacingOccurrences(of: source, with: translation, options: [.caseInsensitive])
-            }
-            return TranslatedSegmentPayload(
-                id: segment.id,
-                sourceText: segment.text,
-                translatedText: "[fr] \(text)",
-                boundingBox: segment.boundingBox,
-                confidence: min(0.95, segment.confidence),
-                readingOrder: segment.readingOrder
-            )
-        }
-
-        return TranslationResponse(
-            detectedSourceLanguage: request.sourceLanguage == WebtoonLensConstants.autoSourceLanguage ? nil : request.sourceLanguage,
-            segments: translated,
-            glossaryUpdates: [],
-            confidence: 0.75
-        )
+    public func translate(_: TranslationRequest) async throws -> TranslationResponse {
+        throw TranslationClientError.missingBackend
     }
 }

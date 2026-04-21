@@ -128,6 +128,7 @@ Si GitHub Actions est bloque par le billing, lance la preview mobile locale:
 
 ```powershell
 cd C:\Users\zerah\Documents\Playground\webtoon-lens-ios
+powershell -ExecutionPolicy Bypass -File .\ci\Install-PhonePreviewAI.ps1
 powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
 ```
 
@@ -136,15 +137,16 @@ Le script affiche deux URLs:
 - `PC`: a ouvrir sur le PC.
 - `Phone`: a ouvrir sur ton telephone.
 
-Mets le telephone sur le meme Wi-Fi que le PC, ouvre l'URL `Phone`, puis importe une capture webtoon. Cette preview teste l'interface mobile et les overlays, mais ce n'est pas encore l'app iOS native avec Safari Extension.
+Mets le telephone sur le meme Wi-Fi que le PC, ouvre l'URL `Phone`, puis colle un lien d'episode ou importe une capture webtoon. Cette preview teste le lecteur mobile, les overlays, l'OCR locale et une traduction locale offline. Ce n'est pas encore l'app iOS native avec Safari Extension.
 
-Par defaut, le champ `Backend optionnel` pointe vers le serveur local. Quand tu appuies sur `Traduire`, le telephone appelle:
+Par defaut, le champ `Backend OCR/IA optionnel` pointe vers le serveur local. Quand tu appuies sur `Traduire`, le telephone appelle:
 
 ```http
+POST /v1/webtoon/ocr
 POST /v1/webtoon/translate
 ```
 
-Ce mock applique les termes verrouilles et renvoie le meme format JSON que le backend prevu pour l'app iOS.
+Le serveur local utilise EasyOCR/Tesseract pour lire les bulles et Argos Translate pour traduire vers le francais. Il ne renvoie plus de fausses traductions. Pour de meilleurs resultats, choisis la bonne `Langue OCR` dans la page avant de traduire.
 
 Si le telephone n'arrive pas a ouvrir l'URL:
 

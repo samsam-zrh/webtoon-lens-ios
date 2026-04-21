@@ -32,7 +32,7 @@
         <img id="previewImage" alt="Capture webtoon importee">
         <div id="emptyState" class="empty-state">
           <strong>Colle un lien</strong>
-          <span>Ouvre un episode webtoon ici, puis traduis les images dans la page.</span>
+          <span>Ouvre un episode webtoon ici, ou choisis une capture depuis ton telephone.</span>
         </div>
         <div id="overlay" class="overlay" aria-live="polite"></div>
       </div>
@@ -43,23 +43,29 @@
           Ou choisir une capture
         </label>
         <label>
-          Lignes a traduire
-          <textarea id="sourceText" rows="4">Astra
-Je ne reculerai pas
-Lame du nord</textarea>
-        </label>
-        <label>
-          Backend optionnel
+          Backend OCR/IA optionnel
           <input id="backendUrl" type="url" placeholder="https://api.example.com">
         </label>
-        <p id="statusLine" class="status-line">Backend mock pret.</p>
+        <label>
+          Langue OCR
+          <select id="ocrLanguage">
+            <option value="auto">Auto</option>
+            <option value="ja">Japonais</option>
+            <option value="ko">Coreen</option>
+            <option value="zh">Chinois</option>
+            <option value="en">Anglais</option>
+          </select>
+        </label>
+        <p id="readerSummary" class="status-line"></p>
+        <p id="capabilityLine" class="status-line">Verification du backend...</p>
+        <p id="statusLine" class="status-line">Colle un lien d'episode ou choisis une capture.</p>
       </div>
     </section>
 
     <section class="glossary" aria-label="Glossaire">
       <div class="section-title">
         <p class="eyebrow">Glossaire</p>
-        <h2>Termes verrouilles</h2>
+        <h2>Coherence visee</h2>
       </div>
       <div class="term-row">
         <span>Astra</span>
@@ -69,7 +75,7 @@ Lame du nord</textarea>
         <span>Lame du nord</span>
         <strong>Lame du Nord</strong>
       </div>
-      <p class="note">La preview web simule l'OCR. L'app iOS native utilise Vision + Safari Extension.</p>
+      <p class="note">La preview utilise maintenant OCR local + traduction locale quand les outils Windows sont installes. Pour les bulles difficiles, choisis la bonne langue OCR avant de traduire.</p>
     </section>
   </main>
 
