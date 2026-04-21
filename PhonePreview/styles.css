@@ -44,6 +44,12 @@ textarea {
   gap: 14px;
 }
 
+.url-loader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: #168c7d;
@@ -98,6 +104,36 @@ button,
   background:
     linear-gradient(135deg, rgba(22, 140, 125, 0.16), transparent 38%),
     #ffffff;
+}
+
+.stage.feed-mode {
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.image-reader {
+  display: none;
+}
+
+.stage.feed-mode .image-reader {
+  display: grid;
+  gap: 14px;
+}
+
+.reader-page {
+  position: relative;
+  overflow: hidden;
+  border: 2px solid #111111;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.reader-page img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 #previewImage {
@@ -223,5 +259,10 @@ input[type="url"] {
   .glossary {
     position: sticky;
     top: 24px;
+  }
+
+  .url-loader {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
   }
 }

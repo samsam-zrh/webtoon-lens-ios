@@ -19,11 +19,20 @@
         <button id="translateButton" type="button">Traduire</button>
       </div>
 
+      <div class="url-loader">
+        <label>
+          Lien du webtoon
+          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/episode-1">
+        </label>
+        <button id="openUrlButton" type="button">Ouvrir le lien</button>
+      </div>
+
       <div class="stage" id="stage">
+        <div id="imageReader" class="image-reader"></div>
         <img id="previewImage" alt="Capture webtoon importee">
         <div id="emptyState" class="empty-state">
-          <strong>Ajoute une capture</strong>
-          <span>Teste l'overlay sur ton telephone, sans Mac ni credit cloud.</span>
+          <strong>Colle un lien</strong>
+          <span>Ouvre un episode webtoon ici, puis traduis les images dans la page.</span>
         </div>
         <div id="overlay" class="overlay" aria-live="polite"></div>
       </div>
@@ -31,7 +40,7 @@
       <div class="controls">
         <label class="file-button">
           <input id="imageInput" type="file" accept="image/*">
-          Choisir une image
+          Ou choisir une capture
         </label>
         <label>
           Lignes a traduire
