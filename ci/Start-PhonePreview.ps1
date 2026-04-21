@@ -5,13 +5,25 @@ param(
 $ErrorActionPreference = "Stop"
 
 $previewPath = Resolve-Path "$PSScriptRoot\..\PhonePreview"
-$ip = Get-NetIPAddress -AddressFamily IPv4 |
+$ipConfig = Get-NetIPConfiguration |
     Where-Object {
-        $_.IPAddress -notlike "127.*" -and
-        $_.IPAddress -notlike "169.254.*" -and
-        $_.PrefixOrigin -ne "WellKnown"
+        $_.IPv4Address -and
+        $_.NetAdapter.Status -eq "Up" -and
+        $_.IPv4DefaultGateway
     } |
-    Select-Object -First 1 -ExpandProperty IPAddress
+    Select-Object -First 1
+
+if ($ipConfig) {
+    $ip = $ipConfig.IPv4Address.IPAddress
+} else {
+    $ip = Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.PrefixOrigin -ne "WellKnown"
+        } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+}
 
 if (-not $ip) {
     $ip = "localhost"
