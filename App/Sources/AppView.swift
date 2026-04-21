@@ -3,6 +3,7 @@ import WebtoonLensCore
 
 enum AppTab: String, CaseIterable, Identifiable {
     case home
+    case webtoon
     case reader
     case series
     case settings
@@ -12,6 +13,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: "Accueil"
+        case .webtoon: "Webtoon"
         case .reader: "Lecteur"
         case .series: "Series"
         case .settings: "Reglages"
@@ -21,6 +23,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .home: "sparkles"
+        case .webtoon: "safari"
         case .reader: "text.viewfinder"
         case .series: "book.closed"
         case .settings: "gearshape"
@@ -42,6 +45,13 @@ struct AppView: View {
             }
             .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.systemImage) }
             .tag(AppTab.home)
+
+            NavigationStack {
+                WebtoonBrowserView()
+                    .navigationTitle("Webtoon")
+            }
+            .tabItem { Label(AppTab.webtoon.title, systemImage: AppTab.webtoon.systemImage) }
+            .tag(AppTab.webtoon)
 
             NavigationStack {
                 ReaderView()

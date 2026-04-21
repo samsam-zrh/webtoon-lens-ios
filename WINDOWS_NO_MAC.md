@@ -120,6 +120,8 @@ Dans GitHub:
 
 Sans Mac ni runner macOS cloud, il n'existe pas de compilation iOS native possible sur Windows. Windows suffit pour coder, pousser sur GitHub, preparer les certificats, et declencher les workflows.
 
+La version iOS native vise maintenant le flux le plus proche de ce que tu veux: l'onglet `Webtoon` ouvre le site dans l'app, detecte les images visibles, fait OCR + traduction, puis injecte les bulles traduites au-dessus de la page. iOS n'autorise toujours pas ce comportement au-dessus des autres apps.
+
 ## Tester maintenant sur ton telephone sans Mac
 
 Si GitHub Actions est bloque par le billing, lance la preview mobile locale:

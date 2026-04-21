@@ -2,6 +2,7 @@
 
 Webtoon Lens is an iOS 18+ prototype for fast webtoon image translation that stays inside App Store rules:
 
+- In-app webtoon browser for direct overlays while reading inside Webtoon Lens.
 - Safari Web Extension for one-tap overlays while reading webtoons in Safari.
 - App Intent/Shortcuts handoff for screenshots from other apps.
 - Local OCR with Vision.
@@ -53,6 +54,8 @@ If no backend URL is configured, the app uses a local preview client that echoes
 ## What is intentionally not implemented
 
 iOS does not allow a third-party App Store app to continuously read and draw over other apps. Outside Safari, the supported flow is: user triggers a Shortcut that captures a screenshot, Webtoon Lens receives the image, then opens the app with the translated result.
+
+For the closest direct-reading experience on iPhone, use the `Webtoon` tab in the app. It loads the webtoon page inside `WKWebView`, detects visible images, runs OCR/translation in native Swift, then injects translated bubbles back into the page at the OCR coordinates.
 
 ## Suggested validation on macOS
 

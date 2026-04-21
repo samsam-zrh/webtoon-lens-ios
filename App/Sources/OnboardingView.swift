@@ -5,17 +5,17 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Traduire sans tricher avec iOS")
+                    Text("Lis le webtoon dans Lens")
                         .font(.title.bold())
-                    Text("Dans Safari, l'extension peut poser des bulles traduites sur les images visibles. Dans les autres apps, passe par un raccourci de capture d'ecran.")
+                    Text("Colle l'URL dans l'onglet Webtoon. L'app pose les bulles traduites directement sur les images pendant la lecture.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
 
                 OnboardingStep(
                     number: "1",
-                    title: "Active l'extension Safari",
-                    body: "Installe l'app, puis active Webtoon Lens dans les extensions Safari et autorise les sites de lecture."
+                    title: "Ouvre le site dans l'app",
+                    body: "Utilise l'onglet Webtoon pour charger l'episode. C'est le flux le plus rapide et le plus proche d'un remplacement direct sur iPhone."
                 )
 
                 OnboardingStep(
@@ -26,11 +26,11 @@ struct OnboardingView: View {
 
                 OnboardingStep(
                     number: "3",
-                    title: "Ajoute le raccourci",
-                    body: "Dans Raccourcis, cree une action Prendre une capture d'ecran puis appelle Traduire ce webtoon avec Webtoon Lens."
+                    title: "Garde le raccourci en secours",
+                    body: "Pour les apps qui refusent le web ou bloquent les images, le raccourci de capture reste le plan B."
                 )
 
-                Text("Important: aucune lecture cachee de l'ecran et aucun overlay systeme hors Safari. C'est la limite saine pour TestFlight et App Store.")
+                Text("Important: iOS interdit a une app App Store de lire l'ecran des autres apps en arriere-plan ou de dessiner par-dessus elles. Webtoon Lens remplace le texte dans son propre lecteur et via Safari Extension.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)

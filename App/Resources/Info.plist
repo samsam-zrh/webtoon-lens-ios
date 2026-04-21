@@ -12,6 +12,13 @@
   <string>public.app-category.utilities</string>
   <key>UIApplicationSupportsIndirectInputEvents</key>
   <true/>
+  <key>NSPhotoLibraryUsageDescription</key>
+  <string>Webtoon Lens utilise les images selectionnees pour traduire les captures que vous choisissez.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
   <key>UILaunchScreen</key>
   <dict/>
   <key>UISupportedInterfaceOrientations</key>
