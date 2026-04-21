@@ -21,6 +21,12 @@ open WebtoonLens.xcodeproj
 
 No Mac? Use [WINDOWS_NO_MAC.md](WINDOWS_NO_MAC.md). The repository includes GitHub Actions workflows that run on macOS cloud runners.
 
+If GitHub billing blocks Actions, use the local phone preview:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
+```
+
 Before running on a real device, replace the sample bundle identifiers and App Group in:
 
 - `project.yml`

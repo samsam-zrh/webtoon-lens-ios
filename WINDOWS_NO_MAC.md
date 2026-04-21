@@ -119,3 +119,34 @@ Dans GitHub:
 ## Limite importante
 
 Sans Mac ni runner macOS cloud, il n'existe pas de compilation iOS native possible sur Windows. Windows suffit pour coder, pousser sur GitHub, preparer les certificats, et declencher les workflows.
+
+## Tester maintenant sur ton telephone sans Mac
+
+Si GitHub Actions est bloque par le billing, lance la preview mobile locale:
+
+```powershell
+cd C:\Users\zerah\Documents\Playground\webtoon-lens-ios
+powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
+```
+
+Le script affiche deux URLs:
+
+- `PC`: a ouvrir sur le PC.
+- `Phone`: a ouvrir sur ton telephone.
+
+Mets le telephone sur le meme Wi-Fi que le PC, ouvre l'URL `Phone`, puis importe une capture webtoon. Cette preview teste l'interface mobile et les overlays, mais ce n'est pas encore l'app iOS native avec Safari Extension.
+
+Si le telephone n'arrive pas a ouvrir l'URL:
+
+1. Autorise Python dans le pare-feu Windows.
+2. Verifie que le PC et le telephone sont sur le meme Wi-Fi.
+3. Relance le script et essaie l'adresse `Phone` affichee.
+
+## Pourquoi GitHub Actions peut etre bloque
+
+Si un run GitHub dit `The job was not started because your account is locked due to a billing issue`, GitHub bloque les jobs avant meme de demarrer le Mac. Les solutions sont:
+
+- Corriger le billing dans GitHub.
+- Utiliser un autre compte GitHub non bloque.
+- Utiliser un Mac emprunte/loue avec Xcode.
+- Garder la preview mobile locale pour tester l'UX en attendant.
