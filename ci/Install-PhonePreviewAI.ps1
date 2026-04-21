@@ -27,7 +27,7 @@ foreach ($language in @("eng", "osd")) {
     }
 }
 
-python -m pip install --user easyocr argostranslate
+python -m pip install --user easyocr argostranslate transformers sentencepiece
 
 @'
 from argostranslate import package
@@ -43,6 +43,10 @@ import easyocr
 for langs in (["ja", "en"], ["ko", "en"], ["ch_sim", "en"], ["ch_tra", "en"], ["en"]):
     print("Preparing EasyOCR " + "+".join(langs))
     easyocr.Reader(langs, gpu=False, verbose=False)
+
+from transformers import pipeline
+print("Preparing English to French transformer")
+pipeline("translation", model="Helsinki-NLP/opus-mt-en-fr", device=-1)
 '@ | python -
 
 Write-Host ""

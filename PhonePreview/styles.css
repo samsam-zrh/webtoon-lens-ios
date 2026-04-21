@@ -236,20 +236,32 @@ button:disabled {
   position: absolute;
   display: grid;
   place-items: center;
-  min-height: 42px;
-  padding: 6px 8px;
-  border: 1px solid rgba(17, 17, 17, 0.28);
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 2px solid rgba(17, 17, 17, 0.82);
   border-radius: 8px;
   color: #111111;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.14);
-  font-size: 13px;
+  background: rgba(255, 255, 255, 0.985);
+  box-shadow: none;
+  font-family: "Comic Sans MS", "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif;
+  font-size: 14px;
   font-weight: 850;
-  line-height: 1.15;
+  line-height: 1.08;
   text-align: center;
+  text-wrap: balance;
+  overflow: hidden;
   transform: translateY(8px);
   opacity: 0;
   animation: bubble-in 280ms ease forwards;
+}
+
+.bubble[data-shape="ellipse"] {
+  border-radius: 999px / 62%;
+  padding-inline: 22px;
+}
+
+.bubble[data-shape="rounded"] {
+  border-radius: 8px;
 }
 
 .controls,

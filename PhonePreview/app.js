@@ -275,14 +275,28 @@ function renderIntoOverlay(targetOverlay, segments) {
     const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
     const bubble = document.createElement("div");
     bubble.className = "bubble";
+    bubble.dataset.shape = segment.shape || guessBubbleShape(box);
     bubble.textContent = segment.translatedText || segment.text || "";
     bubble.title = segment.sourceText || "";
     bubble.style.left = `${box.x * 100}%`;
     bubble.style.top = `${box.y * 100}%`;
-    bubble.style.width = `${Math.max(0.24, box.width) * 100}%`;
-    bubble.style.minHeight = `${Math.max(34, box.height * targetOverlay.clientHeight)}px`;
+    bubble.style.width = `${Math.max(0.18, box.width) * 100}%`;
+    bubble.style.minHeight = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
+    bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay)}px`;
     targetOverlay.appendChild(bubble);
   }
+}
+
+function guessBubbleShape(box) {
+  return box.width / Math.max(0.001, box.height) > 1.35 ? "ellipse" : "rounded";
+}
+
+function fontSizeForBox(box, targetOverlay) {
+  const pixelHeight = box.height * targetOverlay.clientHeight;
+  if (pixelHeight >= 150) return 18;
+  if (pixelHeight >= 105) return 16;
+  if (pixelHeight >= 72) return 14;
+  return 12;
 }
 
 function renderNotice(targetOverlay, text) {
@@ -320,7 +334,7 @@ async function loadCapabilities() {
     if (!response.ok) throw new Error(`Capabilities ${response.status}`);
     const capabilities = await response.json();
     if (capabilities.ocr && capabilities.translation) {
-      capabilityLine.textContent = "OCR EasyOCR/Tesseract + traduction Argos prets en local.";
+      capabilityLine.textContent = "OCR EasyOCR/Tesseract + traduction locale prets.";
     } else if (capabilities.ocr) {
       capabilityLine.textContent = "OCR local pret. Traduction locale non installee.";
     } else {

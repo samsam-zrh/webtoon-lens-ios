@@ -23,6 +23,23 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 TESSDATA_DIR = Path(os.environ.get("WEBTOON_LENS_TESSDATA", Path(os.environ.get("LOCALAPPDATA", "")) / "WebtoonLens" / "tessdata"))
 OCR_LANGUAGES = ["jpn", "kor", "chi_sim", "chi_tra", "eng"]
+WEBTOON_PHRASE_TRANSLATIONS = {
+    "beast taming sect": "la Secte du Dressage des Betes",
+    "beast-taming sect": "la Secte du Dressage des Betes",
+    "demonic sect": "la Secte Demoniaque",
+    "martial arts": "arts martiaux",
+    "sword aura": "aura d'epee",
+    "mana core": "noyau de mana",
+}
+COMMON_ENGLISH_WORDS = {
+    "A", "AN", "AND", "ARE", "AS", "AT", "BE", "BEGINNING", "BUT", "BY", "CAN",
+    "DID", "DO", "DOES", "DON", "FOR", "FROM", "GO", "HAD", "HAS", "HAVE", "HE",
+    "HER", "HERE", "HIM", "HIS", "I", "IF", "IN", "INTO", "IS", "IT", "ITS", "JUST",
+    "FIRST", "LIKE", "LOOK", "ME", "MY", "NO", "NOT", "OF", "ON", "OR", "OUR", "PLACE",
+    "SHOULD", "SO", "THAT", "THE", "THEIR", "THEM", "THEN", "THIS", "THOUGHT",
+    "TO", "WAS", "WE", "WHAT", "WHEN", "WHERE", "WHO", "WHY", "WILL", "WITH",
+    "YOU", "YOUR",
+}
 
 
 class PreviewHandler(SimpleHTTPRequestHandler):
@@ -85,7 +102,7 @@ class PreviewHandler(SimpleHTTPRequestHandler):
                 "translation": bool(translation_pairs),
                 "ocrEngine": "easyocr+tesseract" if easyocr_available() and tesseract_command else ("easyocr" if easyocr_available() else ("tesseract" if tesseract_command else None)),
                 "ocrLanguages": languages,
-                "translationEngine": "argos" if translation_pairs else None,
+                "translationEngine": "transformers+argos" if english_french_transformer_available() and translation_pairs else ("argos" if translation_pairs else None),
                 "translationPairs": translation_pairs,
                 "message": "Local OCR and offline translation are available." if (easyocr_available() or tesseract_command) and translation_pairs else "OCR/translation dependencies are not fully installed.",
             },
@@ -193,19 +210,48 @@ def image_bytes_from_payload(payload: dict[str, Any]) -> bytes:
 
 
 def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, Any]]:
+    candidates: list[tuple[str, list[dict[str, Any]]]] = []
+
+    if requested_language in {"auto", "en", "eng"}:
+        try:
+            english_segments = tesseract_image(data, languages=["eng"])
+            if english_segments:
+                candidates.append(("tesseract-eng", english_segments))
+        except Exception:
+            pass
+
     if easyocr_available():
         try:
             segments = easyocr_image(data, requested_language=requested_language)
             if segments:
-                return segments
+                candidates.append(("easyocr", segments))
         except Exception:
             pass
+
+    try:
+        tesseract_languages = tesseract_languages_for_request(requested_language)
+        if tesseract_languages:
+            segments = tesseract_image(data, languages=tesseract_languages)
+            if segments:
+                candidates.append(("tesseract", segments))
+    except Exception:
+        pass
+
+    if candidates:
+        return group_ocr_segments(choose_ocr_candidate(candidates, requested_language))
 
     command = find_tesseract_command()
     if not command:
         raise RuntimeError("Tesseract is not installed.")
+    raise RuntimeError("OCR found no readable text.")
 
-    languages = [language for language in OCR_LANGUAGES if language in available_tesseract_languages()]
+
+def tesseract_image(data: bytes, *, languages: list[str]) -> list[dict[str, Any]]:
+    command = find_tesseract_command()
+    if not command:
+        raise RuntimeError("Tesseract is not installed.")
+
+    languages = [language for language in languages if language in available_tesseract_languages()]
     if not languages:
         raise RuntimeError("No Tesseract OCR languages are installed.")
 
@@ -239,6 +285,20 @@ def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, A
             raise RuntimeError(completed.stderr.strip() or "Tesseract OCR failed.")
 
     return tsv_to_segments(completed.stdout, width=width, height=height)
+
+
+def tesseract_languages_for_request(requested_language: str) -> list[str]:
+    normalized = normalize_language_code(requested_language, "")
+    if requested_language == "auto":
+        return OCR_LANGUAGES
+    mapping = {
+        "ja": ["jpn"],
+        "ko": ["kor"],
+        "zh": ["chi_sim", "chi_tra"],
+        "en": ["eng"],
+        "fr": ["fra", "eng"],
+    }
+    return mapping.get(normalized, OCR_LANGUAGES)
 
 
 def easyocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, Any]]:
@@ -334,7 +394,120 @@ def score_ocr_segments(segments: list[dict[str, Any]]) -> float:
     text = " ".join(str(segment.get("sourceText", "")) for segment in segments)
     confidence = sum(float(segment.get("confidence", 0)) for segment in segments) / max(1, len(segments))
     useful_chars = len(re.sub(r"\s|\?", "", text))
-    return confidence * max(1, useful_chars)
+    question_marks = text.count("?")
+    latin_words = re.findall(r"[A-Za-z]{2,}", text)
+    cjk_chars = re.findall(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", text)
+    return confidence * (useful_chars + len(latin_words) * 8 + len(cjk_chars) * 3) - question_marks * 8
+
+
+def choose_ocr_candidate(
+    candidates: list[tuple[str, list[dict[str, Any]]]],
+    requested_language: str,
+) -> list[dict[str, Any]]:
+    normalized = normalize_language_code(requested_language, "")
+    scored: list[tuple[float, str, list[dict[str, Any]]]] = []
+    for engine, segments in candidates:
+        text = " ".join(str(segment.get("sourceText", "")) for segment in segments)
+        latin_words = re.findall(r"[A-Za-z]{2,}", text)
+        cjk_chars = re.findall(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", text)
+        score = score_ocr_segments(segments)
+
+        if normalized == "en" and len(latin_words) >= 3:
+            score += 60
+        elif requested_language == "auto" and len(latin_words) >= 4 and not cjk_chars:
+            score += 45
+        elif normalized in {"ja", "ko", "zh"} and cjk_chars:
+            score += 60
+
+        if engine == "tesseract-eng" and len(latin_words) >= 3:
+            score += 25
+
+        scored.append((score, engine, segments))
+
+    return max(scored, key=lambda item: item[0])[2]
+
+
+def group_ocr_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not segments:
+        return []
+
+    ordered = sorted(segments, key=lambda item: (item["boundingBox"]["y"], item["boundingBox"]["x"]))
+    heights = [float(item["boundingBox"]["height"]) for item in ordered]
+    median_height = sorted(heights)[len(heights) // 2] if heights else 0.025
+    max_gap = max(0.024, median_height * 2.1)
+
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for segment in ordered:
+        if not current:
+            current = [segment]
+            continue
+
+        current_box = merge_boxes([item["boundingBox"] for item in current])
+        box = segment["boundingBox"]
+        vertical_gap = float(box["y"]) - (float(current_box["y"]) + float(current_box["height"]))
+        center_delta = abs(box_mid_x(box) - box_mid_x(current_box))
+        overlap = horizontal_overlap(box, current_box)
+        same_bubble = vertical_gap <= max_gap and (overlap > 0.16 or center_delta < 0.24)
+
+        if same_bubble:
+            current.append(segment)
+        else:
+            groups.append(current)
+            current = [segment]
+
+    if current:
+        groups.append(current)
+
+    return [merge_segment_group(group, index) for index, group in enumerate(groups)]
+
+
+def merge_segment_group(group: list[dict[str, Any]], index: int) -> dict[str, Any]:
+    text = normalize_ocr_text(" ".join(str(item.get("sourceText") or item.get("text") or "") for item in group))
+    raw_box = merge_boxes([item["boundingBox"] for item in group])
+    padded_box = expand_box(raw_box)
+    confidence = sum(float(item.get("confidence", 0.7)) for item in group) / max(1, len(group))
+    return {
+        "id": f"bubble-{index}",
+        "text": text,
+        "sourceText": text,
+        "boundingBox": padded_box,
+        "rawBoundingBox": raw_box,
+        "shape": "ellipse" if padded_box["width"] / max(0.001, padded_box["height"]) > 1.35 else "rounded",
+        "confidence": round(confidence, 3),
+        "readingOrder": index,
+    }
+
+
+def merge_boxes(boxes: list[dict[str, Any]]) -> dict[str, float]:
+    left = min(float(box["x"]) for box in boxes)
+    top = min(float(box["y"]) for box in boxes)
+    right = max(float(box["x"]) + float(box["width"]) for box in boxes)
+    bottom = max(float(box["y"]) + float(box["height"]) for box in boxes)
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
+
+
+def expand_box(box: dict[str, Any]) -> dict[str, float]:
+    width = float(box["width"])
+    height = float(box["height"])
+    pad_x = min(0.065, max(0.018, width * 0.12))
+    pad_y = min(0.065, max(0.012, height * 0.34))
+    left = clamp(float(box["x"]) - pad_x)
+    top = clamp(float(box["y"]) - pad_y)
+    right = clamp(float(box["x"]) + width + pad_x)
+    bottom = clamp(float(box["y"]) + height + pad_y)
+    return {"x": left, "y": top, "width": max(0.001, right - left), "height": max(0.001, bottom - top)}
+
+
+def box_mid_x(box: dict[str, Any]) -> float:
+    return float(box["x"]) + float(box["width"]) / 2
+
+
+def horizontal_overlap(first: dict[str, Any], second: dict[str, Any]) -> float:
+    left = max(float(first["x"]), float(second["x"]))
+    right = min(float(first["x"]) + float(first["width"]), float(second["x"]) + float(second["width"]))
+    overlap = max(0, right - left)
+    return overlap / max(0.001, min(float(first["width"]), float(second["width"])))
 
 
 @lru_cache(maxsize=8)
@@ -449,6 +622,8 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     "boundingBox",
                     {"x": 0.12, "y": 0.16 + index * 0.18, "width": 0.42, "height": 0.1},
                 ),
+                "rawBoundingBox": segment.get("rawBoundingBox"),
+                "shape": segment.get("shape", "rounded"),
                 "confidence": float(segment.get("confidence", 0.75)),
                 "readingOrder": int(segment.get("readingOrder", index)),
             }
@@ -468,19 +643,104 @@ def translate_text_to_french(text: str, source_language: str) -> str:
     if source_language == "fr":
         return text
 
+    prepared_text, protected_terms = prepare_text_for_translation(text, source_language)
+
     from argostranslate import translate
 
     installed_languages = translate.get_installed_languages()
     by_code = {language.code: language for language in installed_languages}
-    source_code = source_language if source_language in by_code else detect_language_code(text)
+    source_code = source_language if source_language in by_code else detect_language_code(prepared_text)
 
     if source_code == "fr":
-        return text
+        return restore_protected_terms(prepared_text, protected_terms)
     if source_code == "en":
-        return get_argos_translation(by_code, "en", "fr", text)
+        translated = translate_english_to_french(prepared_text, by_code)
+        return restore_protected_terms(translated, protected_terms)
 
-    english = get_argos_translation(by_code, source_code, "en", text)
-    return get_argos_translation(by_code, "en", "fr", english)
+    english = get_argos_translation(by_code, source_code, "en", prepared_text)
+    translated = translate_english_to_french(english, by_code)
+    return restore_protected_terms(translated, protected_terms)
+
+
+def translate_english_to_french(text: str, by_code: dict[str, Any]) -> str:
+    transformer = english_french_transformer()
+    if transformer:
+        return transformer(text, max_length=256)[0]["translation_text"]
+    return get_argos_translation(by_code, "en", "fr", text)
+
+
+@lru_cache(maxsize=1)
+def english_french_transformer() -> Any | None:
+    try:
+        from transformers import pipeline
+
+        return pipeline("translation", model="Helsinki-NLP/opus-mt-en-fr", device=-1)
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
+def english_french_transformer_available() -> bool:
+    try:
+        import transformers  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def prepare_text_for_translation(text: str, source_language: str) -> tuple[str, dict[str, str]]:
+    protected_terms: dict[str, str] = {}
+    prepared = text
+
+    for phrase, translation in WEBTOON_PHRASE_TRANSLATIONS.items():
+        placeholder = f"XWEBTOON{len(protected_terms)}X"
+        pattern = re.compile(re.escape(phrase), flags=re.IGNORECASE)
+        if pattern.search(prepared):
+            prepared = pattern.sub(placeholder, prepared)
+            protected_terms[placeholder] = translation
+
+    if normalize_language_code(source_language, text) == "en":
+        for token in sorted(set(re.findall(r"\b[A-Z][A-Z0-9]{3,}\b", prepared)), key=len, reverse=True):
+            if token in COMMON_ENGLISH_WORDS or token.startswith("XWEBTOON"):
+                continue
+            placeholder = f"XWEBTOON{len(protected_terms)}X"
+            protected_terms[placeholder] = token.title()
+            prepared = re.sub(rf"\b{re.escape(token)}\b", placeholder, prepared)
+        prepared = normalize_english_casing(prepared)
+
+    return prepared, protected_terms
+
+
+def normalize_english_casing(text: str) -> str:
+    letters = re.findall(r"[A-Za-z]", text)
+    if not letters:
+        return text
+    uppercase_ratio = sum(1 for letter in letters if letter.isupper()) / len(letters)
+    if uppercase_ratio < 0.72:
+        return text
+
+    lowered = text.lower()
+    lowered = re.sub(r"\bxwebtoon(\d+)x\b", lambda match: f"XWEBTOON{match.group(1)}X", lowered)
+    lowered = re.sub(r"\bi\b", "I", lowered)
+    lowered = re.sub(r"(^|[.!?]\s+)([a-z])", lambda match: match.group(1) + match.group(2).upper(), lowered)
+    return lowered
+
+
+def restore_protected_terms(text: str, protected_terms: dict[str, str]) -> str:
+    result = text
+    for placeholder, value in protected_terms.items():
+        result = re.sub(re.escape(placeholder), value, result, flags=re.IGNORECASE)
+    return cleanup_french_webtoon_terms(result)
+
+
+def cleanup_french_webtoon_terms(text: str) -> str:
+    result = re.sub(r"\bLa\s+premi(?:e|\u00e8)re\s+place\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", text, flags=re.IGNORECASE)
+    result = re.sub(r"\bLe\s+premier\s+lieu\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", result, flags=re.IGNORECASE)
+    result = re.sub(r"\ble\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\ble\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdu\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
+    return result
 
 
 def get_argos_translation(by_code: dict[str, Any], source: str, target: str, text: str) -> str:
