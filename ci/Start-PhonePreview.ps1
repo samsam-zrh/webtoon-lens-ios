@@ -39,7 +39,8 @@ Write-Host ""
 
 Push-Location $previewPath
 try {
-    python -m http.server $Port --bind 0.0.0.0
+    $env:WEBTOON_LENS_PREVIEW_PORT = "$Port"
+    python .\server.py
 }
 finally {
     Pop-Location

@@ -124,8 +124,15 @@ button,
 }
 
 .empty-state span,
-.note {
+.note,
+.status-line {
   color: #4d5754;
+}
+
+.status-line {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 720;
 }
 
 .overlay {

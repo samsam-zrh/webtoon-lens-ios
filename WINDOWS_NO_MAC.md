@@ -136,6 +136,14 @@ Le script affiche deux URLs:
 
 Mets le telephone sur le meme Wi-Fi que le PC, ouvre l'URL `Phone`, puis importe une capture webtoon. Cette preview teste l'interface mobile et les overlays, mais ce n'est pas encore l'app iOS native avec Safari Extension.
 
+Par defaut, le champ `Backend optionnel` pointe vers le serveur local. Quand tu appuies sur `Traduire`, le telephone appelle:
+
+```http
+POST /v1/webtoon/translate
+```
+
+Ce mock applique les termes verrouilles et renvoie le meme format JSON que le backend prevu pour l'app iOS.
+
 Si le telephone n'arrive pas a ouvrir l'URL:
 
 1. Autorise Python dans le pare-feu Windows.

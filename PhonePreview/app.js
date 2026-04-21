@@ -5,6 +5,7 @@ const overlay = document.getElementById("overlay");
 const translateButton = document.getElementById("translateButton");
 const sourceText = document.getElementById("sourceText");
 const backendUrl = document.getElementById("backendUrl");
+const statusLine = document.getElementById("statusLine");
 
 const boxes = [
   { x: 0.12, y: 0.14, width: 0.42, height: 0.09 },
@@ -12,7 +13,11 @@ const boxes = [
   { x: 0.16, y: 0.68, width: 0.46, height: 0.1 }
 ];
 
-backendUrl.value = localStorage.getItem("webtoonLensBackend") || "";
+backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
+
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files && imageInput.files[0];
@@ -52,6 +57,9 @@ translateButton.addEventListener("click", async () => {
 
     const translated = await translateSegments(segments);
     render(translated);
+    statusLine.textContent = `OK: ${translated.length} bulles traduites.`;
+  } catch (error) {
+    statusLine.textContent = error && error.message ? error.message : String(error);
   } finally {
     translateButton.disabled = false;
     translateButton.textContent = "Traduire";
