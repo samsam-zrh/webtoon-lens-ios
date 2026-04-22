@@ -180,9 +180,9 @@ function proxyImageUrl(url) {
 }
 
 async function translateReaderImages() {
-  const pages = Array.from(document.querySelectorAll(".reader-page[data-loaded='true']"));
+  const pages = readerPagesForTranslation();
   if (!pages.length) {
-    statusLine.textContent = "Aucune image chargee. Attends le chargement, descends un peu, ou choisis une capture.";
+    statusLine.textContent = "Le debut de l'episode charge encore. Attends quelques secondes, puis relance Traduire.";
     return;
   }
 
@@ -209,6 +209,22 @@ async function translateReaderImages() {
   statusLine.textContent = translatedPages
     ? `OK: ${translatedPages} images traduites avec OCR local.`
     : "OCR termine, mais aucun texte lisible n'a ete detecte.";
+}
+
+function readerPagesForTranslation() {
+  const allPages = Array.from(document.querySelectorAll(".reader-page"));
+  const firstUnloadedIndex = allPages.findIndex((page) => page.dataset.loaded !== "true");
+  const pages = allPages.filter((page) => {
+    const pageIndex = Number(page.dataset.index || "0");
+    return page.dataset.loaded === "true" && (firstUnloadedIndex === -1 || pageIndex < firstUnloadedIndex);
+  });
+  const margin = window.innerHeight * 1.35;
+  const visiblePages = pages.filter((page) => {
+    const rect = page.getBoundingClientRect();
+    return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
+  });
+
+  return visiblePages.length ? visiblePages : pages.slice(0, 1);
 }
 
 async function translateCapture() {
@@ -298,7 +314,10 @@ function fontSizeForBox(box, targetOverlay, text) {
   const length = normalized.length;
   const pixelWidth = Math.max(80, box.width * targetOverlay.clientWidth);
   const pixelHeight = box.height * targetOverlay.clientHeight;
-  const maxSize = pixelHeight >= 150 ? 20 : pixelHeight >= 105 ? 18 : pixelHeight >= 72 ? 16 : 13;
+  let maxSize = pixelHeight >= 150 ? 20 : pixelHeight >= 105 ? 18 : pixelHeight >= 72 ? 16 : 13;
+  if (pixelWidth < 190) maxSize = Math.min(maxSize, 16);
+  if (length > 34) maxSize = Math.min(maxSize, 17);
+  if (length > 70) maxSize = Math.min(maxSize, 14);
   const minSize = 10;
 
   for (let size = maxSize; size >= minSize; size -= 1) {

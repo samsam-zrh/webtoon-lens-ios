@@ -146,7 +146,7 @@ POST /v1/webtoon/ocr
 POST /v1/webtoon/translate
 ```
 
-Le serveur local utilise EasyOCR/Tesseract pour lire les bulles, Ollama `qwen3:14b-q4_K_M` quand il est installe, puis un modele local anglais -> francais et Argos Translate en fallback. Il ne renvoie plus de fausses traductions. Pour de meilleurs resultats, choisis la bonne `Langue OCR` dans la page avant de traduire.
+Le serveur local utilise Tesseract en mode decoupe verticale, RapidOCR/EasyOCR en secours, Ollama `qwen3:14b-q4_K_M` quand il est installe, puis un modele local anglais -> francais et Argos Translate en fallback. Il ne renvoie plus de fausses traductions. Pour de meilleurs resultats, choisis la bonne `Langue OCR` dans la page avant de traduire.
 
 Si le telephone n'arrive pas a ouvrir l'URL:
 

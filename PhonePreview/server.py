@@ -29,6 +29,7 @@ OLLAMA_MODEL = os.environ.get("WEBTOON_LENS_OLLAMA_MODEL", "qwen3:14b-q4_K_M")
 WEBTOON_PHRASE_TRANSLATIONS = {
     "beast taming sect": "la Secte du Dressage des Betes",
     "beast-taming sect": "la Secte du Dressage des Betes",
+    "heavenly wind gates": "les Portes du Vent Celeste",
     "demonic sect": "la Secte Demoniaque",
     "martial arts": "arts martiaux",
     "sword aura": "aura d'epee",
@@ -44,6 +45,17 @@ COMMON_ENGLISH_WORDS = {
     "THE", "THEIR", "THEM", "THEN", "THERE", "THESE", "THIS", "THOSE", "THOUGHT",
     "THREE", "TO", "TWO", "WAS", "WE", "WHAT", "WHEN", "WHERE", "WHO", "WHY",
     "WILL", "WITH", "YOU", "YOUR", "ZERO",
+}
+WEBTOON_ENGLISH_ANCHORS = COMMON_ENGLISH_WORDS | {
+    "ART", "AWAY", "BEAST", "BEASTS", "BLESSED", "CAPABLE", "EVIL", "GATES",
+    "GET", "HAHAHA", "HEAVENLY", "IGNORE", "IMMEDIATELY", "LAND", "LEVEL",
+    "MONOPOLIZING", "OVERWHELMING", "POWER", "QUANRONG", "RECLUSIVE", "SENSE",
+    "SECT", "SECTS", "SPIRIT", "SURPASSES", "TAMING", "TERRIFYING", "TERRITORY",
+    "TRULY", "WIND", "WORLDLINGS", "WONDROUS",
+}
+WEBTOON_PROTECTED_UPPERCASE = {
+    "ASTRA",
+    "QUANRONG",
 }
 
 
@@ -107,7 +119,7 @@ class PreviewHandler(SimpleHTTPRequestHandler):
                 "imageProxy": True,
                 "ocr": bool(easyocr_available() or (tesseract_command and languages)),
                 "translation": has_translation,
-                "ocrEngine": "easyocr+tesseract" if easyocr_available() and tesseract_command else ("easyocr" if easyocr_available() else ("tesseract" if tesseract_command else None)),
+                "ocrEngine": ocr_engine_name(tesseract_command),
                 "ocrLanguages": languages,
                 "translationEngine": translation_engine_name(translation_pairs),
                 "ollamaModel": OLLAMA_MODEL if has_ollama else None,
@@ -142,7 +154,7 @@ class PreviewHandler(SimpleHTTPRequestHandler):
 
         try:
             html = fetch_url(url)
-            images = extract_images(html, url)
+            images = filter_chapter_images(extract_images(html, url))
         except Exception as exc:
             self.send_error(502, f"Extraction failed: {exc}")
             return
@@ -219,16 +231,31 @@ def image_bytes_from_payload(payload: dict[str, Any]) -> bytes:
 
 def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, Any]]:
     candidates: list[tuple[str, list[dict[str, Any]]]] = []
+    is_tall_image = image_is_tall_webtoon(data)
 
     if requested_language in {"auto", "en", "eng"}:
         try:
-            english_segments = tesseract_image(data, languages=["eng"])
+            english_segments = (
+                tesseract_tiled_image(data, languages=["eng"])
+                if is_tall_image
+                else tesseract_image(data, languages=["eng"], language_hint="en")
+            )
             if english_segments:
-                candidates.append(("tesseract-eng", english_segments))
+                candidates.append(("tesseract-tiled-eng" if is_tall_image else "tesseract-eng", english_segments))
         except Exception:
             pass
 
-    if easyocr_available():
+    use_tesseract_tiled_only = is_tall_image and requested_language in {"auto", "en", "eng"} and bool(candidates)
+
+    if rapidocr_available() and not use_tesseract_tiled_only:
+        try:
+            segments = rapidocr_image(data)
+            if segments:
+                candidates.append(("rapidocr", segments))
+        except Exception:
+            pass
+
+    if easyocr_available() and not use_tesseract_tiled_only:
         try:
             segments = easyocr_image(data, requested_language=requested_language)
             if segments:
@@ -236,17 +263,23 @@ def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, A
         except Exception:
             pass
 
-    try:
-        tesseract_languages = tesseract_languages_for_request(requested_language)
-        if tesseract_languages:
-            segments = tesseract_image(data, languages=tesseract_languages)
-            if segments:
-                candidates.append(("tesseract", segments))
-    except Exception:
-        pass
+    if not use_tesseract_tiled_only and not (is_tall_image and requested_language in {"auto", "en", "eng"}):
+        try:
+            tesseract_languages = tesseract_languages_for_request(requested_language)
+            if tesseract_languages:
+                segments = tesseract_image(
+                    data,
+                    languages=tesseract_languages,
+                    language_hint=normalize_language_code(requested_language, ""),
+                )
+                if segments:
+                    candidates.append(("tesseract", segments))
+        except Exception:
+            pass
 
     if candidates:
         grouped = group_ocr_segments(choose_ocr_candidate(candidates, requested_language))
+        grouped = filter_dialogue_segments(grouped, requested_language)
         return fit_segments_to_speech_bubbles(data, grouped)
 
     command = find_tesseract_command()
@@ -255,7 +288,24 @@ def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, A
     raise RuntimeError("OCR found no readable text.")
 
 
-def tesseract_image(data: bytes, *, languages: list[str]) -> list[dict[str, Any]]:
+def image_is_tall_webtoon(data: bytes) -> bool:
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+        return height >= 2200 and height / max(1, width) >= 2.2
+    except Exception:
+        return False
+
+
+def tesseract_image(
+    data: bytes,
+    *,
+    languages: list[str],
+    psm: str = "6",
+    language_hint: str = "",
+) -> list[dict[str, Any]]:
     command = find_tesseract_command()
     if not command:
         raise RuntimeError("Tesseract is not installed.")
@@ -285,7 +335,7 @@ def tesseract_image(data: bytes, *, languages: list[str]) -> list[dict[str, Any]
             "-l",
             "+".join(languages),
             "--psm",
-            "6",
+            psm,
             "-c",
             "tessedit_create_tsv=1",
         ]
@@ -293,7 +343,66 @@ def tesseract_image(data: bytes, *, languages: list[str]) -> list[dict[str, Any]
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "Tesseract OCR failed.")
 
-    return tsv_to_segments(completed.stdout, width=width, height=height)
+    return tsv_to_segments(completed.stdout, width=width, height=height, language_hint=language_hint)
+
+
+def tesseract_tiled_image(data: bytes, *, languages: list[str]) -> list[dict[str, Any]]:
+    command = find_tesseract_command()
+    if not command:
+        raise RuntimeError("Tesseract is not installed.")
+
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("Pillow is required for OCR image preparation.") from exc
+
+    languages = [language for language in languages if language in available_tesseract_languages()]
+    if not languages:
+        raise RuntimeError("No Tesseract OCR languages are installed.")
+
+    with Image.open(io.BytesIO(data)) as image:
+        image = image.convert("RGB")
+        width, height = image.size
+        tile_height = 950 if height > 4200 else 1200
+        step = 360 if height > 4200 else 640
+
+        all_segments: list[dict[str, Any]] = []
+        with tempfile.TemporaryDirectory(prefix="webtoon-lens-tiles-") as temp_dir:
+            temp_path = Path(temp_dir)
+            for index, y0 in enumerate(range(0, height, step)):
+                y1 = min(height, y0 + tile_height)
+                if y1 - y0 < 180:
+                    continue
+                tile_path = temp_path / f"tile-{index}.png"
+                image.crop((0, y0, width, y1)).save(tile_path)
+                args = [
+                    command,
+                    str(tile_path),
+                    "stdout",
+                    "--tessdata-dir",
+                    str(TESSDATA_DIR) if TESSDATA_DIR.exists() else str(Path(command).parent / "tessdata"),
+                    "-l",
+                    "+".join(languages),
+                    "--psm",
+                    "6",
+                    "-c",
+                    "tessedit_create_tsv=1",
+                ]
+                completed = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=35)
+                if completed.returncode != 0:
+                    continue
+                all_segments.extend(
+                    tsv_to_segments(
+                        completed.stdout,
+                        width=width,
+                        height=y1 - y0,
+                        y_offset=y0,
+                        full_height=height,
+                        language_hint="en" if "eng" in languages else "",
+                    )
+                )
+
+    return dedupe_ocr_segments(all_segments)
 
 
 def tesseract_languages_for_request(requested_language: str) -> list[str]:
@@ -333,6 +442,59 @@ def easyocr_image(data: bytes, requested_language: str = "auto") -> list[dict[st
                 best_score = score
 
     return best_segments
+
+
+def rapidocr_image(data: bytes) -> list[dict[str, Any]]:
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except Exception as exc:
+        raise RuntimeError("RapidOCR is not installed.") from exc
+
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("Pillow is required for OCR image preparation.") from exc
+
+    with Image.open(io.BytesIO(data)) as image:
+        width, height = image.size
+
+    result, _ = rapidocr_engine()(data)
+    segments: list[dict[str, Any]] = []
+    for index, item in enumerate(result or []):
+        points, text, confidence = item
+        source_text = normalize_ocr_text(str(text))
+        if not source_text or float(confidence) < 0.45:
+            continue
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        left, right = min(xs), max(xs)
+        top, bottom = min(ys), max(ys)
+        if right <= left or bottom <= top:
+            continue
+        segments.append(
+            {
+                "id": f"rapid-{index}",
+                "text": source_text,
+                "sourceText": source_text,
+                "boundingBox": {
+                    "x": clamp(left / width),
+                    "y": clamp(top / height),
+                    "width": clamp((right - left) / width),
+                    "height": clamp((bottom - top) / height),
+                },
+                "confidence": round(float(confidence), 3),
+                "readingOrder": index,
+            }
+        )
+
+    return segments
+
+
+@lru_cache(maxsize=1)
+def rapidocr_engine() -> Any:
+    from rapidocr_onnxruntime import RapidOCR
+
+    return RapidOCR()
 
 
 def easyocr_segments_for_language(
@@ -430,6 +592,10 @@ def choose_ocr_candidate(
 
         if engine == "tesseract-eng" and len(latin_words) >= 3:
             score += 25
+        if engine == "tesseract-tiled-eng" and len(latin_words) >= 3:
+            score += 80
+        if engine == "rapidocr" and len(latin_words) >= 3:
+            score += 20
 
         scored.append((score, engine, segments))
 
@@ -443,7 +609,7 @@ def group_ocr_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ordered = sorted(segments, key=lambda item: (item["boundingBox"]["y"], item["boundingBox"]["x"]))
     heights = [float(item["boundingBox"]["height"]) for item in ordered]
     median_height = sorted(heights)[len(heights) // 2] if heights else 0.025
-    max_gap = max(0.024, median_height * 2.1)
+    max_gap = max(0.0028, min(0.012, median_height * 2.35))
 
     groups: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
@@ -457,7 +623,7 @@ def group_ocr_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
         vertical_gap = float(box["y"]) - (float(current_box["y"]) + float(current_box["height"]))
         center_delta = abs(box_mid_x(box) - box_mid_x(current_box))
         overlap = horizontal_overlap(box, current_box)
-        same_bubble = vertical_gap <= max_gap and (overlap > 0.16 or center_delta < 0.24)
+        same_bubble = vertical_gap <= max_gap and (overlap > 0.32 or center_delta < 0.15)
 
         if same_bubble:
             current.append(segment)
@@ -473,6 +639,7 @@ def group_ocr_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def merge_segment_group(group: list[dict[str, Any]], index: int) -> dict[str, Any]:
     text = normalize_ocr_text(" ".join(str(item.get("sourceText") or item.get("text") or "") for item in group))
+    text = cleanup_english_ocr_text(text)
     raw_box = merge_boxes([item["boundingBox"] for item in group])
     padded_box = expand_box(raw_box)
     confidence = sum(float(item.get("confidence", 0.7)) for item in group) / max(1, len(group))
@@ -486,6 +653,154 @@ def merge_segment_group(group: list[dict[str, Any]], index: int) -> dict[str, An
         "confidence": round(confidence, 3),
         "readingOrder": index,
     }
+
+
+def dedupe_ocr_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(segments, key=lambda item: (item["boundingBox"]["y"], item["boundingBox"]["x"]))
+    deduped: list[dict[str, Any]] = []
+    for segment in ordered:
+        text_key = compact_text_key(str(segment.get("sourceText") or segment.get("text") or ""))
+        if not text_key:
+            continue
+        duplicate_index: int | None = None
+        for index, existing in enumerate(deduped):
+            existing_key = compact_text_key(str(existing.get("sourceText") or existing.get("text") or ""))
+            same_text = text_key == existing_key or text_key in existing_key or existing_key in text_key
+            close_y = abs(float(segment["boundingBox"]["y"]) - float(existing["boundingBox"]["y"])) < 0.006
+            if same_text and close_y and horizontal_overlap(segment["boundingBox"], existing["boundingBox"]) > 0.42:
+                duplicate_index = index
+                break
+        if duplicate_index is None:
+            deduped.append(segment)
+            continue
+        if float(segment.get("confidence", 0)) > float(deduped[duplicate_index].get("confidence", 0)):
+            deduped[duplicate_index] = segment
+    for index, segment in enumerate(deduped):
+        segment["id"] = f"ocr-{index}"
+        segment["readingOrder"] = index
+    return deduped
+
+
+def filter_dialogue_segments(segments: list[dict[str, Any]], requested_language: str) -> list[dict[str, Any]]:
+    normalized = normalize_language_code(requested_language, "")
+    if normalized not in {"", "auto", "en"} and requested_language != "auto":
+        return segments
+
+    filtered: list[dict[str, Any]] = []
+    for segment in segments:
+        text = cleanup_english_ocr_text(str(segment.get("sourceText") or segment.get("text") or ""))
+        if not is_probably_english_dialogue(text, float(segment.get("confidence", 0.0))):
+            continue
+        segment = {**segment, "text": text, "sourceText": text}
+        filtered.append(segment)
+    for index, segment in enumerate(filtered):
+        segment["id"] = f"bubble-{index}"
+        segment["readingOrder"] = index
+    return filtered
+
+
+def is_probably_english_dialogue(text: str, confidence: float) -> bool:
+    words = re.findall(r"[A-Za-z][A-Za-z']+", text)
+    if len(words) < 2:
+        return False
+    letters = re.findall(r"[A-Za-z]", text)
+    if len(letters) < 8:
+        return False
+    chars = [char for char in text if not char.isspace()]
+    symbol_ratio = sum(1 for char in chars if not char.isalnum() and char not in "'.,?!:;-’“”") / max(1, len(chars))
+    if symbol_ratio > 0.18:
+        return False
+    normalized_words = [word.upper().strip("'’") for word in words]
+    anchor_hits = sum(1 for word in normalized_words if word in WEBTOON_ENGLISH_ANCHORS and len(word) > 2)
+    has_dialogue_punctuation = bool(re.search(r"[?!]", text))
+    short_direct_phrase = set(normalized_words) <= {"LET", "LETS", "LET'S", "GO"} and len(normalized_words) >= 2
+    if short_direct_phrase:
+        return confidence >= 0.45
+    if len(words) < 3:
+        return False
+    if confidence < 0.52 and anchor_hits < 2:
+        return False
+    return has_dialogue_punctuation or anchor_hits >= 2 or (len(words) >= 6 and anchor_hits >= 1)
+
+
+def cleanup_english_ocr_text(text: str) -> str:
+    result = normalize_ocr_text(text)
+    if not result:
+        return ""
+    replacements = {
+        r"\b1S\b": "IS",
+        r"\b16\b": "IS",
+        r"\bLANO\b": "LAND",
+        r"\bWORLOLINGS\b": "WORLDLINGS",
+        r"\bWINO\b": "WIND",
+        r"\bFLACE\b": "PLACE",
+        r"\bTE+T+ORY\b": "TERRITORY",
+        r"\bTE+E+T+ORY\b": "TERRITORY",
+        r"\bT SHOULD\b": "I SHOULD",
+        r"\bDIONT\b": "DIDN'T",
+        r"\bDON T\b": "DON'T",
+        r"\bLET S\b": "LET'S",
+        r"\bLETSSO\b": "LET'S GO",
+        r"\bBOl\b": "GO!",
+    }
+    for pattern, replacement in replacements.items():
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    result = re.sub(r"\b(?:aa|ia|ij|iy|om|vig|eee|nal|tuc)\b", "", result, flags=re.IGNORECASE)
+    result = re.sub(r"\b(?:l\s+b\s+)?(?:lavore|wear|ce|se)\b", "", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bint\s+PLACE\b", "PLACE", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTHE\s+THE\s+OF\s+THE\s+I\s+BEAST\b", "THE BEAST", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTHE\s+OF\s+THE\s+I\s+BEAST\b", "THE BEAST", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTERRITORY\s+OF\s+THE\s+TERRITORY\s+OF\s+THE\b", "TERRITORY OF THE", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bTERRITORY\s+OF\s+THE\s+THE\b", "TERRITORY OF THE", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bI\s+IS\b", "IT IS", result, flags=re.IGNORECASE)
+    result = re.sub(r"^\s*I\s+(?=GET AWAY\b)", "IT ", result, flags=re.IGNORECASE)
+    if re.search(r"\bGET\s*AWAY\b", result, flags=re.IGNORECASE) and not re.search(r"\bIGNORE\b", result, flags=re.IGNORECASE):
+        result = re.sub(r"^.*?\b(?:IT\s+)?GET\s*AWAY\b", "IGNORE WHAT IT IS! GET AWAY", result, flags=re.IGNORECASE)
+    result = re.sub(r"\s+", " ", result).strip()
+    return remove_repeated_phrases(result)
+
+
+def clean_english_ocr_token(text: str, confidence: float) -> str:
+    token = text.strip().replace("|", "I")
+    if not token or confidence < 42:
+        return ""
+    if re.fullmatch(r"[\\/|_`~^*+=<>\[\]{}()]+", token):
+        return ""
+    letters = re.findall(r"[A-Za-z]", token)
+    if not letters:
+        return token if re.fullmatch(r"\d{1,3}", token) and confidence >= 45 else ""
+    if len(letters) == 1 and confidence < 68:
+        return ""
+    noisy = sum(1 for char in token if not char.isalnum() and char not in "'.,?!:;-’“”")
+    if noisy / max(1, len(token)) > 0.34:
+        return ""
+    return token
+
+
+def remove_repeated_phrases(text: str) -> str:
+    words = text.split()
+    if len(words) < 4:
+        return text
+    output: list[str] = []
+    index = 0
+    while index < len(words):
+        repeated = False
+        for size in range(min(6, (len(words) - index) // 2), 1, -1):
+            first = [compact_text_key(word) for word in words[index : index + size]]
+            second = [compact_text_key(word) for word in words[index + size : index + size * 2]]
+            if first == second:
+                output.extend(words[index : index + size])
+                index += size * 2
+                repeated = True
+                break
+        if not repeated:
+            output.append(words[index])
+            index += 1
+    return " ".join(output)
+
+
+def compact_text_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
 def fit_segments_to_speech_bubbles(data: bytes, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -549,6 +864,8 @@ def find_best_bubble_component(
         return None
 
     labels_to_score: dict[int, float] = {}
+    raw_width = max(1, right - left)
+    raw_height = max(1, bottom - top)
     center_x = (left + right) // 2
     center_y = (top + bottom) // 2
     sample_points = [(center_x, center_y)]
@@ -560,6 +877,9 @@ def find_best_bubble_component(
         if 0 <= x < width and 0 <= y < height:
             label = int(labels[y, x])
             if label:
+                component = [int(value) for value in stats[label]]
+                if component_is_bad_for_text_component(component, raw_width=raw_width, raw_height=raw_height, image_width=width, image_height=height):
+                    continue
                 labels_to_score[label] = labels_to_score.get(label, 0) + 4
 
     for label in range(1, component_count):
@@ -569,6 +889,8 @@ def find_best_bubble_component(
         if area > width * height * 0.55:
             continue
         if w > width * 0.96 and h > height * 0.96:
+            continue
+        if component_is_bad_for_text_component([x, y, w, h, area], raw_width=raw_width, raw_height=raw_height, image_width=width, image_height=height):
             continue
         overlap = pixel_overlap((left, top, right, bottom), (x, y, x + w, y + h))
         if overlap <= 0:
@@ -585,6 +907,8 @@ def find_best_bubble_component(
     best_label = max(labels_to_score.items(), key=lambda item: item[1])[0]
     x, y, w, h, area = [int(value) for value in stats[best_label]]
     if w <= 0 or h <= 0:
+        return None
+    if component_is_bad_for_text_component([x, y, w, h, area], raw_width=raw_width, raw_height=raw_height, image_width=width, image_height=height):
         return None
 
     pad = max(2, int(min(width, height) * 0.004))
@@ -612,6 +936,27 @@ def find_best_bubble_component(
         "style": sample_bubble_style(image, labels, best_label, raw_box=(left, top, right, bottom)),
         "bubbleDetected": True,
     }
+
+
+def component_is_bad_for_text_component(
+    component: list[int],
+    *,
+    raw_width: int,
+    raw_height: int,
+    image_width: int,
+    image_height: int,
+) -> bool:
+    x, y, w, h, area = component
+    touches_canvas = x <= 1 or y <= 1 or x + w >= image_width - 1 or y + h >= image_height - 1
+    if touches_canvas and (w > image_width * 0.70 or h > image_height * 0.04):
+        return True
+    if w > raw_width * 5.0 and h > raw_height * 7.0:
+        return True
+    if h > image_height * 0.055 and h > raw_height * 7.5:
+        return True
+    if (w * h) / max(1, image_width * image_height) > 0.055 and h > raw_height * 6:
+        return True
+    return False
 
 
 def clamp_oversized_bubble_box(
@@ -713,7 +1058,7 @@ def expand_box(box: dict[str, Any]) -> dict[str, float]:
     width = float(box["width"])
     height = float(box["height"])
     pad_x = min(0.065, max(0.018, width * 0.12))
-    pad_y = min(0.065, max(0.012, height * 0.34))
+    pad_y = min(0.04, max(0.004, height * 1.05))
     left = clamp(float(box["x"]) - pad_x)
     top = clamp(float(box["y"]) - pad_y)
     right = clamp(float(box["x"]) + width + pad_x)
@@ -739,9 +1084,18 @@ def easyocr_reader(languages: tuple[str, ...]) -> Any:
     return easyocr.Reader(list(languages), gpu=False, verbose=False)
 
 
-def tsv_to_segments(tsv: str, *, width: int, height: int) -> list[dict[str, Any]]:
+def tsv_to_segments(
+    tsv: str,
+    *,
+    width: int,
+    height: int,
+    y_offset: int = 0,
+    full_height: int | None = None,
+    language_hint: str = "",
+) -> list[dict[str, Any]]:
     lines: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    reader = csv.DictReader(io.StringIO(tsv), delimiter="\t")
+    normalized_language = normalize_language_code(language_hint, "") if language_hint else ""
+    reader = csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE)
     for row in reader:
         text = (row.get("text") or "").strip()
         if not text or row.get("level") != "5":
@@ -756,7 +1110,10 @@ def tsv_to_segments(tsv: str, *, width: int, height: int) -> list[dict[str, Any]
         except ValueError:
             continue
 
-        if confidence < 25 or item_width <= 0 or item_height <= 0:
+        if normalized_language == "en":
+            text = clean_english_ocr_token(text, confidence)
+
+        if confidence < 25 or item_width <= 0 or item_height <= 0 or not text:
             continue
 
         key = (
@@ -785,8 +1142,13 @@ def tsv_to_segments(tsv: str, *, width: int, height: int) -> list[dict[str, Any]
 
     segments: list[dict[str, Any]] = []
     sorted_lines = sorted(lines.values(), key=lambda item: (item["top"], item["left"]))
+    denominator_height = full_height or height
     for index, item in enumerate(sorted_lines):
-        source_text = normalize_ocr_text(" ".join(item["words"]))
+        source_text = (
+            cleanup_english_ocr_text(" ".join(item["words"]))
+            if normalized_language == "en"
+            else normalize_ocr_text(" ".join(item["words"]))
+        )
         if not source_text:
             continue
         confidence = sum(item["confidences"]) / max(1, len(item["confidences"]))
@@ -797,9 +1159,9 @@ def tsv_to_segments(tsv: str, *, width: int, height: int) -> list[dict[str, Any]
                 "sourceText": source_text,
                 "boundingBox": {
                     "x": clamp(item["left"] / width),
-                    "y": clamp(item["top"] / height),
+                    "y": clamp((y_offset + item["top"]) / denominator_height),
                     "width": clamp((item["right"] - item["left"]) / width),
-                    "height": clamp((item["bottom"] - item["top"]) / height),
+                    "height": clamp((item["bottom"] - item["top"]) / denominator_height),
                 },
                 "confidence": round(confidence / 100, 3),
                 "readingOrder": index,
@@ -927,10 +1289,14 @@ def translate_segments_with_ollama(
     payload = {
         "targetLanguage": "fr",
         "instructions": (
-            "Traduis pour un webtoon/manhwa en francais naturel. "
+            "Chaque texte vient d'un OCR de webtoon/manhwa et peut contenir du bruit. "
+            "Corrige mentalement les erreurs OCR evidentes avant de traduire: mots coupes, lettres confondues, fragments parasites. "
+            "Ignore les fragments sans sens comme aa, Tuc, L b, Se, Ce, traits ou lettres isolees. "
+            "Traduis en francais naturel et fluide, pas mot a mot. "
+            "Ne laisse pas de mots anglais sauf noms propres, lieux, techniques ou titres verrouilles. "
             "Garde exactement les placeholders XWEBTOON0X, XWEBTOON1X, etc. "
             "Garde les noms propres et termes de pouvoir coherents. "
-            "Ne traduis pas litteralement si la phrase doit etre reformulee."
+            "Adapte les cris et reactions au ton d'un webtoon."
         ),
         "glossary": [
             {
@@ -958,7 +1324,10 @@ def translate_segments_with_ollama(
             {
                 "role": "system",
                 "content": (
-                    "You are a professional webtoon translator. "
+                    "You are a professional EN/JA/KO/ZH to French webtoon translator and OCR cleanup editor. "
+                    "Your job is to infer the intended dialogue from noisy OCR, then translate it into natural French. "
+                    "Never translate word by word when idiomatic French is needed. "
+                    "Do not preserve English words unless they are proper nouns or locked glossary terms. "
                     "Return only valid JSON in this exact shape: "
                     "{\"translations\":[{\"id\":\"...\",\"text\":\"...\"}]}. "
                     "No explanation."
@@ -1055,6 +1424,17 @@ def translation_engine_name(translation_pairs: list[str]) -> str | None:
     return None
 
 
+def ocr_engine_name(tesseract_command: str) -> str | None:
+    engines: list[str] = []
+    if rapidocr_available():
+        engines.append("rapidocr")
+    if tesseract_command:
+        engines.append("tesseract-tiled")
+    if easyocr_available():
+        engines.append("easyocr")
+    return "+".join(engines) if engines else None
+
+
 def prepare_text_for_translation(text: str, source_language: str) -> tuple[str, dict[str, str]]:
     protected_terms: dict[str, str] = {}
     prepared = text
@@ -1068,7 +1448,7 @@ def prepare_text_for_translation(text: str, source_language: str) -> tuple[str, 
 
     if normalize_language_code(source_language, text) == "en":
         for token in sorted(set(re.findall(r"\b[A-Z][A-Z0-9]{3,}\b", prepared)), key=len, reverse=True):
-            if token in COMMON_ENGLISH_WORDS or token.startswith("XWEBTOON"):
+            if token not in WEBTOON_PROTECTED_UPPERCASE or token.startswith("XWEBTOON"):
                 continue
             placeholder = f"XWEBTOON{len(protected_terms)}X"
             protected_terms[placeholder] = token.title()
@@ -1106,6 +1486,12 @@ def cleanup_french_webtoon_terms(text: str) -> str:
     result = re.sub(r"\ble\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\ble\s+Secte", "la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\bdu\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdes\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bl['’]\s*la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdans\s+l['’]([A-Z])", r"dans \1", result)
+    result = re.sub(r"\bLa\s+premi(?:e|\u00e8)re\s+place\s+(?:a|\u00e0)\s+visiter", "Le premier endroit ou chercher", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdes\s+les\s+Portes", "des Portes", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bles\s+\u00ab\s+les\s+Portes", "les \u00ab Portes", result, flags=re.IGNORECASE)
     return result
 
 
@@ -1225,6 +1611,16 @@ def easyocr_available() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
+def rapidocr_available() -> bool:
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def extract_images(markup: str, page_url: str) -> list[dict[str, str]]:
     extractor = ImageExtractor(page_url)
     extractor.feed(markup)
@@ -1234,6 +1630,24 @@ def extract_images(markup: str, page_url: str) -> list[dict[str, str]]:
         extractor.add_image(raw, alt="")
 
     return extractor.images
+
+
+def filter_chapter_images(images: list[dict[str, str]]) -> list[dict[str, str]]:
+    if len(images) < 4:
+        return images
+
+    host_counts: dict[str, int] = {}
+    for image in images:
+        host = urllib.parse.urlparse(image.get("url", "")).netloc.lower()
+        if host:
+            host_counts[host] = host_counts.get(host, 0) + 1
+    if not host_counts:
+        return images
+
+    dominant_host, dominant_count = max(host_counts.items(), key=lambda item: item[1])
+    if dominant_count >= 3 and dominant_count / max(1, len(images)) >= 0.55:
+        return [image for image in images if urllib.parse.urlparse(image.get("url", "")).netloc.lower() == dominant_host]
+    return images
 
 
 class ImageExtractor(HTMLParser):

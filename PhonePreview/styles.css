@@ -131,9 +131,14 @@ button:disabled {
 .reader-page {
   position: relative;
   overflow: hidden;
+  min-height: 82svh;
   border: 2px solid #111111;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.reader-page[data-loaded="true"] {
+  min-height: 0;
 }
 
 .reader-page.load-error {

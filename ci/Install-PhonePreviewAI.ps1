@@ -27,7 +27,7 @@ foreach ($language in @("eng", "osd")) {
     }
 }
 
-python -m pip install --user easyocr argostranslate transformers sentencepiece
+python -m pip install --user easyocr rapidocr-onnxruntime argostranslate transformers sentencepiece
 
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if ($ollama) {
