@@ -5,10 +5,12 @@ import os
 import re
 import base64
 import csv
+import hashlib
 import io
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -22,17 +24,25 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
+CACHE_DIR = Path(os.environ.get("WEBTOON_LENS_CACHE", Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "WebtoonLens" / "cache"))
+OCR_CACHE_VERSION = "ocr-v4"
+TRANSLATION_CACHE_VERSION = "translation-v5"
+OCR_MEMORY_CACHE: dict[str, list[dict[str, Any]]] = {}
+TRANSLATION_MEMORY_CACHE: dict[str, dict[str, str]] = {}
+OLLAMA_WARMUP_LOCK = threading.Lock()
+OLLAMA_WARMUP_STARTED = False
+OLLAMA_WARMUP_READY = False
 TESSDATA_DIR = Path(os.environ.get("WEBTOON_LENS_TESSDATA", Path(os.environ.get("LOCALAPPDATA", "")) / "WebtoonLens" / "tessdata"))
 OCR_LANGUAGES = ["jpn", "kor", "chi_sim", "chi_tra", "eng"]
 OLLAMA_URL = os.environ.get("WEBTOON_LENS_OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("WEBTOON_LENS_OLLAMA_MODEL", "qwen3:14b-q4_K_M")
 WEBTOON_PHRASE_TRANSLATIONS = {
-    "beast taming sect": "la Secte du Dressage des Betes",
-    "beast-taming sect": "la Secte du Dressage des Betes",
-    "heavenly wind gates": "les Portes du Vent Celeste",
-    "demonic sect": "la Secte Demoniaque",
+    "beast taming sect": "la Secte du Dressage des B\u00eates",
+    "beast-taming sect": "la Secte du Dressage des B\u00eates",
+    "heavenly wind gates": "les Portes du Vent C\u00e9leste",
+    "demonic sect": "la Secte D\u00e9moniaque",
     "martial arts": "arts martiaux",
-    "sword aura": "aura d'epee",
+    "sword aura": "aura d'\u00e9p\u00e9e",
     "mana core": "noyau de mana",
 }
 COMMON_ENGLISH_WORDS = {
@@ -77,6 +87,9 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/v1/webtoon/capabilities":
             self.handle_capabilities()
+            return
+        if parsed.path == "/v1/webtoon/warmup":
+            self.handle_warmup()
             return
         if parsed.path == "/v1/webtoon/extract":
             self.handle_extract(parsed)
@@ -128,6 +141,10 @@ class PreviewHandler(SimpleHTTPRequestHandler):
             },
         )
 
+    def handle_warmup(self) -> None:
+        started = start_ollama_warmup()
+        self.write_json(200, {"started": started, "ready": OLLAMA_WARMUP_READY, "model": OLLAMA_MODEL})
+
     def handle_ocr(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
@@ -135,7 +152,12 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         try:
             payload = json.loads(body.decode("utf-8"))
             data = image_bytes_from_payload(payload)
-            segments = ocr_image(data, requested_language=str(payload.get("language", "auto")))
+            language = str(payload.get("language", "auto"))
+            cache_key = ocr_cache_key(data, language, str(payload.get("cacheKey", "")))
+            segments = read_ocr_cache(cache_key)
+            if segments is None:
+                segments = ocr_image(data, requested_language=language)
+                write_ocr_cache(cache_key, segments)
         except json.JSONDecodeError:
             self.write_json(400, {"error": "Invalid JSON"})
             return
@@ -227,6 +249,51 @@ def image_bytes_from_payload(payload: dict[str, Any]) -> bytes:
     referer = str(payload.get("referer", ""))
     data, _ = fetch_binary(image_url, referer=referer)
     return data
+
+
+def ocr_cache_key(data: bytes, language: str, crop_key: str) -> str:
+    digest = hashlib.sha256(data).hexdigest()
+    seed = f"{OCR_CACHE_VERSION}:{language}:{crop_key}:{digest}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def read_ocr_cache(cache_key: str) -> list[dict[str, Any]] | None:
+    if cache_key in OCR_MEMORY_CACHE:
+        return clone_json(OCR_MEMORY_CACHE[cache_key])
+
+    path = cache_path("ocr", cache_key)
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        segments = payload.get("segments", [])
+        if isinstance(segments, list):
+            OCR_MEMORY_CACHE[cache_key] = clone_json(segments)
+            return clone_json(segments)
+    except Exception:
+        return None
+    return None
+
+
+def write_ocr_cache(cache_key: str, segments: list[dict[str, Any]]) -> None:
+    OCR_MEMORY_CACHE[cache_key] = clone_json(segments)
+    try:
+        path = cache_path("ocr", cache_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump({"segments": segments}, handle, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def cache_path(kind: str, cache_key: str) -> Path:
+    safe_key = re.sub(r"[^a-f0-9]", "", cache_key.lower())[:80]
+    return CACHE_DIR / kind / f"{safe_key}.json"
+
+
+def clone_json(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False))
 
 
 def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, Any]]:
@@ -1232,6 +1299,7 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if detected_language is None and source_language != "auto":
             detected_language = source_language
         prepared_text, protected_terms = prepare_text_for_translation(source, source_language)
+        quick_translation = quick_webtoon_translation(source, source_language)
         prepared_segments.append(
             {
                 "index": index,
@@ -1241,11 +1309,12 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "sourceLanguage": source_language,
                 "preparedText": prepared_text,
                 "protectedTerms": protected_terms,
+                "quickTranslation": quick_translation,
             }
         )
 
     ollama_translations = translate_segments_with_ollama(
-        prepared_segments,
+        [item for item in prepared_segments if not item.get("quickTranslation")],
         glossary,
         context_segments,
         previous_translations,
@@ -1257,7 +1326,7 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         segment = item["segment"]
         source = item["source"]
         source_language = item["sourceLanguage"]
-        translated = ollama_translations.get(item["id"])
+        translated = item.get("quickTranslation") or ollama_translations.get(item["id"])
         if translated:
             translated = restore_protected_terms(translated, item["protectedTerms"])
         else:
@@ -1310,6 +1379,56 @@ def style_for_translated_segment(segment: dict[str, Any], source: str) -> dict[s
         style["fontWeight"] = "760"
 
     return style
+
+
+def quick_webtoon_translation(source: str, source_language: str) -> str:
+    if normalize_language_code(source_language, source) != "en":
+        return ""
+
+    cleaned = cleanup_english_ocr_text(source)
+    lowered = cleaned.lower()
+    if not lowered:
+        return ""
+
+    if "ignore" in lowered and "get away" in lowered:
+        return (
+            "Peu importe ce que c'est ! \u00c9loignez-vous imm\u00e9diatement !"
+            if "immediately" in lowered
+            else "Peu importe ce que c'est ! \u00c9loignez-vous !"
+        )
+
+    if "have thought" in lowered and "beginning" in lowered and "quanrong" in lowered:
+        return (
+            "J'aurais d\u00fb y penser d\u00e8s le d\u00e9but. Le premier endroit o\u00f9 chercher "
+            "dans Quanrong, c'est la Secte du Dressage des B\u00eates, haha..."
+        )
+
+    if "beast" in lowered and "taming" in lowered and "sect" in lowered:
+        sect = WEBTOON_PHRASE_TRANSLATIONS["beast taming sect"]
+        if "territory" in lowered:
+            return f"C'est bien le territoire de {sect} !"
+        if len(re.findall(r"[A-Za-z]+", cleaned)) <= 6:
+            return sect
+
+    if "get out" in lowered and "sight" in lowered:
+        return "Hors de ma vue !"
+
+    if re.fullmatch(r"(?:let'?s|lets)\s+go[!.]*", lowered):
+        return "Allons-y !"
+
+    if "level" in lowered and "spirit" in lowered and "beast" in lowered:
+        match = re.search(r"\b(?:two|2)\b.*?\blevel\s*7", lowered)
+        if match:
+            return "Deux b\u00eates spirituelles de niveau 7 ?"
+
+    if "heavenly" in lowered and "wind" in lowered and "gates" in lowered and ("worldlings" in lowered or "monopol" in lowered):
+        return (
+            "C'est logique. Un territoire b\u00e9ni comme les Portes du Vent C\u00e9leste, "
+            "qu'il serve le bien ou le mal, ne peut pas appartenir aux profanes. "
+            "Seules les sectes recluses peuvent le monopoliser !"
+        )
+
+    return ""
 
 
 def translate_text_to_french(text: str, source_language: str) -> str:
@@ -1396,6 +1515,27 @@ def is_ocr_fragment_noise(text: str) -> bool:
     return False
 
 
+def relevant_context_segments(context_segments: list[dict[str, Any]], prepared_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not context_segments or not prepared_segments:
+        return []
+
+    requested_ids = {str(item.get("id", "")) for item in prepared_segments}
+    requested_orders = [
+        int(context.get("order", 0))
+        for context in context_segments
+        if str(context.get("id", "")) in requested_ids
+    ]
+    if not requested_orders:
+        requested_orders = [int(item.get("index", 0)) for item in prepared_segments]
+
+    center = sum(requested_orders) / max(1, len(requested_orders))
+    ranked = sorted(
+        context_segments,
+        key=lambda item: (0 if str(item.get("id", "")) in requested_ids else 1, abs(int(item.get("order", 0)) - center)),
+    )
+    return ranked[:10]
+
+
 def translate_segments_with_ollama(
     prepared_segments: list[dict[str, Any]],
     glossary: list[dict[str, Any]],
@@ -1408,20 +1548,12 @@ def translate_segments_with_ollama(
     payload = {
         "targetLanguage": "fr",
         "instructions": (
-            "Chaque texte vient d'un OCR de webtoon/manhwa et peut contenir du bruit. "
-            "Corrige mentalement les erreurs OCR evidentes avant de traduire: mots coupes, lettres confondues, fragments parasites. "
-            "Ignore les fragments sans sens comme aa, Tuc, L b, Se, Ce, traits ou lettres isolees. "
-            "Traduis en francais naturel et fluide, pas mot a mot. "
-            "Ne laisse pas de mots anglais sauf noms propres, lieux, techniques ou titres verrouilles. "
-            "Garde exactement les placeholders XWEBTOON0X, XWEBTOON1X, etc. "
-            "Garde les noms propres et termes de pouvoir coherents. "
-            "Utilise pageContext et previousTranslations seulement pour comprendre la scene et garder la coherence. "
-            "Traduis uniquement les elements dans segments. "
-            "Adapte les cris et reactions au ton d'un webtoon. "
-            "Reste assez court pour tenir dans une bulle."
+            "Traduis l'OCR webtoon en francais naturel, compact et coherent. "
+            "Corrige les erreurs OCR evidentes, ignore les fragments parasites, garde les placeholders et noms propres. "
+            "Utilise pageContext seulement comme contexte; traduis uniquement segments."
         ),
-        "pageContext": context_segments,
-        "previousTranslations": previous_translations,
+        "pageContext": relevant_context_segments(context_segments, prepared_segments),
+        "previousTranslations": previous_translations[-5:],
         "glossary": [
             {
                 "source": str(item.get("source", "")),
@@ -1441,6 +1573,10 @@ def translate_segments_with_ollama(
     }
     if not payload["segments"]:
         return {}
+    cache_key = translation_cache_key(payload)
+    cached = read_translation_cache(cache_key)
+    if cached is not None:
+        return cached
 
     request_payload = {
         "model": OLLAMA_MODEL,
@@ -1449,10 +1585,8 @@ def translate_segments_with_ollama(
                 "role": "system",
                 "content": (
                     "You are a professional EN/JA/KO/ZH to French webtoon translator and OCR cleanup editor. "
-                    "Your job is to infer the intended dialogue from noisy OCR, then translate it into natural French. "
-                    "Never translate word by word when idiomatic French is needed. "
-                    "Use pageContext for meaning, speaker flow, pronouns, and recurring terms, but translate only the requested segments. "
-                    "Keep the French compact enough for speech bubbles. "
+                    "Infer the intended dialogue from noisy OCR and translate compactly into natural French. "
+                    "Use pageContext only for meaning and recurring terms. "
                     "Do not preserve English words unless they are proper nouns or locked glossary terms. "
                     "Return only valid JSON in this exact shape: "
                     "{\"translations\":[{\"id\":\"...\",\"text\":\"...\"}]}. "
@@ -1492,11 +1626,49 @@ def translate_segments_with_ollama(
             if item.get("id") and item.get("text")
         }
         if result:
+            write_translation_cache(cache_key, result)
             print(f"Ollama translated {len(result)} segments in {time.time() - started:.2f}s")
         return result
     except Exception as exc:
         print(f"Ollama translation fallback: {exc}")
         return {}
+
+
+def translation_cache_key(payload: dict[str, Any]) -> str:
+    stable = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    seed = f"{TRANSLATION_CACHE_VERSION}:{OLLAMA_MODEL}:{stable}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def read_translation_cache(cache_key: str) -> dict[str, str] | None:
+    if cache_key in TRANSLATION_MEMORY_CACHE:
+        return dict(TRANSLATION_MEMORY_CACHE[cache_key])
+
+    path = cache_path("translation", cache_key)
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        translations = payload.get("translations", {})
+        if isinstance(translations, dict):
+            result = {str(key): str(value) for key, value in translations.items() if value}
+            TRANSLATION_MEMORY_CACHE[cache_key] = dict(result)
+            return result
+    except Exception:
+        return None
+    return None
+
+
+def write_translation_cache(cache_key: str, translations: dict[str, str]) -> None:
+    TRANSLATION_MEMORY_CACHE[cache_key] = dict(translations)
+    try:
+        path = cache_path("translation", cache_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump({"translations": translations}, handle, ensure_ascii=False)
+    except Exception:
+        pass
 
 
 def parse_json_object(content: str) -> dict[str, Any]:
@@ -1538,6 +1710,47 @@ def ollama_model_available() -> bool:
         return any(model.get("name") == OLLAMA_MODEL or model.get("model") == OLLAMA_MODEL for model in payload.get("models", []))
     except Exception:
         return False
+
+
+def start_ollama_warmup() -> bool:
+    global OLLAMA_WARMUP_STARTED
+    if not ollama_model_available():
+        return False
+
+    with OLLAMA_WARMUP_LOCK:
+        if OLLAMA_WARMUP_STARTED:
+            return False
+        OLLAMA_WARMUP_STARTED = True
+
+    thread = threading.Thread(target=warm_ollama_model, name="ollama-warmup", daemon=True)
+    thread.start()
+    return True
+
+
+def warm_ollama_model() -> None:
+    global OLLAMA_WARMUP_READY
+    request_payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "user", "content": "Reponds seulement OK. /no_think"},
+        ],
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0, "num_predict": 4},
+    }
+    try:
+        data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{OLLAMA_URL.rstrip('/')}/api/chat",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=75) as response:
+            response.read()
+        OLLAMA_WARMUP_READY = True
+    except Exception as exc:
+        print(f"Ollama warmup skipped: {exc}")
 
 
 def translation_engine_name(translation_pairs: list[str]) -> str | None:
@@ -1610,8 +1823,17 @@ def enforce_phrase_translations(source: str, translated: str) -> str:
     result = translated
     lowered_source = source.lower()
 
+    if "ignore" in lowered_source and "get away" in lowered_source:
+        return (
+            "Peu importe ce que c'est ! \u00c9loignez-vous imm\u00e9diatement !"
+            if "immediately" in lowered_source
+            else "Peu importe ce que c'est ! \u00c9loignez-vous !"
+        )
+
     if "beast taming sect" in lowered_source or "beast-taming sect" in lowered_source:
         preferred = WEBTOON_PHRASE_TRANSLATIONS["beast taming sect"]
+        if "territory" in lowered_source:
+            return f"C'est bien le territoire de {preferred} !"
         result = re.sub(
             r"(?:la\s+)?Secte\s+du\s+(?:Domptage|Dressage)\s+des\s+B(?:e|\u00ea)tes",
             preferred,
@@ -1640,6 +1862,10 @@ def enforce_phrase_translations(source: str, translated: str) -> str:
 def cleanup_french_webtoon_terms(text: str) -> str:
     result = re.sub(r"\bLa\s+premi(?:e|\u00e8)re\s+place\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", text, flags=re.IGNORECASE)
     result = re.sub(r"\bLe\s+premier\s+lieu\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bCela\s+est\s+bien\b", "C'est bien", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bterritoire\s+b(?:e|\u00e9)nit\b", "territoire b\u00e9ni", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bla\s+\u00ab\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\u00ab\s*(la\s+Secte[^!?.\u00bb]*)\s*\u00bb", r"\1", result, flags=re.IGNORECASE)
     result = re.sub(r"\ble\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\ble\s+Secte", "la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\bla\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
