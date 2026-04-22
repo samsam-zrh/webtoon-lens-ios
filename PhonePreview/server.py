@@ -9,6 +9,7 @@ import io
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +24,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 TESSDATA_DIR = Path(os.environ.get("WEBTOON_LENS_TESSDATA", Path(os.environ.get("LOCALAPPDATA", "")) / "WebtoonLens" / "tessdata"))
 OCR_LANGUAGES = ["jpn", "kor", "chi_sim", "chi_tra", "eng"]
+OLLAMA_URL = os.environ.get("WEBTOON_LENS_OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("WEBTOON_LENS_OLLAMA_MODEL", "qwen3:14b-q4_K_M")
 WEBTOON_PHRASE_TRANSLATIONS = {
     "beast taming sect": "la Secte du Dressage des Betes",
     "beast-taming sect": "la Secte du Dressage des Betes",
@@ -35,10 +38,12 @@ COMMON_ENGLISH_WORDS = {
     "A", "AN", "AND", "ARE", "AS", "AT", "BE", "BEGINNING", "BUT", "BY", "CAN",
     "DID", "DO", "DOES", "DON", "FOR", "FROM", "GO", "HAD", "HAS", "HAVE", "HE",
     "HER", "HERE", "HIM", "HIS", "I", "IF", "IN", "INTO", "IS", "IT", "ITS", "JUST",
-    "FIRST", "LIKE", "LOOK", "ME", "MY", "NO", "NOT", "OF", "ON", "OR", "OUR", "PLACE",
-    "SHOULD", "SO", "THAT", "THE", "THEIR", "THEM", "THEN", "THIS", "THOUGHT",
-    "TO", "WAS", "WE", "WHAT", "WHEN", "WHERE", "WHO", "WHY", "WILL", "WITH",
-    "YOU", "YOUR",
+    "BEAST", "BEASTS", "EIGHT", "FIRST", "FIVE", "FOUR", "LIKE", "LEVEL", "LOOK",
+    "ME", "MY", "NINE", "NO", "NOT", "OF", "ON", "ONE", "OR", "OUR", "PLACE",
+    "SECT", "SEVEN", "SHOULD", "SIX", "SO", "SPIRIT", "TAMING", "TEN", "THAT",
+    "THE", "THEIR", "THEM", "THEN", "THERE", "THESE", "THIS", "THOSE", "THOUGHT",
+    "THREE", "TO", "TWO", "WAS", "WE", "WHAT", "WHEN", "WHERE", "WHO", "WHY",
+    "WILL", "WITH", "YOU", "YOUR", "ZERO",
 }
 
 
@@ -93,18 +98,21 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         tesseract_command = find_tesseract_command()
         languages = available_tesseract_languages()
         translation_pairs = available_translation_pairs()
+        has_ollama = ollama_model_available()
+        has_translation = has_ollama or bool(translation_pairs)
         self.write_json(
             200,
             {
                 "imageExtraction": True,
                 "imageProxy": True,
                 "ocr": bool(easyocr_available() or (tesseract_command and languages)),
-                "translation": bool(translation_pairs),
+                "translation": has_translation,
                 "ocrEngine": "easyocr+tesseract" if easyocr_available() and tesseract_command else ("easyocr" if easyocr_available() else ("tesseract" if tesseract_command else None)),
                 "ocrLanguages": languages,
-                "translationEngine": "transformers+argos" if english_french_transformer_available() and translation_pairs else ("argos" if translation_pairs else None),
+                "translationEngine": translation_engine_name(translation_pairs),
+                "ollamaModel": OLLAMA_MODEL if has_ollama else None,
                 "translationPairs": translation_pairs,
-                "message": "Local OCR and offline translation are available." if (easyocr_available() or tesseract_command) and translation_pairs else "OCR/translation dependencies are not fully installed.",
+                "message": "Local OCR and offline translation are available." if (easyocr_available() or tesseract_command) and has_translation else "OCR/translation dependencies are not fully installed.",
             },
         )
 
@@ -238,7 +246,8 @@ def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, A
         pass
 
     if candidates:
-        return group_ocr_segments(choose_ocr_candidate(candidates, requested_language))
+        grouped = group_ocr_segments(choose_ocr_candidate(candidates, requested_language))
+        return fit_segments_to_speech_bubbles(data, grouped)
 
     command = find_tesseract_command()
     if not command:
@@ -479,6 +488,219 @@ def merge_segment_group(group: list[dict[str, Any]], index: int) -> dict[str, An
     }
 
 
+def fit_segments_to_speech_bubbles(data: bytes, segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not segments:
+        return segments
+
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return segments
+
+    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return segments
+
+    height, width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    b, g, r = cv2.split(image)
+    white_mask = ((value > 235) & (saturation < 45)) | ((r > 224) & (g > 224) & (b > 224))
+    mask = white_mask.astype("uint8") * 255
+    mask = cv2.medianBlur(mask, 5)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8), iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations=1)
+
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    fitted: list[dict[str, Any]] = []
+    for segment in segments:
+        bubble_box = find_best_bubble_component(segment, labels, stats, image=image, width=width, height=height, component_count=component_count)
+        if bubble_box:
+            fitted.append({**segment, **bubble_box})
+        else:
+            fitted.append(segment)
+
+    return fitted
+
+
+def find_best_bubble_component(
+    segment: dict[str, Any],
+    labels: Any,
+    stats: Any,
+    *,
+    image: Any,
+    width: int,
+    height: int,
+    component_count: int,
+) -> dict[str, Any] | None:
+    raw_box = segment.get("rawBoundingBox") or segment.get("boundingBox")
+    if not raw_box:
+        return None
+
+    left = int(float(raw_box["x"]) * width)
+    top = int(float(raw_box["y"]) * height)
+    right = int((float(raw_box["x"]) + float(raw_box["width"])) * width)
+    bottom = int((float(raw_box["y"]) + float(raw_box["height"])) * height)
+    left, top = max(0, left), max(0, top)
+    right, bottom = min(width - 1, right), min(height - 1, bottom)
+    if right <= left or bottom <= top:
+        return None
+
+    labels_to_score: dict[int, float] = {}
+    center_x = (left + right) // 2
+    center_y = (top + bottom) // 2
+    sample_points = [(center_x, center_y)]
+    for y in range(top, bottom + 1, max(1, (bottom - top) // 4 or 1)):
+        for x in range(left, right + 1, max(1, (right - left) // 4 or 1)):
+            sample_points.append((x, y))
+
+    for x, y in sample_points:
+        if 0 <= x < width and 0 <= y < height:
+            label = int(labels[y, x])
+            if label:
+                labels_to_score[label] = labels_to_score.get(label, 0) + 4
+
+    for label in range(1, component_count):
+        x, y, w, h, area = [int(value) for value in stats[label]]
+        if area < 900:
+            continue
+        if area > width * height * 0.55:
+            continue
+        if w > width * 0.96 and h > height * 0.96:
+            continue
+        overlap = pixel_overlap((left, top, right, bottom), (x, y, x + w, y + h))
+        if overlap <= 0:
+            continue
+        raw_area = max(1, (right - left) * (bottom - top))
+        overlap_ratio = overlap / raw_area
+        if overlap_ratio < 0.08:
+            continue
+        labels_to_score[label] = labels_to_score.get(label, 0) + overlap_ratio * 100
+
+    if not labels_to_score:
+        return None
+
+    best_label = max(labels_to_score.items(), key=lambda item: item[1])[0]
+    x, y, w, h, area = [int(value) for value in stats[best_label]]
+    if w <= 0 or h <= 0:
+        return None
+
+    pad = max(2, int(min(width, height) * 0.004))
+    x0 = max(0, x - pad)
+    y0 = max(0, y - pad)
+    x1 = min(width, x + w + pad)
+    y1 = min(height, y + h + pad)
+    x0, y0, x1, y1 = clamp_oversized_bubble_box(
+        component_box=(x0, y0, x1, y1),
+        raw_box=(left, top, right, bottom),
+        image_width=width,
+        image_height=height,
+    )
+    normalized = {
+        "x": clamp(x0 / width),
+        "y": clamp(y0 / height),
+        "width": clamp((x1 - x0) / width),
+        "height": clamp((y1 - y0) / height),
+    }
+    fill_ratio = area / max(1, w * h)
+    shape = "ellipse" if fill_ratio < 0.86 and w / max(1, h) > 1.12 else "rounded"
+    return {
+        "boundingBox": normalized,
+        "shape": shape,
+        "style": sample_bubble_style(image, labels, best_label, raw_box=(left, top, right, bottom)),
+        "bubbleDetected": True,
+    }
+
+
+def clamp_oversized_bubble_box(
+    *,
+    component_box: tuple[int, int, int, int],
+    raw_box: tuple[int, int, int, int],
+    image_width: int,
+    image_height: int,
+) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = component_box
+    raw_left, raw_top, raw_right, raw_bottom = raw_box
+    box_width = x1 - x0
+    box_height = y1 - y0
+    raw_width = max(1, raw_right - raw_left)
+    raw_height = max(1, raw_bottom - raw_top)
+    component_ratio = (box_width * box_height) / max(1, image_width * image_height)
+    too_wide = box_width > image_width * 0.96
+    too_tall = box_height > image_height * 0.34
+    too_large = component_ratio > 0.24
+
+    if not (too_wide or too_tall or too_large):
+        return component_box
+
+    max_width = int(min(image_width * 0.94, max(raw_width * 4.4, image_width * 0.34)))
+    max_height = int(min(image_height * 0.30, max(raw_height * 7.0, image_height * 0.15)))
+    center_x = (raw_left + raw_right) // 2
+    center_y = (raw_top + raw_bottom) // 2
+
+    if box_width > max_width:
+        half_width = max_width // 2
+        x0 = max(0, center_x - half_width)
+        x1 = min(image_width, center_x + half_width)
+
+    if box_height > max_height:
+        half_height = max_height // 2
+        y0 = max(0, center_y - half_height)
+        y1 = min(image_height, center_y + half_height)
+
+    return x0, y0, max(x0 + 1, x1), max(y0 + 1, y1)
+
+
+def sample_bubble_style(
+    image: Any,
+    labels: Any,
+    label: int,
+    *,
+    raw_box: tuple[int, int, int, int],
+) -> dict[str, str]:
+    try:
+        import numpy as np
+    except Exception:
+        return {}
+
+    mask = labels == label
+    fill_pixels = image[mask]
+    if fill_pixels.size == 0:
+        return {}
+
+    fill_color = bgr_to_hex(np.median(fill_pixels, axis=0))
+    raw_left, raw_top, raw_right, raw_bottom = raw_box
+    patch = image[max(0, raw_top) : max(0, raw_bottom), max(0, raw_left) : max(0, raw_right)]
+    if patch.size:
+        luminance = patch[:, :, 2] * 0.2126 + patch[:, :, 1] * 0.7152 + patch[:, :, 0] * 0.0722
+        dark_pixels = patch[luminance < 115]
+        text_color = bgr_to_hex(np.median(dark_pixels, axis=0)) if dark_pixels.size else "#111111"
+    else:
+        text_color = "#111111"
+
+    return {
+        "fillColor": fill_color,
+        "textColor": text_color,
+        "borderColor": text_color,
+    }
+
+
+def bgr_to_hex(pixel: Any) -> str:
+    values = [int(max(0, min(255, round(float(value))))) for value in pixel[:3]]
+    blue, green, red = values
+    return f"#{red:02x}{green:02x}{blue:02x}"
+
+
+def pixel_overlap(first: tuple[int, int, int, int], second: tuple[int, int, int, int]) -> int:
+    left = max(first[0], second[0])
+    top = max(first[1], second[1])
+    right = min(first[2], second[2])
+    bottom = min(first[3], second[3])
+    return max(0, right - left) * max(0, bottom - top)
+
+
 def merge_boxes(boxes: list[dict[str, Any]]) -> dict[str, float]:
     left = min(float(box["x"]) for box in boxes)
     top = min(float(box["y"]) for box in boxes)
@@ -604,18 +826,43 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if item.get("isLocked") and item.get("source") and item.get("translation")
     ]
 
-    translated_segments = []
+    prepared_segments: list[dict[str, Any]] = []
     detected_language: str | None = None
     for index, segment in enumerate(payload.get("segments", [])):
         source = str(segment.get("text") or segment.get("sourceText") or "")
         source_language = normalize_language_code(str(payload.get("sourceLanguage") or "auto"), source)
         if detected_language is None and source_language != "auto":
             detected_language = source_language
-        translated = translate_text_to_french(source, source_language)
+        prepared_text, protected_terms = prepare_text_for_translation(source, source_language)
+        prepared_segments.append(
+            {
+                "index": index,
+                "segment": segment,
+                "id": str(segment.get("id", f"segment-{index}")),
+                "source": source,
+                "sourceLanguage": source_language,
+                "preparedText": prepared_text,
+                "protectedTerms": protected_terms,
+            }
+        )
+
+    ollama_translations = translate_segments_with_ollama(prepared_segments, glossary)
+
+    translated_segments = []
+    for item in prepared_segments:
+        index = int(item["index"])
+        segment = item["segment"]
+        source = item["source"]
+        source_language = item["sourceLanguage"]
+        translated = ollama_translations.get(item["id"])
+        if translated:
+            translated = restore_protected_terms(translated, item["protectedTerms"])
+        else:
+            translated = translate_text_to_french(source, source_language)
         translated = apply_locked_glossary(source, translated, glossary)
         translated_segments.append(
             {
-                "id": str(segment.get("id", f"segment-{index}")),
+                "id": item["id"],
                 "sourceText": source,
                 "translatedText": translated,
                 "boundingBox": segment.get(
@@ -624,6 +871,7 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "rawBoundingBox": segment.get("rawBoundingBox"),
                 "shape": segment.get("shape", "rounded"),
+                "style": segment.get("style"),
                 "confidence": float(segment.get("confidence", 0.75)),
                 "readingOrder": int(segment.get("readingOrder", index)),
             }
@@ -669,6 +917,104 @@ def translate_english_to_french(text: str, by_code: dict[str, Any]) -> str:
     return get_argos_translation(by_code, "en", "fr", text)
 
 
+def translate_segments_with_ollama(
+    prepared_segments: list[dict[str, Any]],
+    glossary: list[dict[str, Any]],
+) -> dict[str, str]:
+    if not prepared_segments or not ollama_model_available():
+        return {}
+
+    payload = {
+        "targetLanguage": "fr",
+        "instructions": (
+            "Traduis pour un webtoon/manhwa en francais naturel. "
+            "Garde exactement les placeholders XWEBTOON0X, XWEBTOON1X, etc. "
+            "Garde les noms propres et termes de pouvoir coherents. "
+            "Ne traduis pas litteralement si la phrase doit etre reformulee."
+        ),
+        "glossary": [
+            {
+                "source": str(item.get("source", "")),
+                "translation": str(item.get("translation", "")),
+            }
+            for item in glossary
+        ],
+        "segments": [
+            {
+                "id": item["id"],
+                "sourceLanguage": item["sourceLanguage"],
+                "text": item["preparedText"],
+            }
+            for item in prepared_segments
+            if item.get("preparedText")
+        ],
+    }
+    if not payload["segments"]:
+        return {}
+
+    request_payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional webtoon translator. "
+                    "Return only valid JSON in this exact shape: "
+                    "{\"translations\":[{\"id\":\"...\",\"text\":\"...\"}]}. "
+                    "No explanation."
+                ),
+            },
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False) + " /no_think"},
+        ],
+        "format": "json",
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": 0.12,
+            "top_p": 0.85,
+            "num_ctx": 4096,
+            "num_predict": 96 + 96 * len(payload["segments"]),
+        },
+    }
+
+    try:
+        data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{OLLAMA_URL.rstrip('/')}/api/chat",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        started = time.time()
+        with urllib.request.urlopen(request, timeout=28) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+        content = str(raw.get("message", {}).get("content", "")).strip()
+        parsed = parse_json_object(content)
+        translations = parsed.get("translations", [])
+        result = {
+            str(item.get("id", "")): str(item.get("text", "")).strip()
+            for item in translations
+            if item.get("id") and item.get("text")
+        }
+        if result:
+            print(f"Ollama translated {len(result)} segments in {time.time() - started:.2f}s")
+        return result
+    except Exception as exc:
+        print(f"Ollama translation fallback: {exc}")
+        return {}
+
+
+def parse_json_object(content: str) -> dict[str, Any]:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(content[start : end + 1])
+        raise
+
+
 @lru_cache(maxsize=1)
 def english_french_transformer() -> Any | None:
     try:
@@ -687,6 +1033,26 @@ def english_french_transformer_available() -> bool:
         return True
     except Exception:
         return False
+
+
+@lru_cache(maxsize=1)
+def ollama_model_available() -> bool:
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL.rstrip('/')}/api/tags", timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return any(model.get("name") == OLLAMA_MODEL or model.get("model") == OLLAMA_MODEL for model in payload.get("models", []))
+    except Exception:
+        return False
+
+
+def translation_engine_name(translation_pairs: list[str]) -> str | None:
+    if ollama_model_available():
+        return f"ollama:{OLLAMA_MODEL}"
+    if english_french_transformer_available() and translation_pairs:
+        return "transformers+argos"
+    if translation_pairs:
+        return "argos"
+    return None
 
 
 def prepare_text_for_translation(text: str, source_language: str) -> tuple[str, dict[str, str]]:

@@ -102,6 +102,7 @@ button:disabled {
 
 .stage {
   position: relative;
+  isolation: isolate;
   min-height: 430px;
   overflow: hidden;
   border: 2px solid #111111;
@@ -155,12 +156,16 @@ button:disabled {
 }
 
 .reader-page img {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: auto;
 }
 
 #previewImage {
+  position: relative;
+  z-index: 1;
   display: none;
   width: 100%;
   height: auto;
@@ -198,13 +203,14 @@ button:disabled {
 .overlay {
   position: absolute;
   inset: 0;
+  z-index: 20;
   pointer-events: none;
 }
 
 .page-badge,
 .ocr-notice {
   position: absolute;
-  z-index: 2;
+  z-index: 5;
   border: 1px solid rgba(17, 17, 17, 0.2);
   border-radius: 8px;
   color: #111111;
@@ -234,6 +240,7 @@ button:disabled {
 
 .bubble {
   position: absolute;
+  z-index: 30;
   display: grid;
   place-items: center;
   min-height: 44px;
@@ -241,18 +248,19 @@ button:disabled {
   border: 2px solid rgba(17, 17, 17, 0.82);
   border-radius: 8px;
   color: #111111;
-  background: rgba(255, 255, 255, 0.985);
+  background: #ffffff;
   box-shadow: none;
   font-family: "Comic Sans MS", "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 850;
   line-height: 1.08;
   text-align: center;
-  text-wrap: balance;
+  text-wrap: pretty;
+  white-space: pre-line;
+  overflow-wrap: break-word;
   overflow: hidden;
-  transform: translateY(8px);
-  opacity: 0;
-  animation: bubble-in 280ms ease forwards;
+  opacity: 1;
+  mix-blend-mode: normal;
 }
 
 .bubble[data-shape="ellipse"] {
@@ -308,13 +316,6 @@ select {
 
 .term-row strong {
   color: #b13a2e;
-}
-
-@keyframes bubble-in {
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
 }
 
 @media (min-width: 760px) {

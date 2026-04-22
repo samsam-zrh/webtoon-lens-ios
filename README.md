@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File .\ci\Install-PhonePreviewAI.ps1
 powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
 ```
 
-The preview serves the mobile UI and a local OCR/translation backend on the same local URL. It uses EasyOCR/Tesseract for OCR, a local EN -> FR transformer, and Argos Translate for JP/KO/ZH -> EN fallback. It no longer returns fake `[fr]` translations.
+The preview serves the mobile UI and a local OCR/translation backend on the same local URL. It uses EasyOCR/Tesseract for OCR, Ollama `qwen3:14b-q4_K_M` when available, then a local EN -> FR transformer and Argos Translate as fallbacks. It no longer returns fake `[fr]` translations.
 
 Before running on a real device, replace the sample bundle identifiers and App Group in:
 

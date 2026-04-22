@@ -29,6 +29,14 @@ foreach ($language in @("eng", "osd")) {
 
 python -m pip install --user easyocr argostranslate transformers sentencepiece
 
+$ollama = Get-Command ollama -ErrorAction SilentlyContinue
+if ($ollama) {
+    Write-Host "Ollama detected. The preview will use qwen3:14b-q4_K_M if that model is installed."
+    & $ollama.Source list
+} else {
+    Write-Host "Optional: install Ollama and run 'ollama pull qwen3:14b-q4_K_M' for the best local translations."
+}
+
 @'
 from argostranslate import package
 

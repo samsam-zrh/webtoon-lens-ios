@@ -273,16 +273,18 @@ function renderIntoOverlay(targetOverlay, segments) {
 
   for (const segment of segments) {
     const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
+    const translatedText = formatBubbleText(segment.translatedText || segment.text || "");
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.dataset.shape = segment.shape || guessBubbleShape(box);
-    bubble.textContent = segment.translatedText || segment.text || "";
+    bubble.textContent = translatedText;
     bubble.title = segment.sourceText || "";
     bubble.style.left = `${box.x * 100}%`;
     bubble.style.top = `${box.y * 100}%`;
     bubble.style.width = `${Math.max(0.18, box.width) * 100}%`;
-    bubble.style.minHeight = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
-    bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay)}px`;
+    bubble.style.height = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
+    bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay, translatedText)}px`;
+    applyBubbleStyle(bubble, segment.style);
     targetOverlay.appendChild(bubble);
   }
 }
@@ -291,12 +293,43 @@ function guessBubbleShape(box) {
   return box.width / Math.max(0.001, box.height) > 1.35 ? "ellipse" : "rounded";
 }
 
-function fontSizeForBox(box, targetOverlay) {
+function fontSizeForBox(box, targetOverlay, text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const length = normalized.length;
+  const pixelWidth = Math.max(80, box.width * targetOverlay.clientWidth);
   const pixelHeight = box.height * targetOverlay.clientHeight;
-  if (pixelHeight >= 150) return 18;
-  if (pixelHeight >= 105) return 16;
-  if (pixelHeight >= 72) return 14;
-  return 12;
+  const maxSize = pixelHeight >= 150 ? 20 : pixelHeight >= 105 ? 18 : pixelHeight >= 72 ? 16 : 13;
+  const minSize = 10;
+
+  for (let size = maxSize; size >= minSize; size -= 1) {
+    const charsPerLine = Math.max(8, Math.floor(pixelWidth / (size * 0.58)));
+    const explicitLines = text.split("\n").reduce((total, line) => {
+      const lineLength = line.replace(/\s+/g, " ").trim().length;
+      return total + Math.max(1, Math.ceil(lineLength / charsPerLine));
+    }, 0);
+    const neededHeight = explicitLines * size * 1.16;
+    if (neededHeight <= pixelHeight * 0.68 && length / charsPerLine <= 5.2) {
+      return size;
+    }
+  }
+
+  return minSize;
+}
+
+function formatBubbleText(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s+([?!:;])/g, "\u00a0$1")
+    .replace(/([?!])\s+([A-Z\u00c0-\u00d6\u00d8-\u00dd])/g, "$1\n$2");
+}
+
+function applyBubbleStyle(bubble, style) {
+  if (!style || typeof style !== "object") return;
+
+  if (style.fillColor) bubble.style.backgroundColor = style.fillColor;
+  if (style.textColor) bubble.style.color = style.textColor;
+  if (style.borderColor) bubble.style.borderColor = style.borderColor;
 }
 
 function renderNotice(targetOverlay, text) {
@@ -334,7 +367,9 @@ async function loadCapabilities() {
     if (!response.ok) throw new Error(`Capabilities ${response.status}`);
     const capabilities = await response.json();
     if (capabilities.ocr && capabilities.translation) {
-      capabilityLine.textContent = "OCR EasyOCR/Tesseract + traduction locale prets.";
+      capabilityLine.textContent = capabilities.ollamaModel
+        ? `OCR + Qwen local prets (${capabilities.ollamaModel}).`
+        : "OCR EasyOCR/Tesseract + traduction locale prets.";
     } else if (capabilities.ocr) {
       capabilityLine.textContent = "OCR local pret. Traduction locale non installee.";
     } else {

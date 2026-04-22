@@ -1,4 +1,4 @@
-const CACHE_NAME = "webtoon-lens-preview-v3";
+const CACHE_NAME = "webtoon-lens-preview-v5";
 const ASSETS = [
   "./",
   "./index.html",
