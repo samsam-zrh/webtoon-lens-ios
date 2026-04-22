@@ -21,12 +21,16 @@ let loadedImages = 0;
 let failedImages = 0;
 let currentPageUrl = "";
 let currentCaptureDataUrl = "";
+let autoTranslateEnabled = false;
+let translateScrollTimer = 0;
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 
 loadCapabilities();
+window.addEventListener("scroll", scheduleAutoTranslate, { passive: true });
+window.addEventListener("resize", scheduleAutoTranslate);
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files && imageInput.files[0];
@@ -35,6 +39,7 @@ imageInput.addEventListener("change", () => {
   const reader = new FileReader();
   reader.onload = () => {
     resetReaderCounters();
+    autoTranslateEnabled = false;
     stage.classList.remove("feed-mode");
     imageReader.innerHTML = "";
     currentCaptureDataUrl = String(reader.result);
@@ -120,6 +125,7 @@ async function openWebtoonUrl() {
 
 function renderImageFeed(images) {
   resetReaderCounters();
+  autoTranslateEnabled = false;
   stage.classList.add("feed-mode");
   previewImage.style.display = "none";
   overlay.innerHTML = "";
@@ -148,7 +154,7 @@ function renderImageFeed(images) {
     const img = document.createElement("img");
     img.src = proxyImageUrl(image.url);
     img.alt = image.alt || `Image webtoon ${index + 1}`;
-    img.loading = index < 2 ? "eager" : "lazy";
+    img.loading = index < 3 ? "eager" : "lazy";
     img.addEventListener("load", () => {
       loadedImages += 1;
       page.dataset.loaded = "true";
@@ -180,51 +186,101 @@ function proxyImageUrl(url) {
 }
 
 async function translateReaderImages() {
-  const pages = readerPagesForTranslation();
+  autoTranslateEnabled = true;
+  const pages = readerPagesForTranslation().filter((page) => !["running", "done"].includes(page.dataset.translationState || ""));
   if (!pages.length) {
-    statusLine.textContent = "Le debut de l'episode charge encore. Attends quelques secondes, puis relance Traduire.";
+    const running = document.querySelector(".reader-page[data-translation-state='running']");
+    statusLine.textContent = running
+      ? "Traduction en cours sur la page visible..."
+      : "Descends jusqu'a la prochaine image chargee, elle se traduira automatiquement.";
     return;
   }
 
   let translatedPages = 0;
   for (const [index, page] of pages.entries()) {
-    const pageOverlay = page.querySelector(".overlay");
-    const imageUrl = page.dataset.sourceUrl || "";
-    if (!pageOverlay || !imageUrl) continue;
-
-    renderNotice(pageOverlay, `OCR ${index + 1}/${pages.length}...`);
-    statusLine.textContent = `OCR + traduction image ${index + 1}/${pages.length}...`;
-
-    const ocr = await ocrImage({ imageUrl, referer: currentPageUrl, language: ocrLanguage.value });
-    if (!ocr.length) {
-      renderNotice(pageOverlay, "Aucun texte detecte");
-      continue;
-    }
-
-    const translated = await translateSegments(ocr);
-    renderIntoOverlay(pageOverlay, translated);
-    translatedPages += 1;
+    const translated = await translatePageProgressively(page, index + 1, pages.length);
+    if (translated) translatedPages += 1;
   }
 
   statusLine.textContent = translatedPages
-    ? `OK: ${translatedPages} images traduites avec OCR local.`
+    ? `OK: ${translatedPages} image(s) lancee(s). Scroll: les suivantes se traduisent quand elles arrivent.`
     : "OCR termine, mais aucun texte lisible n'a ete detecte.";
+  scheduleAutoTranslate();
+}
+
+async function translatePageProgressively(page, pageNumber, totalPages) {
+  const pageOverlay = page.querySelector(".overlay");
+  const imageUrl = page.dataset.sourceUrl || "";
+  if (!pageOverlay || !imageUrl) return false;
+  if (["running", "done"].includes(page.dataset.translationState || "")) return false;
+
+  page.dataset.translationState = "running";
+  pageOverlay.innerHTML = "";
+  renderNotice(pageOverlay, `OCR image ${Number(page.dataset.index || "0") + 1}...`);
+  statusLine.textContent = `OCR image ${pageNumber}/${totalPages}...`;
+
+  try {
+    const ocr = page.__ocrSegments || await ocrImage({ imageUrl, referer: currentPageUrl, language: ocrLanguage.value });
+    page.__ocrSegments = ocr;
+    pageOverlay.innerHTML = "";
+
+    if (!ocr.length) {
+      page.dataset.translationState = "empty";
+      renderNotice(pageOverlay, "Aucun texte detecte");
+      return false;
+    }
+
+    const contextSegments = contextForSegments(ocr);
+    const previousTranslations = [];
+    let translatedCount = 0;
+
+    for (let segmentIndex = 0; segmentIndex < ocr.length;) {
+      const batchSize = segmentIndex === 0 ? 1 : progressiveBatchSize(ocr.length - segmentIndex);
+      const batch = ocr.slice(segmentIndex, segmentIndex + batchSize);
+      const endIndex = segmentIndex + batch.length;
+      statusLine.textContent = `Traduction bulle ${segmentIndex + 1}/${ocr.length} - image ${Number(page.dataset.index || "0") + 1}...`;
+      const translated = await translateSegments(batch, contextSegments, previousTranslations);
+
+      for (const segment of translated) {
+        renderSegmentIntoOverlay(pageOverlay, segment);
+        previousTranslations.push({
+          source: segment.sourceText || "",
+          translation: segment.translatedText || ""
+        });
+        translatedCount += 1;
+      }
+      segmentIndex = endIndex;
+    }
+
+    page.dataset.translationState = translatedCount ? "done" : "empty";
+    return translatedCount > 0;
+  } catch (error) {
+    page.dataset.translationState = "error";
+    renderNotice(pageOverlay, error && error.message ? error.message : String(error));
+    return false;
+  }
 }
 
 function readerPagesForTranslation() {
   const allPages = Array.from(document.querySelectorAll(".reader-page"));
-  const firstUnloadedIndex = allPages.findIndex((page) => page.dataset.loaded !== "true");
-  const pages = allPages.filter((page) => {
-    const pageIndex = Number(page.dataset.index || "0");
-    return page.dataset.loaded === "true" && (firstUnloadedIndex === -1 || pageIndex < firstUnloadedIndex);
-  });
-  const margin = window.innerHeight * 1.35;
+  const pages = allPages.filter((page) => page.dataset.loaded === "true");
+  const margin = window.innerHeight * 2.05;
   const visiblePages = pages.filter((page) => {
     const rect = page.getBoundingClientRect();
     return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
   });
 
   return visiblePages.length ? visiblePages : pages.slice(0, 1);
+}
+
+function scheduleAutoTranslate() {
+  if (!autoTranslateEnabled || !stage.classList.contains("feed-mode")) return;
+  window.clearTimeout(translateScrollTimer);
+  translateScrollTimer = window.setTimeout(() => {
+    translateReaderImages().catch((error) => {
+      statusLine.textContent = error && error.message ? error.message : String(error);
+    });
+  }, 260);
 }
 
 async function translateCapture() {
@@ -242,9 +298,7 @@ async function translateCapture() {
     return;
   }
 
-  const translated = await translateSegments(ocr);
-  renderIntoOverlay(overlay, translated);
-  statusLine.textContent = `OK: ${translated.length} lignes traduites avec OCR local.`;
+  await translateOverlayProgressively(overlay, ocr, "capture");
 }
 
 async function ocrImage(payload) {
@@ -252,7 +306,36 @@ async function ocrImage(payload) {
   return result.segments || [];
 }
 
-async function translateSegments(segments) {
+async function translateOverlayProgressively(targetOverlay, segments, label) {
+  targetOverlay.innerHTML = "";
+  const contextSegments = contextForSegments(segments);
+  const previousTranslations = [];
+  let translatedCount = 0;
+
+  for (let index = 0; index < segments.length;) {
+    const batchSize = index === 0 ? 1 : progressiveBatchSize(segments.length - index);
+    const batch = segments.slice(index, index + batchSize);
+    const endIndex = index + batch.length;
+    statusLine.textContent = `Traduction bulle ${index + 1}/${segments.length} - ${label}...`;
+    const translated = await translateSegments(batch, contextSegments, previousTranslations);
+
+    for (const segment of translated) {
+      renderSegmentIntoOverlay(targetOverlay, segment);
+      previousTranslations.push({
+        source: segment.sourceText || "",
+        translation: segment.translatedText || ""
+      });
+      translatedCount += 1;
+    }
+    index = endIndex;
+  }
+
+  statusLine.textContent = translatedCount
+    ? `OK: ${translatedCount} bulles traduites avec OCR local.`
+    : "OCR termine, mais aucun texte lisible n'a ete traduit.";
+}
+
+async function translateSegments(segments, contextSegments = [], previousTranslations = []) {
   const payload = await postJSON("/v1/webtoon/translate", {
     sourceLanguage: ocrLanguage.value,
     targetLanguage: "fr",
@@ -262,9 +345,24 @@ async function translateSegments(segments) {
       { id: "astra", source: "Astra", translation: "Astra", category: "power", isLocked: true },
       { id: "north-blade", source: "Lame du nord", translation: "Lame du Nord", category: "power", isLocked: true }
     ],
+    contextSegments,
+    previousTranslations,
     segments
   });
   return payload.segments || [];
+}
+
+function contextForSegments(segments) {
+  return segments.map((segment, index) => ({
+    id: segment.id || `segment-${index}`,
+    order: Number(segment.readingOrder ?? index),
+    text: segment.sourceText || segment.text || ""
+  }));
+}
+
+function progressiveBatchSize(remaining) {
+  if (remaining <= 2) return remaining;
+  return remaining >= 8 ? 3 : 2;
 }
 
 async function postJSON(path, payload) {
@@ -288,21 +386,30 @@ function renderIntoOverlay(targetOverlay, segments) {
   targetOverlay.innerHTML = "";
 
   for (const segment of segments) {
-    const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
-    const translatedText = formatBubbleText(segment.translatedText || segment.text || "");
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.dataset.shape = segment.shape || guessBubbleShape(box);
-    bubble.textContent = translatedText;
-    bubble.title = segment.sourceText || "";
-    bubble.style.left = `${box.x * 100}%`;
-    bubble.style.top = `${box.y * 100}%`;
-    bubble.style.width = `${Math.max(0.18, box.width) * 100}%`;
-    bubble.style.height = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
-    bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay, translatedText)}px`;
-    applyBubbleStyle(bubble, segment.style);
-    targetOverlay.appendChild(bubble);
+    renderSegmentIntoOverlay(targetOverlay, segment);
   }
+}
+
+function renderSegmentIntoOverlay(targetOverlay, segment) {
+  const existing = targetOverlay.querySelector(`[data-segment-id="${cssEscape(segment.id || "")}"]`);
+  if (existing) existing.remove();
+
+  const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
+  const translatedText = formatBubbleText(segment.translatedText || segment.text || "");
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.dataset.segmentId = segment.id || "";
+  bubble.dataset.shape = segment.shape || guessBubbleShape(box);
+  bubble.textContent = translatedText;
+  bubble.title = segment.sourceText || "";
+  bubble.style.left = `${box.x * 100}%`;
+  bubble.style.top = `${box.y * 100}%`;
+  bubble.style.width = `${Math.max(0.18, box.width) * 100}%`;
+  bubble.style.height = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
+  bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay, translatedText)}px`;
+  bubble.dataset.length = translatedText.length > 72 ? "long" : "short";
+  applyBubbleStyle(bubble, segment.style, segment.sourceText || "");
+  targetOverlay.appendChild(bubble);
 }
 
 function guessBubbleShape(box) {
@@ -343,12 +450,28 @@ function formatBubbleText(text) {
     .replace(/([?!])\s+([A-Z\u00c0-\u00d6\u00d8-\u00dd])/g, "$1\n$2");
 }
 
-function applyBubbleStyle(bubble, style) {
+function applyBubbleStyle(bubble, style, sourceText = "") {
   if (!style || typeof style !== "object") return;
 
   if (style.fillColor) bubble.style.backgroundColor = style.fillColor;
   if (style.textColor) bubble.style.color = style.textColor;
   if (style.borderColor) bubble.style.borderColor = style.borderColor;
+  if (style.fontFamily) bubble.style.fontFamily = style.fontFamily;
+  if (style.fontWeight) bubble.style.fontWeight = style.fontWeight;
+  if (style.letterSpacing) bubble.style.letterSpacing = style.letterSpacing;
+  if (style.textTransform) bubble.style.textTransform = style.textTransform;
+
+  const letters = sourceText.match(/[A-Za-z]/g) || [];
+  const uppercase = letters.filter((letter) => letter === letter.toUpperCase()).length;
+  if (letters.length >= 6 && uppercase / letters.length > 0.82 && sourceText.length < 95) {
+    bubble.style.textTransform = "uppercase";
+    bubble.style.fontWeight = "900";
+  }
+}
+
+function cssEscape(value) {
+  if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
+  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function renderNotice(targetOverlay, text) {
@@ -373,6 +496,7 @@ function updateReaderStatus(total) {
   }
 
   statusLine.textContent = "Images visibles dans le lecteur. Appuie sur Traduire pour OCR + traduction locale.";
+  scheduleAutoTranslate();
 }
 
 function resetReaderCounters() {

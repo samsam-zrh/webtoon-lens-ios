@@ -972,16 +972,26 @@ def clamp_oversized_bubble_box(
     box_height = y1 - y0
     raw_width = max(1, raw_right - raw_left)
     raw_height = max(1, raw_bottom - raw_top)
+    raw_area = raw_width * raw_height
+    component_area = max(1, box_width * box_height)
     component_ratio = (box_width * box_height) / max(1, image_width * image_height)
+    component_over_text = component_area / max(1, raw_area)
+    if component_over_text > 10.5 or box_height > raw_height * 6.0 or box_width > raw_width * 5.2:
+        return expanded_text_patch_box(
+            raw_box=raw_box,
+            image_width=image_width,
+            image_height=image_height,
+        )
+
     too_wide = box_width > image_width * 0.96
-    too_tall = box_height > image_height * 0.34
-    too_large = component_ratio > 0.24
+    too_tall = box_height > image_height * 0.28
+    too_large = component_ratio > 0.18
 
     if not (too_wide or too_tall or too_large):
         return component_box
 
-    max_width = int(min(image_width * 0.94, max(raw_width * 4.4, image_width * 0.34)))
-    max_height = int(min(image_height * 0.30, max(raw_height * 7.0, image_height * 0.15)))
+    max_width = int(min(image_width * 0.90, max(raw_width * 3.8, image_width * 0.26)))
+    max_height = int(min(image_height * 0.22, max(raw_height * 5.2, image_height * 0.10)))
     center_x = (raw_left + raw_right) // 2
     center_y = (raw_top + raw_bottom) // 2
 
@@ -995,6 +1005,30 @@ def clamp_oversized_bubble_box(
         y0 = max(0, center_y - half_height)
         y1 = min(image_height, center_y + half_height)
 
+    return x0, y0, max(x0 + 1, x1), max(y0 + 1, y1)
+
+
+def expanded_text_patch_box(
+    *,
+    raw_box: tuple[int, int, int, int],
+    image_width: int,
+    image_height: int,
+) -> tuple[int, int, int, int]:
+    raw_left, raw_top, raw_right, raw_bottom = raw_box
+    raw_width = max(1, raw_right - raw_left)
+    raw_height = max(1, raw_bottom - raw_top)
+    center_x = (raw_left + raw_right) // 2
+    center_y = (raw_top + raw_bottom) // 2
+
+    target_width = int(min(image_width * 0.78, max(raw_width * 1.7, raw_width + image_width * 0.055)))
+    target_height = int(min(image_height * 0.15, max(raw_height * 2.1, raw_height + image_height * 0.018)))
+    half_width = max(raw_width // 2 + 2, target_width // 2)
+    half_height = max(raw_height // 2 + 2, target_height // 2)
+
+    x0 = max(0, center_x - half_width)
+    y0 = max(0, center_y - half_height)
+    x1 = min(image_width, center_x + half_width)
+    y1 = min(image_height, center_y + half_height)
     return x0, y0, max(x0 + 1, x1), max(y0 + 1, y1)
 
 
@@ -1187,6 +1221,8 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         for item in payload.get("glossary", [])
         if item.get("isLocked") and item.get("source") and item.get("translation")
     ]
+    context_segments = compact_context_segments(payload.get("contextSegments", []))
+    previous_translations = compact_previous_translations(payload.get("previousTranslations", []))
 
     prepared_segments: list[dict[str, Any]] = []
     detected_language: str | None = None
@@ -1208,7 +1244,12 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    ollama_translations = translate_segments_with_ollama(prepared_segments, glossary)
+    ollama_translations = translate_segments_with_ollama(
+        prepared_segments,
+        glossary,
+        context_segments,
+        previous_translations,
+    )
 
     translated_segments = []
     for item in prepared_segments:
@@ -1221,6 +1262,7 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             translated = restore_protected_terms(translated, item["protectedTerms"])
         else:
             translated = translate_text_to_french(source, source_language)
+        translated = enforce_phrase_translations(source, translated)
         translated = apply_locked_glossary(source, translated, glossary)
         translated_segments.append(
             {
@@ -1233,7 +1275,7 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "rawBoundingBox": segment.get("rawBoundingBox"),
                 "shape": segment.get("shape", "rounded"),
-                "style": segment.get("style"),
+                "style": style_for_translated_segment(segment, source),
                 "confidence": float(segment.get("confidence", 0.75)),
                 "readingOrder": int(segment.get("readingOrder", index)),
             }
@@ -1245,6 +1287,29 @@ def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "glossaryUpdates": [],
         "confidence": 0.7,
     }
+
+
+def style_for_translated_segment(segment: dict[str, Any], source: str) -> dict[str, str]:
+    raw_style = segment.get("style")
+    style: dict[str, str] = dict(raw_style) if isinstance(raw_style, dict) else {}
+    letters = re.findall(r"[A-Za-z]", source)
+    uppercase_ratio = sum(1 for letter in letters if letter.isupper()) / max(1, len(letters))
+    source_length = len(source.strip())
+
+    style.setdefault(
+        "fontFamily",
+        '"Comic Sans MS", "Trebuchet MS", "Arial Rounded MT Bold", system-ui, sans-serif',
+    )
+    style.setdefault("fontWeight", "900" if uppercase_ratio > 0.72 else "820")
+    style.setdefault("letterSpacing", "0")
+
+    if letters and uppercase_ratio > 0.82 and source_length <= 95:
+        style["textTransform"] = "uppercase"
+    elif source_length > 115:
+        style["fontFamily"] = '"Trebuchet MS", system-ui, sans-serif'
+        style["fontWeight"] = "760"
+
+    return style
 
 
 def translate_text_to_french(text: str, source_language: str) -> str:
@@ -1279,9 +1344,63 @@ def translate_english_to_french(text: str, by_code: dict[str, Any]) -> str:
     return get_argos_translation(by_code, "en", "fr", text)
 
 
+def compact_context_segments(raw_context: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_context, list):
+        return []
+
+    compacted: list[dict[str, Any]] = []
+    for index, item in enumerate(raw_context[:32]):
+        if not isinstance(item, dict):
+            continue
+        text = cleanup_english_ocr_text(str(item.get("text") or ""))
+        if not text or is_ocr_fragment_noise(text):
+            continue
+        compacted.append(
+            {
+                "id": str(item.get("id") or f"context-{index}"),
+                "order": int(float(item.get("order", index) or index)),
+                "text": text,
+            }
+        )
+    return sorted(compacted, key=lambda item: item["order"])
+
+
+def compact_previous_translations(raw_previous: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_previous, list):
+        return []
+
+    compacted: list[dict[str, str]] = []
+    for item in raw_previous[-10:]:
+        if not isinstance(item, dict):
+            continue
+        source = cleanup_english_ocr_text(str(item.get("source") or ""))
+        translation = cleanup_french_webtoon_terms(str(item.get("translation") or "")).strip()
+        if source and translation:
+            compacted.append({"source": source, "translation": translation})
+    return compacted
+
+
+def is_ocr_fragment_noise(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", stripped):
+        return False
+    letters = re.findall(r"[A-Za-z]", stripped)
+    if len(stripped) <= 3 and len(letters) <= 2:
+        return True
+    if re.fullmatch(r"[\W_]+", stripped):
+        return True
+    if re.fullmatch(r"(?:[A-Za-z]\s*){1,3}", stripped):
+        return True
+    return False
+
+
 def translate_segments_with_ollama(
     prepared_segments: list[dict[str, Any]],
     glossary: list[dict[str, Any]],
+    context_segments: list[dict[str, Any]],
+    previous_translations: list[dict[str, str]],
 ) -> dict[str, str]:
     if not prepared_segments or not ollama_model_available():
         return {}
@@ -1296,8 +1415,13 @@ def translate_segments_with_ollama(
             "Ne laisse pas de mots anglais sauf noms propres, lieux, techniques ou titres verrouilles. "
             "Garde exactement les placeholders XWEBTOON0X, XWEBTOON1X, etc. "
             "Garde les noms propres et termes de pouvoir coherents. "
-            "Adapte les cris et reactions au ton d'un webtoon."
+            "Utilise pageContext et previousTranslations seulement pour comprendre la scene et garder la coherence. "
+            "Traduis uniquement les elements dans segments. "
+            "Adapte les cris et reactions au ton d'un webtoon. "
+            "Reste assez court pour tenir dans une bulle."
         ),
+        "pageContext": context_segments,
+        "previousTranslations": previous_translations,
         "glossary": [
             {
                 "source": str(item.get("source", "")),
@@ -1327,6 +1451,8 @@ def translate_segments_with_ollama(
                     "You are a professional EN/JA/KO/ZH to French webtoon translator and OCR cleanup editor. "
                     "Your job is to infer the intended dialogue from noisy OCR, then translate it into natural French. "
                     "Never translate word by word when idiomatic French is needed. "
+                    "Use pageContext for meaning, speaker flow, pronouns, and recurring terms, but translate only the requested segments. "
+                    "Keep the French compact enough for speech bubbles. "
                     "Do not preserve English words unless they are proper nouns or locked glossary terms. "
                     "Return only valid JSON in this exact shape: "
                     "{\"translations\":[{\"id\":\"...\",\"text\":\"...\"}]}. "
@@ -1342,7 +1468,7 @@ def translate_segments_with_ollama(
             "temperature": 0.12,
             "top_p": 0.85,
             "num_ctx": 4096,
-            "num_predict": 96 + 96 * len(payload["segments"]),
+            "num_predict": min(512, 112 + 92 * len(payload["segments"])),
         },
     }
 
@@ -1355,7 +1481,7 @@ def translate_segments_with_ollama(
             method="POST",
         )
         started = time.time()
-        with urllib.request.urlopen(request, timeout=28) as response:
+        with urllib.request.urlopen(request, timeout=24 if len(payload["segments"]) == 1 else 32) as response:
             raw = json.loads(response.read().decode("utf-8"))
         content = str(raw.get("message", {}).get("content", "")).strip()
         parsed = parse_json_object(content)
@@ -1480,15 +1606,49 @@ def restore_protected_terms(text: str, protected_terms: dict[str, str]) -> str:
     return cleanup_french_webtoon_terms(result)
 
 
+def enforce_phrase_translations(source: str, translated: str) -> str:
+    result = translated
+    lowered_source = source.lower()
+
+    if "beast taming sect" in lowered_source or "beast-taming sect" in lowered_source:
+        preferred = WEBTOON_PHRASE_TRANSLATIONS["beast taming sect"]
+        result = re.sub(
+            r"(?:la\s+)?Secte\s+du\s+(?:Domptage|Dressage)\s+des\s+B(?:e|\u00ea)tes",
+            preferred,
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(
+            r"(?:la\s+)?Secte\s+(?:du|de)\s+(?:Domptage|Dressage)\s+des\s+B(?:e|\u00ea)tes",
+            preferred,
+            result,
+            flags=re.IGNORECASE,
+        )
+
+    if "heavenly wind gates" in lowered_source:
+        preferred = WEBTOON_PHRASE_TRANSLATIONS["heavenly wind gates"]
+        result = re.sub(
+            r"(?:les\s+)?Portes\s+du\s+Vent\s+C(?:e|\u00e9)leste",
+            preferred,
+            result,
+            flags=re.IGNORECASE,
+        )
+
+    return cleanup_french_webtoon_terms(result)
+
+
 def cleanup_french_webtoon_terms(text: str) -> str:
     result = re.sub(r"\bLa\s+premi(?:e|\u00e8)re\s+place\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", text, flags=re.IGNORECASE)
     result = re.sub(r"\bLe\s+premier\s+lieu\s+(?:a|\u00e0)\s+regarder", "Le premier endroit ou chercher", result, flags=re.IGNORECASE)
     result = re.sub(r"\ble\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\ble\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bla\s+la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bde\s+la\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\bdu\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdu\s+la\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
     result = re.sub(r"\bdes\s+la\s+Secte", "de la Secte", result, flags=re.IGNORECASE)
-    result = re.sub(r"\bl['’]\s*la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
-    result = re.sub(r"\bdans\s+l['’]([A-Z])", r"dans \1", result)
+    result = re.sub(r"\bl(?:'|\u2019)\s*la\s+Secte", "la Secte", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bdans\s+l(?:'|\u2019)([A-Z])", r"dans \1", result)
     result = re.sub(r"\bLa\s+premi(?:e|\u00e8)re\s+place\s+(?:a|\u00e0)\s+visiter", "Le premier endroit ou chercher", result, flags=re.IGNORECASE)
     result = re.sub(r"\bdes\s+les\s+Portes", "des Portes", result, flags=re.IGNORECASE)
     result = re.sub(r"\bles\s+\u00ab\s+les\s+Portes", "les \u00ab Portes", result, flags=re.IGNORECASE)
