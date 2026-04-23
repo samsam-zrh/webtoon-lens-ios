@@ -14,8 +14,8 @@ body {
   margin: 0;
   min-height: 100svh;
   background:
-    radial-gradient(circle at top left, rgba(22, 140, 125, 0.1), transparent 34%),
-    linear-gradient(180deg, rgba(243, 245, 239, 0.96), rgba(233, 238, 233, 0.98));
+    radial-gradient(circle at top left, rgba(22, 140, 125, 0.14), transparent 28%),
+    linear-gradient(180deg, rgba(245, 247, 241, 0.98), rgba(231, 236, 230, 0.98));
 }
 
 button,
@@ -25,7 +25,7 @@ select {
 }
 
 .app-shell {
-  width: min(100%, 1040px);
+  width: min(100%, 980px);
   margin: 0 auto;
   padding: 18px 18px 28px;
 }
@@ -38,7 +38,7 @@ select {
 .hero-block {
   display: grid;
   gap: 10px;
-  padding-top: 6px;
+  padding: 10px 0 4px;
 }
 
 .hero-row {
@@ -49,7 +49,7 @@ select {
 .hero-copy {
   display: grid;
   gap: 8px;
-  max-width: 740px;
+  max-width: 660px;
 }
 
 .hero-copy p {
@@ -152,17 +152,21 @@ button:disabled {
 }
 
 .quick-controls {
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 240px);
+  grid-template-columns: minmax(180px, 240px);
+  justify-content: end;
 }
 
 .meta-strip {
-  padding: 2px 0 4px;
+  padding: 4px 0 2px;
+  border-top: 1px solid rgba(17, 17, 17, 0.08);
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+  padding-block: 10px;
 }
 
 .advanced-panel {
   border: 1px solid rgba(17, 17, 17, 0.12);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.7);
   overflow: hidden;
 }
 
@@ -207,7 +211,7 @@ button:disabled {
   background:
     linear-gradient(135deg, rgba(22, 140, 125, 0.12), transparent 34%),
     #ffffff;
-  box-shadow: 0 16px 44px rgba(23, 36, 31, 0.08);
+  box-shadow: 0 18px 46px rgba(23, 36, 31, 0.08);
 }
 
 .stage.feed-mode {
@@ -433,7 +437,7 @@ select {
 
   .ghost-button,
   #openUrlButton,
-  .file-button {
+  .quick-controls {
     width: 100%;
   }
 }

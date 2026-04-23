@@ -22,7 +22,10 @@ const OCR_WINDOW_COVERAGE_THRESHOLD = 0.72;
 const OCR_WINDOWS_PER_PASS = 4;
 const OCR_VIEWPORT_FOCI = [0.48, 0.72, 0.96, 1.14];
 const OCR_WINDOW_DEDUPE_THRESHOLD = 0.66;
-const AUTO_TRANSLATE_DELAY_MS = 140;
+const AUTO_TRANSLATE_DELAY_MS = 90;
+const TRANSLATION_PAGES_PER_PASS = 1;
+const BACKGROUND_TRANSLATION_PAGE_LIMIT = 3;
+const BACKGROUND_TRANSLATION_VIEWPORTS = 5.5;
 
 backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
 webtoonUrl.value = localStorage.getItem("webtoonLensUrl") || "";
@@ -46,16 +49,18 @@ updateChapterNavigation(webtoonUrl.value);
 window.addEventListener("scroll", scheduleAutoTranslate, { passive: true });
 window.addEventListener("resize", scheduleAutoTranslate);
 
-imageInput.addEventListener("change", () => {
-  const file = imageInput.files && imageInput.files[0];
-  if (!file) return;
+if (imageInput) {
+  imageInput.addEventListener("change", () => {
+    const file = imageInput.files && imageInput.files[0];
+    if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    prepareCapture(String(reader.result || ""));
-  };
-  reader.readAsDataURL(file);
-});
+    const reader = new FileReader();
+    reader.onload = () => {
+      prepareCapture(String(reader.result || ""));
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 openUrlButton.addEventListener("click", () => {
   openWebtoonUrl().catch((error) => {
@@ -102,7 +107,7 @@ async function openWebtoonUrl(urlOverride = "") {
 
   setOpenButtonBusy(true);
   readerSummary.textContent = "";
-  statusLine.textContent = "Ouverture du chapitre et extraction des images...";
+  statusLine.textContent = "Ouverture du chapitre, extraction des images et prechauffe de la traduction...";
 
   try {
     warmupLocalModel();
@@ -280,7 +285,7 @@ function renderImageFeed(images) {
     emptyState.querySelector("strong").textContent = "Aucune image trouvee";
     emptyState.querySelector("span").textContent = "Certains sites chargent les images avec JavaScript, demandent une connexion, ou bloquent le proxy local.";
     readerSummary.textContent = "0 image extraite.";
-    statusLine.textContent = "Essaie un lien direct d'episode avec images publiques, ou ajoute une capture.";
+    statusLine.textContent = "Essaie un lien direct d'episode avec images publiques.";
     return;
   }
 
@@ -325,7 +330,7 @@ function renderImageFeed(images) {
   }
 
   readerSummary.textContent = `${images.length} images trouvees. Chargement en cours...`;
-  statusLine.textContent = "Le lecteur charge le chapitre. Les premieres bulles partiront toutes seules.";
+  statusLine.textContent = "Le lecteur charge le chapitre. La traduction se lance et continuera automatiquement.";
   scheduleAutoTranslate();
 }
 
@@ -338,7 +343,7 @@ function proxyImageUrl(url) {
 async function translateReaderImages() {
   const sessionId = contentSessionId;
   autoTranslateEnabled = true;
-  const pages = readerPagesForTranslation().filter((page) => pageHasUntranslatedVisibleWindow(page));
+  const pages = readerPagesForTranslation().filter((page) => pageNeedsTranslation(page)).slice(0, TRANSLATION_PAGES_PER_PASS);
   if (!pages.length) {
     if (!loadedImages && !failedImages) {
       statusLine.textContent = "Chargement des premieres images...";
@@ -346,8 +351,8 @@ async function translateReaderImages() {
     }
     const running = document.querySelector(".reader-page[data-translation-state='running']");
     statusLine.textContent = running
-      ? "Traduction en cours sur la page visible..."
-      : "Continue a scroller: la prochaine zone non traduite partira automatiquement.";
+      ? "Traduction en cours..."
+      : "Les premieres zones sont pretes. Continue a lire, la suite partira toute seule.";
     return;
   }
 
@@ -360,8 +365,8 @@ async function translateReaderImages() {
 
   if (isStaleSession(sessionId)) return;
   statusLine.textContent = translatedPages
-    ? `OK: ${translatedPages} image(s) lancee(s). Scroll: les suivantes se traduisent quand elles arrivent.`
-    : "OCR termine, mais aucun texte lisible n'a ete detecte.";
+    ? `OK: ${translatedPages} image(s) avancee(s). La traduction continue en fond.`
+    : "Analyse en cours. La traduction avance zone par zone.";
   scheduleAutoTranslate();
 }
 
@@ -446,12 +451,12 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
   }
 }
 
-function pageHasUntranslatedVisibleWindow(page) {
+function pageNeedsTranslation(page) {
   if (page.dataset.loaded !== "true" || page.dataset.translationState === "running" || page.dataset.translationState === "done") {
     return false;
   }
 
-  return currentVisibleWindows(page).some((cropWindow) => !visibleWindowAlreadyCovered(page, cropWindow));
+  return translationWindowCandidates(page).some((cropWindow) => !visibleWindowAlreadyCovered(page, cropWindow));
 }
 
 function currentVisibleWindow(page) {
@@ -506,9 +511,52 @@ function uniqueWindows(windows) {
   return unique;
 }
 
+function translationWindowCandidates(page) {
+  const visible = currentVisibleWindows(page).filter((candidate) => !visibleWindowAlreadyCovered(page, candidate));
+  if (visible.length) return visible;
+  return backgroundWindowCandidates(page).filter((candidate) => !visibleWindowAlreadyCovered(page, candidate));
+}
+
+function backgroundWindowCandidates(page) {
+  if (!pageEligibleForBackgroundTranslation(page)) return [];
+  const nextWindow = nextSequentialWindow(page);
+  return nextWindow ? [nextWindow] : [];
+}
+
+function pageEligibleForBackgroundTranslation(page) {
+  const pageIndex = Number(page.dataset.index || "0");
+  if (pageIndex < BACKGROUND_TRANSLATION_PAGE_LIMIT) return true;
+  const rect = page.getBoundingClientRect();
+  return rect.top <= window.innerHeight * BACKGROUND_TRANSLATION_VIEWPORTS;
+}
+
+function nextSequentialWindow(page) {
+  const img = page.querySelector("img");
+  if (!img || !img.naturalHeight) return null;
+
+  const merged = mergeWindows(page.__ocrWindows || []);
+  const normalizedMaxHeight = clamp01(OCR_WINDOW_MAX_NATURAL_HEIGHT / Math.max(1, img.naturalHeight));
+  const minimumGap = Math.max(0.03, normalizedMaxHeight * 0.32);
+  let cursor = 0;
+
+  for (const windowRange of merged) {
+    if (windowRange.y - cursor > minimumGap) {
+      break;
+    }
+    cursor = Math.max(cursor, windowRange.y + windowRange.height);
+  }
+
+  if (cursor >= 0.985) return null;
+  const height = Math.min(1 - cursor, Math.max(0.08, normalizedMaxHeight));
+  return {
+    y: clamp01(cursor),
+    height: clamp01(height)
+  };
+}
+
 async function visibleImageCrop(page) {
   const img = page.querySelector("img");
-  const cropWindow = currentVisibleWindows(page).find((candidate) => !visibleWindowAlreadyCovered(page, candidate));
+  const cropWindow = translationWindowCandidates(page)[0];
   if (!img || !cropWindow) return null;
 
   const cropY = Math.max(0, Math.floor(cropWindow.y * img.naturalHeight));
@@ -639,15 +687,26 @@ function clamp01(value) {
 }
 
 function readerPagesForTranslation() {
-  const allPages = Array.from(document.querySelectorAll(".reader-page"));
-  const pages = allPages.filter((page) => page.dataset.loaded === "true");
+  const pages = Array.from(document.querySelectorAll(".reader-page"))
+    .filter((page) => page.dataset.loaded === "true")
+    .sort((a, b) => Number(a.dataset.index || "0") - Number(b.dataset.index || "0"));
   const margin = window.innerHeight * 2.05;
   const visiblePages = pages.filter((page) => {
     const rect = page.getBoundingClientRect();
     return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
   });
+  const backgroundPages = pages.filter((page) => !visiblePages.includes(page) && pageEligibleForBackgroundTranslation(page));
 
-  return visiblePages.length ? visiblePages : pages.slice(0, 1);
+  return uniquePageList([...visiblePages, ...backgroundPages, ...pages.slice(0, BACKGROUND_TRANSLATION_PAGE_LIMIT)]);
+}
+
+function uniquePageList(pages) {
+  const seen = new Set();
+  return pages.filter((page) => {
+    if (seen.has(page)) return false;
+    seen.add(page);
+    return true;
+  });
 }
 
 function scheduleAutoTranslate() {
@@ -924,7 +983,7 @@ function updateReaderStatus(total) {
   }
 
   statusLine.textContent = loadedImages
-    ? "Images visibles dans le lecteur. La traduction continue au fil du scroll."
+    ? "Images visibles dans le lecteur. La traduction continue en arriere-plan."
     : "Chargement des premieres images...";
   scheduleAutoTranslate();
 }
