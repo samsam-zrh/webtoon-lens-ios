@@ -17,6 +17,9 @@ const OCR_WINDOW_MARGIN_BEFORE = 0.12;
 const OCR_WINDOW_MARGIN_AFTER = 0.42;
 const OCR_WINDOW_MAX_NATURAL_HEIGHT = 2500;
 const OCR_WINDOW_COVERAGE_THRESHOLD = 0.72;
+const OCR_WINDOWS_PER_PASS = 4;
+const OCR_VIEWPORT_FOCI = [0.48, 0.72, 0.96, 1.14];
+const OCR_WINDOW_DEDUPE_THRESHOLD = 0.66;
 
 backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
 webtoonUrl.value = localStorage.getItem("webtoonLensUrl") || "";
@@ -219,7 +222,7 @@ async function translatePageProgressively(page, pageNumber, totalPages) {
   if (!pageOverlay || !imageUrl) return false;
   if (page.dataset.translationState === "running") return false;
 
-  const crop = await visibleImageCrop(page);
+  let crop = await visibleImageCrop(page);
   if (!crop || visibleWindowAlreadyCovered(page, crop.window)) return false;
 
   page.dataset.translationState = "running";
@@ -227,52 +230,58 @@ async function translatePageProgressively(page, pageNumber, totalPages) {
   statusLine.textContent = `OCR zone visible ${pageNumber}/${totalPages}...`;
 
   try {
-    const cropOcr = await ocrImage({
-      imageData: crop.dataUrl,
-      language: ocrLanguage.value,
-      cacheKey: `${imageUrl}:${crop.cacheKey}`
-    });
-    const ocr = mapCropSegmentsToPage(cropOcr, crop, page);
-    rememberProcessedWindow(page, crop.window);
-    clearOverlayNotice(pageOverlay);
-
-    if (!ocr.length) {
-      page.dataset.translationState = "idle";
-      if (!pageOverlay.querySelector(".bubble")) showOverlayNotice(pageOverlay, "Aucun texte detecte ici");
-      return false;
-    }
-
-    page.__ocrSegments = mergeSegmentLists(page.__ocrSegments || [], ocr);
-    const freshSegments = newSegmentsForPage(page, ocr);
-    if (!freshSegments.length) {
-      page.dataset.translationState = "idle";
-      return false;
-    }
-
-    const contextSegments = contextForSegments(page.__ocrSegments);
     const previousTranslations = page.__previousTranslations || [];
     let translatedCount = 0;
+    let processedWindows = 0;
 
-    for (let segmentIndex = 0; segmentIndex < freshSegments.length;) {
-      const batchSize = segmentIndex === 0 ? 1 : progressiveBatchSize(freshSegments.length - segmentIndex);
-      const batch = freshSegments.slice(segmentIndex, segmentIndex + batchSize);
-      const endIndex = segmentIndex + batch.length;
-      statusLine.textContent = `Traduction bulle ${segmentIndex + 1}/${freshSegments.length} - image ${Number(page.dataset.index || "0") + 1}...`;
-      const translated = await translateSegments(batch, contextSegments, previousTranslations);
+    while (crop && processedWindows < OCR_WINDOWS_PER_PASS) {
+      showOverlayNotice(pageOverlay, `OCR zone ${Number(page.dataset.index || "0") + 1}...`);
+      statusLine.textContent = `OCR zone visible ${pageNumber}/${totalPages}...`;
 
-      for (const segment of translated) {
-        renderSegmentIntoOverlay(pageOverlay, segment);
-        rememberTranslatedSegment(page, segment);
-        previousTranslations.push({
-          source: segment.sourceText || "",
-          translation: segment.translatedText || ""
-        });
-        translatedCount += 1;
+      const cropOcr = await ocrImage({
+        imageData: crop.dataUrl,
+        language: ocrLanguage.value,
+        cacheKey: `${imageUrl}:${crop.cacheKey}`
+      });
+      const ocr = mapCropSegmentsToPage(cropOcr, crop, page);
+      rememberProcessedWindow(page, crop.window);
+      clearOverlayNotice(pageOverlay);
+      processedWindows += 1;
+
+      if (ocr.length) {
+        page.__ocrSegments = mergeSegmentLists(page.__ocrSegments || [], ocr);
+        const freshSegments = newSegmentsForPage(page, ocr);
+        if (freshSegments.length) {
+          const contextSegments = contextForSegments(page.__ocrSegments);
+
+          for (let segmentIndex = 0; segmentIndex < freshSegments.length;) {
+            const batchSize = segmentIndex === 0 ? 1 : progressiveBatchSize(freshSegments.length - segmentIndex);
+            const batch = freshSegments.slice(segmentIndex, segmentIndex + batchSize);
+            const endIndex = segmentIndex + batch.length;
+            statusLine.textContent = `Traduction bulle ${segmentIndex + 1}/${freshSegments.length} - image ${Number(page.dataset.index || "0") + 1}...`;
+            const translated = await translateSegments(batch, contextSegments, previousTranslations);
+
+            for (const segment of translated) {
+              renderSegmentIntoOverlay(pageOverlay, segment);
+              rememberTranslatedSegment(page, segment);
+              previousTranslations.push({
+                source: segment.sourceText || "",
+                translation: segment.translatedText || ""
+              });
+              translatedCount += 1;
+            }
+            segmentIndex = endIndex;
+          }
+        }
       }
-      segmentIndex = endIndex;
+
+      crop = await visibleImageCrop(page);
     }
 
     page.__previousTranslations = previousTranslations.slice(-14);
+    if (!translatedCount && !pageOverlay.querySelector(".bubble")) {
+      showOverlayNotice(pageOverlay, "Aucun texte detecte ici");
+    }
     page.dataset.translationState = pageFullyCovered(page) ? "done" : "idle";
     return translatedCount > 0;
   } catch (error) {
@@ -318,7 +327,7 @@ function currentVisibleWindows(page) {
     return [normalizedWindow(topCss, bottomCss, rect.height)];
   }
 
-  const focusWindows = [0.54, 0.88].map((viewportRatio) => {
+  const focusWindows = OCR_VIEWPORT_FOCI.map((viewportRatio) => {
     const focusCss = Math.min(rect.height, Math.max(0, -rect.top + window.innerHeight * viewportRatio));
     const focusedTop = Math.max(0, Math.min(focusCss - maxCssHeight * 0.56, rect.height - maxCssHeight));
     return normalizedWindow(focusedTop, Math.min(rect.height, focusedTop + maxCssHeight), rect.height);
@@ -337,7 +346,7 @@ function normalizedWindow(topCss, bottomCss, imageCssHeight) {
 function uniqueWindows(windows) {
   const unique = [];
   for (const cropWindow of windows) {
-    if (!unique.some((existing) => coveredRatio(cropWindow, [existing]) > 0.82)) {
+    if (!unique.some((existing) => coveredRatio(cropWindow, [existing]) > OCR_WINDOW_DEDUPE_THRESHOLD)) {
       unique.push(cropWindow);
     }
   }
