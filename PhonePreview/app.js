@@ -289,43 +289,64 @@ function pageHasUntranslatedVisibleWindow(page) {
     return false;
   }
 
-  const cropWindow = currentVisibleWindow(page);
-  return Boolean(cropWindow && !visibleWindowAlreadyCovered(page, cropWindow));
+  return currentVisibleWindows(page).some((cropWindow) => !visibleWindowAlreadyCovered(page, cropWindow));
 }
 
 function currentVisibleWindow(page) {
+  return currentVisibleWindows(page)[0] || null;
+}
+
+function currentVisibleWindows(page) {
   const img = page.querySelector("img");
-  if (!img || !img.complete || !img.naturalWidth || !img.naturalHeight) return null;
+  if (!img || !img.complete || !img.naturalWidth || !img.naturalHeight) return [];
 
   const rect = img.getBoundingClientRect();
   if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
     const preloadMargin = window.innerHeight * 1.8;
-    if (rect.bottom < -preloadMargin || rect.top > window.innerHeight + preloadMargin) return null;
+    if (rect.bottom < -preloadMargin || rect.top > window.innerHeight + preloadMargin) return [];
   }
 
   const before = window.innerHeight * OCR_WINDOW_MARGIN_BEFORE;
   const after = window.innerHeight * OCR_WINDOW_MARGIN_AFTER;
   let topCss = Math.max(0, -rect.top - before);
   let bottomCss = Math.min(rect.height, window.innerHeight - rect.top + after);
-  if (bottomCss <= topCss + 24) return null;
+  if (bottomCss <= topCss + 24) return [];
 
   const scaleY = img.naturalHeight / Math.max(1, rect.height);
   const maxCssHeight = OCR_WINDOW_MAX_NATURAL_HEIGHT / Math.max(0.001, scaleY);
-  if (bottomCss - topCss > maxCssHeight) {
-    const focusCss = Math.min(rect.height, Math.max(0, -rect.top + window.innerHeight * 0.56));
-    topCss = Math.max(0, Math.min(focusCss - maxCssHeight * 0.56, rect.height - maxCssHeight));
-    bottomCss = Math.min(rect.height, topCss + maxCssHeight);
+  if (bottomCss - topCss <= maxCssHeight) {
+    return [normalizedWindow(topCss, bottomCss, rect.height)];
   }
 
+  const focusWindows = [0.54, 0.88].map((viewportRatio) => {
+    const focusCss = Math.min(rect.height, Math.max(0, -rect.top + window.innerHeight * viewportRatio));
+    const focusedTop = Math.max(0, Math.min(focusCss - maxCssHeight * 0.56, rect.height - maxCssHeight));
+    return normalizedWindow(focusedTop, Math.min(rect.height, focusedTop + maxCssHeight), rect.height);
+  });
+
+  return uniqueWindows(focusWindows);
+}
+
+function normalizedWindow(topCss, bottomCss, imageCssHeight) {
   return {
-    y: clamp01(topCss / Math.max(1, rect.height)),
-    height: clamp01((bottomCss - topCss) / Math.max(1, rect.height))
+    y: clamp01(topCss / Math.max(1, imageCssHeight)),
+    height: clamp01((bottomCss - topCss) / Math.max(1, imageCssHeight))
   };
+}
+
+function uniqueWindows(windows) {
+  const unique = [];
+  for (const cropWindow of windows) {
+    if (!unique.some((existing) => coveredRatio(cropWindow, [existing]) > 0.82)) {
+      unique.push(cropWindow);
+    }
+  }
+  return unique;
 }
 
 async function visibleImageCrop(page) {
   const img = page.querySelector("img");
-  const cropWindow = currentVisibleWindow(page);
+  const cropWindow = currentVisibleWindows(page).find((candidate) => !visibleWindowAlreadyCovered(page, candidate));
   if (!img || !cropWindow) return null;
 
   const cropY = Math.max(0, Math.floor(cropWindow.y * img.naturalHeight));

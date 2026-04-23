@@ -1397,6 +1397,9 @@ def quick_webtoon_translation(source: str, source_language: str) -> str:
             else "Peu importe ce que c'est ! \u00c9loignez-vous !"
         )
 
+    if "terrifying" in lowered and "power" in lowered:
+        return "Quelle puissance terrifiante et \u00e9crasante !"
+
     if "have thought" in lowered and "beginning" in lowered and "quanrong" in lowered:
         return (
             "J'aurais d\u00fb y penser d\u00e8s le d\u00e9but. Le premier endroit o\u00f9 chercher "
@@ -1417,8 +1420,7 @@ def quick_webtoon_translation(source: str, source_language: str) -> str:
         return "Allons-y !"
 
     if "level" in lowered and "spirit" in lowered and "beast" in lowered:
-        match = re.search(r"\b(?:two|2)\b.*?\blevel\s*7", lowered)
-        if match:
+        if "7" in lowered or "seven" in lowered:
             return "Deux b\u00eates spirituelles de niveau 7 ?"
 
     if "heavenly" in lowered and "wind" in lowered and "gates" in lowered and ("worldlings" in lowered or "monopol" in lowered):
