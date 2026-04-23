@@ -11,42 +11,37 @@
 <body>
   <main class="app-shell">
     <section class="workspace" aria-label="Lecteur Webtoon Lens">
-      <div class="reader-head">
-        <div>
-          <p class="eyebrow">Preview mobile</p>
-          <h1>Webtoon Lens</h1>
+      <header class="hero-block">
+        <p class="eyebrow">Preview mobile locale</p>
+        <div class="hero-row">
+          <div class="hero-copy">
+            <h1>Webtoon Lens</h1>
+            <p>Ouvre un chapitre ou ajoute une capture. La traduction demarre toute seule pendant la lecture.</p>
+          </div>
+          <p id="capabilityLine" class="capability-pill">Verification du backend...</p>
         </div>
-        <button id="translateButton" type="button">Traduire</button>
-      </div>
+      </header>
 
       <div class="url-loader">
-        <label>
-          Lien du webtoon
-          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/episode-1">
+        <label class="url-field">
+          Lien du scan
+          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/episode-843/">
         </label>
-        <button id="openUrlButton" type="button">Ouvrir le lien</button>
+        <button id="openUrlButton" type="button">Ouvrir</button>
       </div>
 
-      <div class="stage" id="stage">
-        <div id="imageReader" class="image-reader"></div>
-        <img id="previewImage" alt="Capture webtoon importee">
-        <div id="emptyState" class="empty-state">
-          <strong>Colle un lien</strong>
-          <span>Ouvre un episode webtoon ici, ou choisis une capture depuis ton telephone.</span>
-        </div>
-        <div id="overlay" class="overlay" aria-live="polite"></div>
+      <div class="chapter-nav" aria-label="Navigation chapitre">
+        <button id="prevChapterButton" type="button" class="ghost-button" disabled>Scan precedent</button>
+        <p id="chapterHint" class="status-line">Colle un lien de chapitre pour activer la navigation rapide.</p>
+        <button id="nextChapterButton" type="button" class="ghost-button" disabled>Scan suivant</button>
       </div>
 
-      <div class="controls">
+      <div class="quick-controls">
         <label class="file-button">
           <input id="imageInput" type="file" accept="image/*">
-          Ou choisir une capture
+          Ajouter une capture
         </label>
-        <label>
-          Backend OCR/IA optionnel
-          <input id="backendUrl" type="url" placeholder="https://api.example.com">
-        </label>
-        <label>
+        <label class="compact-field">
           Langue OCR
           <select id="ocrLanguage">
             <option value="auto">Auto</option>
@@ -56,26 +51,30 @@
             <option value="en">Anglais</option>
           </select>
         </label>
-        <p id="readerSummary" class="status-line"></p>
-        <p id="capabilityLine" class="status-line">Verification du backend...</p>
-        <p id="statusLine" class="status-line">Colle un lien d'episode ou choisis une capture.</p>
       </div>
-    </section>
 
-    <section class="glossary" aria-label="Glossaire">
-      <div class="section-title">
-        <p class="eyebrow">Glossaire</p>
-        <h2>Coherence visee</h2>
+      <details class="advanced-panel">
+        <summary>Reglages avances</summary>
+        <label>
+          Backend OCR/IA optionnel
+          <input id="backendUrl" type="url" placeholder="https://api.example.com">
+        </label>
+      </details>
+
+      <div class="meta-strip">
+        <p id="statusLine" class="status-line primary-status">Colle un lien d'episode ou ajoute une capture.</p>
+        <p id="readerSummary" class="status-line"></p>
       </div>
-      <div class="term-row">
-        <span>Astra</span>
-        <strong>Astra</strong>
+
+      <div class="stage" id="stage">
+        <div id="imageReader" class="image-reader"></div>
+        <img id="previewImage" alt="Capture webtoon importee">
+        <div id="emptyState" class="empty-state">
+          <strong>Colle un lien</strong>
+          <span>Ouvre un episode webtoon ici, ou ajoute une capture depuis ton telephone.</span>
+        </div>
+        <div id="overlay" class="overlay" aria-live="polite"></div>
       </div>
-      <div class="term-row">
-        <span>Lame du nord</span>
-        <strong>Lame du Nord</strong>
-      </div>
-      <p class="note">La preview utilise maintenant OCR local + traduction locale quand les outils Windows sont installes. Pour les bulles difficiles, choisis la bonne langue OCR avant de traduire.</p>
     </section>
   </main>
 

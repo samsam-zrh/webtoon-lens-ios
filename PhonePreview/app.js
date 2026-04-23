@@ -4,7 +4,6 @@ const emptyState = document.getElementById("emptyState");
 const overlay = document.getElementById("overlay");
 const stage = document.getElementById("stage");
 const imageReader = document.getElementById("imageReader");
-const translateButton = document.getElementById("translateButton");
 const backendUrl = document.getElementById("backendUrl");
 const statusLine = document.getElementById("statusLine");
 const webtoonUrl = document.getElementById("webtoonUrl");
@@ -12,6 +11,9 @@ const openUrlButton = document.getElementById("openUrlButton");
 const capabilityLine = document.getElementById("capabilityLine");
 const readerSummary = document.getElementById("readerSummary");
 const ocrLanguage = document.getElementById("ocrLanguage");
+const prevChapterButton = document.getElementById("prevChapterButton");
+const nextChapterButton = document.getElementById("nextChapterButton");
+const chapterHint = document.getElementById("chapterHint");
 
 const OCR_WINDOW_MARGIN_BEFORE = 0.12;
 const OCR_WINDOW_MARGIN_AFTER = 0.42;
@@ -20,6 +22,7 @@ const OCR_WINDOW_COVERAGE_THRESHOLD = 0.72;
 const OCR_WINDOWS_PER_PASS = 4;
 const OCR_VIEWPORT_FOCI = [0.48, 0.72, 0.96, 1.14];
 const OCR_WINDOW_DEDUPE_THRESHOLD = 0.66;
+const AUTO_TRANSLATE_DELAY_MS = 140;
 
 backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
 webtoonUrl.value = localStorage.getItem("webtoonLensUrl") || "";
@@ -31,12 +34,15 @@ let currentPageUrl = "";
 let currentCaptureDataUrl = "";
 let autoTranslateEnabled = false;
 let translateScrollTimer = 0;
+let contentSessionId = 0;
+let chapterNavigation = { previousUrl: "", nextUrl: "", currentLabel: "" };
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 
 loadCapabilities();
+updateChapterNavigation(webtoonUrl.value);
 window.addEventListener("scroll", scheduleAutoTranslate, { passive: true });
 window.addEventListener("resize", scheduleAutoTranslate);
 
@@ -46,24 +52,26 @@ imageInput.addEventListener("change", () => {
 
   const reader = new FileReader();
   reader.onload = () => {
-    resetReaderCounters();
-    autoTranslateEnabled = false;
-    stage.classList.remove("feed-mode");
-    imageReader.innerHTML = "";
-    currentCaptureDataUrl = String(reader.result);
-    previewImage.src = currentCaptureDataUrl;
-    previewImage.style.display = "block";
-    emptyState.style.display = "none";
-    overlay.innerHTML = "";
-    readerSummary.textContent = "Capture chargee depuis ton telephone.";
-    statusLine.textContent = "Image chargee. Appuie sur Traduire pour lancer OCR + traduction locale.";
+    prepareCapture(String(reader.result || ""));
   };
   reader.readAsDataURL(file);
 });
 
-openUrlButton.addEventListener("click", openWebtoonUrl);
+openUrlButton.addEventListener("click", () => {
+  openWebtoonUrl().catch((error) => {
+    statusLine.textContent = error && error.message ? error.message : String(error);
+  });
+});
 webtoonUrl.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") openWebtoonUrl();
+  if (event.key === "Enter") {
+    event.preventDefault();
+    openWebtoonUrl().catch((error) => {
+      statusLine.textContent = error && error.message ? error.message : String(error);
+    });
+  }
+});
+webtoonUrl.addEventListener("input", () => {
+  updateChapterNavigation(webtoonUrl.value);
 });
 
 backendUrl.addEventListener("input", () => {
@@ -74,49 +82,37 @@ ocrLanguage.addEventListener("change", () => {
   localStorage.setItem("webtoonLensOcrLanguage", ocrLanguage.value);
 });
 
-translateButton.addEventListener("click", async () => {
-  translateButton.disabled = true;
-  translateButton.textContent = "Verification...";
-
-  try {
-    if (stage.classList.contains("feed-mode")) {
-      await translateReaderImages();
-      return;
-    }
-
-    if (previewImage.style.display === "block") {
-      await translateCapture();
-      return;
-    }
-
-    statusLine.textContent = "Ouvre un lien webtoon ou choisis une image avant de traduire.";
-  } catch (error) {
+prevChapterButton.addEventListener("click", () => {
+  navigateChapter(-1).catch((error) => {
     statusLine.textContent = error && error.message ? error.message : String(error);
-  } finally {
-    translateButton.disabled = false;
-    translateButton.textContent = "Traduire";
-  }
+  });
+});
+nextChapterButton.addEventListener("click", () => {
+  navigateChapter(1).catch((error) => {
+    statusLine.textContent = error && error.message ? error.message : String(error);
+  });
 });
 
-async function openWebtoonUrl() {
-  const value = webtoonUrl.value.trim();
+async function openWebtoonUrl(urlOverride = "") {
+  const value = normalizedUrlValue(urlOverride || webtoonUrl.value);
   if (!value) {
     statusLine.textContent = "Colle d'abord un lien.";
     return;
   }
 
-  openUrlButton.disabled = true;
-  openUrlButton.textContent = "Ouverture...";
+  setOpenButtonBusy(true);
   readerSummary.textContent = "";
-  statusLine.textContent = "Extraction des images visibles dans la page...";
+  statusLine.textContent = "Ouverture du chapitre et extraction des images...";
 
   try {
-    const normalized = value.includes("://") ? value : `https://${value}`;
-    webtoonUrl.value = normalized;
-    localStorage.setItem("webtoonLensUrl", normalized);
-    currentPageUrl = normalized;
+    warmupLocalModel();
+    webtoonUrl.value = value;
+    localStorage.setItem("webtoonLensUrl", value);
+    currentPageUrl = value;
+    currentCaptureDataUrl = "";
+    updateChapterNavigation(value);
 
-    const response = await fetch(`/v1/webtoon/extract?url=${encodeURIComponent(normalized)}`);
+    const response = await fetch(`/v1/webtoon/extract?url=${encodeURIComponent(value)}`);
     if (!response.ok) {
       const message = await readError(response);
       throw new Error(message || `Extraction impossible (${response.status})`);
@@ -126,14 +122,154 @@ async function openWebtoonUrl() {
   } catch (error) {
     statusLine.textContent = error && error.message ? error.message : String(error);
   } finally {
-    openUrlButton.disabled = false;
-    openUrlButton.textContent = "Ouvrir le lien";
+    setOpenButtonBusy(false);
   }
 }
 
-function renderImageFeed(images) {
+function normalizedUrlValue(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  return value.includes("://") ? value : `https://${value}`;
+}
+
+function beginContentSession() {
+  contentSessionId += 1;
+  window.clearTimeout(translateScrollTimer);
+  return contentSessionId;
+}
+
+function isStaleSession(sessionId) {
+  return sessionId !== contentSessionId;
+}
+
+function setOpenButtonBusy(isBusy) {
+  openUrlButton.disabled = isBusy;
+  openUrlButton.textContent = isBusy ? "Ouverture..." : "Ouvrir";
+  prevChapterButton.disabled = isBusy || !chapterNavigation.previousUrl;
+  nextChapterButton.disabled = isBusy || !chapterNavigation.nextUrl;
+}
+
+function prepareCapture(dataUrl) {
+  const sessionId = beginContentSession();
   resetReaderCounters();
   autoTranslateEnabled = false;
+  stage.classList.remove("feed-mode");
+  imageReader.innerHTML = "";
+  overlay.innerHTML = "";
+  currentPageUrl = "";
+  currentCaptureDataUrl = dataUrl;
+  previewImage.src = currentCaptureDataUrl;
+  previewImage.style.display = "block";
+  emptyState.style.display = "none";
+  readerSummary.textContent = "Capture chargee depuis ton telephone.";
+  statusLine.textContent = "Capture chargee. OCR + traduction locale en cours...";
+  runAutoCaptureTranslation(sessionId).catch((error) => {
+    if (isStaleSession(sessionId)) return;
+    statusLine.textContent = error && error.message ? error.message : String(error);
+  });
+}
+
+async function runAutoCaptureTranslation(sessionId) {
+  await waitForImageReady(previewImage);
+  await nextFrame();
+  await nextFrame();
+  if (isStaleSession(sessionId)) return;
+  await translateCapture(sessionId);
+}
+
+async function navigateChapter(direction) {
+  const targetUrl = direction < 0 ? chapterNavigation.previousUrl : chapterNavigation.nextUrl;
+  if (!targetUrl) return;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  await openWebtoonUrl(targetUrl);
+}
+
+function updateChapterNavigation(rawValue) {
+  chapterNavigation = deriveChapterNavigation(rawValue);
+  prevChapterButton.disabled = !chapterNavigation.previousUrl || openUrlButton.disabled;
+  nextChapterButton.disabled = !chapterNavigation.nextUrl || openUrlButton.disabled;
+  chapterHint.textContent = chapterNavigation.currentLabel || "Colle un lien de chapitre pour activer la navigation rapide.";
+}
+
+function deriveChapterNavigation(rawValue) {
+  const normalized = normalizedUrlValue(rawValue);
+  if (!normalized) {
+    return { previousUrl: "", nextUrl: "", currentLabel: "" };
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const pathMatch = lastNumericMatch(parsed.pathname);
+    if (pathMatch) {
+      const chapterNumber = Number(pathMatch[0]);
+      return {
+        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "pathname", pathMatch, chapterNumber - 1) : "",
+        nextUrl: buildSteppedUrl(parsed, "pathname", pathMatch, chapterNumber + 1),
+        currentLabel: `Chapitre ${chapterNumber} detecte.`
+      };
+    }
+
+    const searchMatch = lastNumericMatch(parsed.search);
+    if (searchMatch) {
+      const chapterNumber = Number(searchMatch[0]);
+      return {
+        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "search", searchMatch, chapterNumber - 1) : "",
+        nextUrl: buildSteppedUrl(parsed, "search", searchMatch, chapterNumber + 1),
+        currentLabel: `Episode ${chapterNumber} detecte.`
+      };
+    }
+  } catch {
+    return { previousUrl: "", nextUrl: "", currentLabel: "Lien invalide." };
+  }
+
+  return {
+    previousUrl: "",
+    nextUrl: "",
+    currentLabel: "Navigation rapide indisponible sur ce lien."
+  };
+}
+
+function lastNumericMatch(text) {
+  const matches = Array.from(String(text || "").matchAll(/\d+/g));
+  return matches[matches.length - 1] || null;
+}
+
+function buildSteppedUrl(parsedUrl, property, match, targetNumber) {
+  const clone = new URL(parsedUrl.toString());
+  const source = clone[property];
+  const padded = String(targetNumber).padStart(String(match[0]).length, "0");
+  clone[property] = `${source.slice(0, match.index)}${padded}${source.slice(match.index + match[0].length)}`;
+  return clone.toString();
+}
+
+function waitForImageReady(image) {
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onLoad = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Image impossible a charger."));
+    };
+    const cleanup = () => {
+      image.removeEventListener("load", onLoad);
+      image.removeEventListener("error", onError);
+    };
+    image.addEventListener("load", onLoad, { once: true });
+    image.addEventListener("error", onError, { once: true });
+  });
+}
+
+function nextFrame() {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function renderImageFeed(images) {
+  const sessionId = beginContentSession();
+  resetReaderCounters();
+  autoTranslateEnabled = true;
   stage.classList.add("feed-mode");
   previewImage.style.display = "none";
   overlay.innerHTML = "";
@@ -144,7 +280,7 @@ function renderImageFeed(images) {
     emptyState.querySelector("strong").textContent = "Aucune image trouvee";
     emptyState.querySelector("span").textContent = "Certains sites chargent les images avec JavaScript, demandent une connexion, ou bloquent le proxy local.";
     readerSummary.textContent = "0 image extraite.";
-    statusLine.textContent = "Essaie un lien direct d'episode avec images publiques, ou choisis une capture.";
+    statusLine.textContent = "Essaie un lien direct d'episode avec images publiques, ou ajoute une capture.";
     return;
   }
 
@@ -154,6 +290,7 @@ function renderImageFeed(images) {
     page.className = "reader-page";
     page.dataset.index = String(index);
     page.dataset.sourceUrl = image.url;
+    page.dataset.sessionId = String(sessionId);
 
     const badge = document.createElement("div");
     badge.className = "page-badge";
@@ -163,12 +300,16 @@ function renderImageFeed(images) {
     img.src = proxyImageUrl(image.url);
     img.alt = image.alt || `Image webtoon ${index + 1}`;
     img.loading = index < 3 ? "eager" : "lazy";
+    img.decoding = "async";
+    img.fetchPriority = index < 2 ? "high" : "auto";
     img.addEventListener("load", () => {
+      if (isStaleSession(sessionId)) return;
       loadedImages += 1;
       page.dataset.loaded = "true";
       updateReaderStatus(images.length);
     });
     img.addEventListener("error", () => {
+      if (isStaleSession(sessionId)) return;
       failedImages += 1;
       page.classList.add("load-error");
       badge.textContent = `Image ${index + 1} bloquee`;
@@ -184,7 +325,8 @@ function renderImageFeed(images) {
   }
 
   readerSummary.textContent = `${images.length} images trouvees. Chargement en cours...`;
-  statusLine.textContent = "Le lecteur charge les images. Appuie sur Traduire pour lancer OCR + traduction locale.";
+  statusLine.textContent = "Le lecteur charge le chapitre. Les premieres bulles partiront toutes seules.";
+  scheduleAutoTranslate();
 }
 
 function proxyImageUrl(url) {
@@ -194,9 +336,14 @@ function proxyImageUrl(url) {
 }
 
 async function translateReaderImages() {
+  const sessionId = contentSessionId;
   autoTranslateEnabled = true;
   const pages = readerPagesForTranslation().filter((page) => pageHasUntranslatedVisibleWindow(page));
   if (!pages.length) {
+    if (!loadedImages && !failedImages) {
+      statusLine.textContent = "Chargement des premieres images...";
+      return;
+    }
     const running = document.querySelector(".reader-page[data-translation-state='running']");
     statusLine.textContent = running
       ? "Traduction en cours sur la page visible..."
@@ -206,21 +353,24 @@ async function translateReaderImages() {
 
   let translatedPages = 0;
   for (const [index, page] of pages.entries()) {
-    const translated = await translatePageProgressively(page, index + 1, pages.length);
+    if (isStaleSession(sessionId)) return;
+    const translated = await translatePageProgressively(page, index + 1, pages.length, sessionId);
     if (translated) translatedPages += 1;
   }
 
+  if (isStaleSession(sessionId)) return;
   statusLine.textContent = translatedPages
     ? `OK: ${translatedPages} image(s) lancee(s). Scroll: les suivantes se traduisent quand elles arrivent.`
     : "OCR termine, mais aucun texte lisible n'a ete detecte.";
   scheduleAutoTranslate();
 }
 
-async function translatePageProgressively(page, pageNumber, totalPages) {
+async function translatePageProgressively(page, pageNumber, totalPages, sessionId = contentSessionId) {
   const pageOverlay = page.querySelector(".overlay");
   const imageUrl = page.dataset.sourceUrl || "";
   if (!pageOverlay || !imageUrl) return false;
   if (page.dataset.translationState === "running") return false;
+  if (isStaleSession(sessionId) || !page.isConnected) return false;
 
   let crop = await visibleImageCrop(page);
   if (!crop || visibleWindowAlreadyCovered(page, crop.window)) return false;
@@ -235,6 +385,7 @@ async function translatePageProgressively(page, pageNumber, totalPages) {
     let processedWindows = 0;
 
     while (crop && processedWindows < OCR_WINDOWS_PER_PASS) {
+      if (isStaleSession(sessionId) || !page.isConnected) return false;
       showOverlayNotice(pageOverlay, `OCR zone ${Number(page.dataset.index || "0") + 1}...`);
       statusLine.textContent = `OCR zone visible ${pageNumber}/${totalPages}...`;
 
@@ -255,6 +406,7 @@ async function translatePageProgressively(page, pageNumber, totalPages) {
           const contextSegments = contextForSegments(page.__ocrSegments);
 
           for (let segmentIndex = 0; segmentIndex < freshSegments.length;) {
+            if (isStaleSession(sessionId) || !page.isConnected) return false;
             const batchSize = segmentIndex === 0 ? 1 : progressiveBatchSize(freshSegments.length - segmentIndex);
             const batch = freshSegments.slice(segmentIndex, segmentIndex + batchSize);
             const endIndex = segmentIndex + batch.length;
@@ -278,6 +430,7 @@ async function translatePageProgressively(page, pageNumber, totalPages) {
       crop = await visibleImageCrop(page);
     }
 
+    if (isStaleSession(sessionId) || !page.isConnected) return false;
     page.__previousTranslations = previousTranslations.slice(-14);
     if (!translatedCount && !pageOverlay.querySelector(".bubble")) {
       showOverlayNotice(pageOverlay, "Aucun texte detecte ici");
@@ -504,10 +657,10 @@ function scheduleAutoTranslate() {
     translateReaderImages().catch((error) => {
       statusLine.textContent = error && error.message ? error.message : String(error);
     });
-  }, 260);
+  }, AUTO_TRANSLATE_DELAY_MS);
 }
 
-async function translateCapture() {
+async function translateCapture(sessionId = contentSessionId) {
   if (!currentCaptureDataUrl) {
     statusLine.textContent = "Choisis une capture avant de traduire.";
     return;
@@ -516,13 +669,14 @@ async function translateCapture() {
   renderNotice(overlay, "OCR...");
   statusLine.textContent = "OCR + traduction de la capture...";
   const ocr = await ocrImage({ imageData: currentCaptureDataUrl, language: ocrLanguage.value });
+  if (isStaleSession(sessionId)) return;
   if (!ocr.length) {
     renderNotice(overlay, "Aucun texte detecte");
     statusLine.textContent = "OCR termine, mais aucun texte lisible n'a ete detecte.";
     return;
   }
 
-  await translateOverlayProgressively(overlay, ocr, "capture");
+  await translateOverlayProgressively(overlay, ocr, "capture", sessionId);
 }
 
 async function ocrImage(payload) {
@@ -530,13 +684,14 @@ async function ocrImage(payload) {
   return result.segments || [];
 }
 
-async function translateOverlayProgressively(targetOverlay, segments, label) {
+async function translateOverlayProgressively(targetOverlay, segments, label, sessionId = contentSessionId) {
   targetOverlay.innerHTML = "";
   const contextSegments = contextForSegments(segments);
   const previousTranslations = [];
   let translatedCount = 0;
 
   for (let index = 0; index < segments.length;) {
+    if (isStaleSession(sessionId)) return;
     const batchSize = index === 0 ? 1 : progressiveBatchSize(segments.length - index);
     const batch = segments.slice(index, index + batchSize);
     const endIndex = index + batch.length;
@@ -554,6 +709,7 @@ async function translateOverlayProgressively(targetOverlay, segments, label) {
     index = endIndex;
   }
 
+  if (isStaleSession(sessionId)) return;
   statusLine.textContent = translatedCount
     ? `OK: ${translatedCount} bulles traduites avec OCR local.`
     : "OCR termine, mais aucun texte lisible n'a ete traduit.";
@@ -767,7 +923,9 @@ function updateReaderStatus(total) {
     return;
   }
 
-  statusLine.textContent = "Images visibles dans le lecteur. Appuie sur Traduire pour OCR + traduction locale.";
+  statusLine.textContent = loadedImages
+    ? "Images visibles dans le lecteur. La traduction continue au fil du scroll."
+    : "Chargement des premieres images...";
   scheduleAutoTranslate();
 }
 
@@ -784,7 +942,7 @@ async function loadCapabilities() {
     if (capabilities.ocr && capabilities.translation) {
       capabilityLine.textContent = capabilities.ollamaModel
         ? `OCR + Qwen local prets (${capabilities.ollamaModel}).`
-        : "OCR EasyOCR/Tesseract + traduction locale prets.";
+        : "OCR local + traduction locale prets.";
       if (capabilities.ollamaModel) warmupLocalModel();
     } else if (capabilities.ocr) {
       capabilityLine.textContent = "OCR local pret. Traduction locale non installee.";
