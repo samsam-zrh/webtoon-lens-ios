@@ -16,10 +16,10 @@ const PILOTS := {
 		"hp": 95.0,
 		"max_speed": 62.0,
 		"boost_speed": 125.0,
-		"turn_rate": 1.65,
+		"turn_rate": 2.2,
 		"fire_interval": 0.16,
 		"laser_damage": 7.0,
-		"ai_skill": 0.85,
+		"ai_skill": 0.62,
 	},
 	"anakin": {
 		"pilot": "Anakin Skywalker",
@@ -33,10 +33,10 @@ const PILOTS := {
 		"hp": 90.0,
 		"max_speed": 66.0,
 		"boost_speed": 132.0,
-		"turn_rate": 1.8,
+		"turn_rate": 2.4,
 		"fire_interval": 0.15,
 		"laser_damage": 6.5,
-		"ai_skill": 0.9,
+		"ai_skill": 0.68,
 	},
 	"han": {
 		"pilot": "Han Solo",
@@ -50,10 +50,10 @@ const PILOTS := {
 		"hp": 135.0,
 		"max_speed": 58.0,
 		"boost_speed": 118.0,
-		"turn_rate": 1.35,
+		"turn_rate": 1.8,
 		"fire_interval": 0.2,
 		"laser_damage": 9.0,
-		"ai_skill": 0.8,
+		"ai_skill": 0.55,
 	},
 }
 

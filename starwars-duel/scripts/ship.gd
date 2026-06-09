@@ -150,7 +150,7 @@ func _physics_process(delta: float) -> void:
 		boost_energy = maxf(0.0, boost_energy - delta * 0.45)
 	else:
 		boost_energy = minf(1.0, boost_energy + delta * 0.18)
-	speed = lerpf(speed, target_speed, 1.5 * delta)
+	speed = lerpf(speed, target_speed, 2.4 * delta)
 
 	# Rotation
 	var tr: float = cfg["turn_rate"]
@@ -160,7 +160,7 @@ func _physics_process(delta: float) -> void:
 		roll_input = 0.0
 	rotate_object_local(Vector3.RIGHT, pitch_input * tr * delta)
 	rotate_object_local(Vector3.UP, yaw_input * tr * delta)
-	rotate_object_local(Vector3.FORWARD, roll_input * tr * 1.4 * delta)
+	rotate_object_local(Vector3.FORWARD, roll_input * tr * 1.8 * delta)
 
 	# Visual banking on the model when yawing
 	_visual_bank = lerpf(_visual_bank, -yaw_input * 0.55, 4.0 * delta)
@@ -187,6 +187,9 @@ func _physics_process(delta: float) -> void:
 
 func _fire() -> void:
 	_fire_cooldown = cfg["fire_interval"]
+	if not is_player:
+		# The AI shoots in slower bursts than a human spamming the trigger
+		_fire_cooldown *= 1.7
 	_muzzle_flip = -_muzzle_flip
 	var muzzle_local := Vector3(_muzzle_flip * cfg["target_len"] * 0.3, 0.0, -cfg["target_len"] * 0.5)
 	var origin := global_transform * muzzle_local
@@ -194,7 +197,7 @@ func _fire() -> void:
 	if not is_player and enemy != null and enemy.alive:
 		# AI aims at the predicted enemy position, with skill-based error
 		var to_target: Vector3 = enemy.global_position + enemy.linear_velocity() * (global_position.distance_to(enemy.global_position) / LASER_SPEED) - origin
-		var err: float = (1.0 - float(cfg["ai_skill"])) * 0.12
+		var err: float = (1.0 - float(cfg["ai_skill"])) * 0.22
 		dir = (to_target.normalized() + _ai_aim_jitter * err).normalized()
 	var laser := Laser.new()
 	laser.setup(self, origin, dir, cfg["laser_color"], cfg["laser_damage"], LASER_SPEED)
@@ -267,7 +270,7 @@ func _ai_think(delta: float) -> void:
 			throttle = 1.0
 			boosting = false
 
-	fire_held = _ai_state == "pursue" and facing > 0.965 and dist < 650.0
+	fire_held = _ai_state == "pursue" and facing > 0.978 and dist < 520.0
 
 func _ai_steer_towards(target: Vector3, _delta: float, skill: float) -> void:
 	var local: Vector3 = global_transform.affine_inverse() * target

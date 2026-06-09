@@ -59,9 +59,9 @@ void sky() {
 	float neb1 = fbm(dir * 2.6 + vec3(7.0));
 	float neb2 = fbm(dir * 5.5 - vec3(3.0));
 	float neb3 = fbm(dir * 1.7 + vec3(21.0));
-	vec3 nebcol = vec3(0.035, 0.030, 0.10) * pow(neb1, 2.6) * 1.5;
-	nebcol += vec3(0.10, 0.025, 0.075) * pow(neb2, 3.6) * band * 1.2;
-	nebcol += vec3(0.015, 0.035, 0.075) * pow(neb3, 3.0);
+	vec3 nebcol = vec3(0.05, 0.042, 0.14) * pow(neb1, 2.4) * 1.6;
+	nebcol += vec3(0.14, 0.04, 0.10) * pow(neb2, 3.4) * band * 1.3;
+	nebcol += vec3(0.022, 0.05, 0.10) * pow(neb3, 2.8);
 	col += nebcol;
 
 	// Faint galactic band glow

@@ -105,6 +105,41 @@ func _build_scenery() -> void:
 	planet.position = Vector3(2300, -500, -2900)
 	add_child(planet)
 
+	# Planetary ring: a flattened torus with a soft sand color
+	var ring := MeshInstance3D.new()
+	var rm := TorusMesh.new()
+	rm.inner_radius = 1.35
+	rm.outer_radius = 2.1
+	rm.rings = 96
+	rm.ring_segments = 6
+	var rmat := StandardMaterial3D.new()
+	rmat.albedo_color = Color(0.78, 0.68, 0.52, 0.32)
+	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	rm.material = rmat
+	ring.mesh = rm
+	ring.scale = Vector3(1100.0, 18.0, 1100.0)
+	ring.position = Vector3(2300, -500, -2900)
+	ring.rotation = Vector3(0.32, 0.0, 0.18)
+	add_child(ring)
+
+	# Small moon orbit-frozen near the planet
+	var moon := MeshInstance3D.new()
+	var mm := SphereMesh.new()
+	mm.radius = 1.0
+	mm.height = 2.0
+	mm.radial_segments = 48
+	mm.rings = 24
+	var mmat := StandardMaterial3D.new()
+	mmat.albedo_color = Color(0.52, 0.5, 0.48)
+	mmat.roughness = 1.0
+	mm.material = mmat
+	moon.mesh = mm
+	moon.scale = Vector3.ONE * 180.0
+	moon.position = Vector3(950, 350, -2200)
+	add_child(moon)
+
 	# Thin additive atmosphere shell around the planet
 	var atmo := MeshInstance3D.new()
 	var am := SphereMesh.new()
@@ -222,6 +257,34 @@ func _build_camera() -> void:
 	_update_camera(1.0)
 	camera.make_current()
 
+	# Space dust drifting past the cockpit: cheap but sells the speed
+	var dust := GPUParticles3D.new()
+	var dmat := ParticleProcessMaterial.new()
+	dmat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	dmat.emission_box_extents = Vector3(90, 60, 90)
+	dmat.gravity = Vector3.ZERO
+	dmat.initial_velocity_min = 0.0
+	dmat.initial_velocity_max = 0.5
+	dmat.scale_min = 0.5
+	dmat.scale_max = 1.0
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.06
+	mesh.height = 0.12
+	mesh.radial_segments = 4
+	mesh.rings = 2
+	var mmat := StandardMaterial3D.new()
+	mmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mmat.albedo_color = Color(0.8, 0.85, 1.0, 0.5)
+	mmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh.material = mmat
+	dust.draw_pass_1 = mesh
+	dust.process_material = dmat
+	dust.amount = 500
+	dust.lifetime = 6.0
+	dust.local_coords = false
+	dust.visibility_aabb = AABB(Vector3(-200, -200, -200), Vector3(400, 400, 400))
+	camera.add_child(dust)
+
 func _countdown() -> void:
 	player.controls_enabled = false
 	enemy.controls_enabled = false
@@ -238,7 +301,7 @@ func _countdown() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_mouse_offset += event.relative * 0.0016
+		_mouse_offset += event.relative * 0.002
 		_mouse_offset = _mouse_offset.limit_length(1.0)
 	if event.is_action_pressed("pause") and not _ended:
 		_toggle_pause()
@@ -266,7 +329,7 @@ func _physics_process(delta: float) -> void:
 			player.start_boost_sfx()
 		player.fire_held = Input.is_action_pressed("fire")
 		# The cursor relaxes back to center so the ship flies straight again
-		_mouse_offset = _mouse_offset.lerp(Vector2.ZERO, delta * 1.6)
+		_mouse_offset = _mouse_offset.lerp(Vector2.ZERO, delta * 2.0)
 	hud.mouse_offset = _mouse_offset
 
 	_check_collisions(delta)
