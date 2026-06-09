@@ -42,23 +42,35 @@ func _build_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.25, 0.28, 0.4)
-	env.ambient_light_energy = 0.6
+	env.ambient_light_color = Color(0.18, 0.21, 0.34)
+	env.ambient_light_energy = 0.55
 	env.glow_enabled = true
-	env.glow_intensity = 0.9
-	env.glow_bloom = 0.1
-	env.glow_hdr_threshold = 1.0
+	env.glow_intensity = 0.7
+	env.glow_strength = 1.0
+	env.glow_bloom = 0.04
+	env.glow_hdr_threshold = 1.1
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.05
+	env.tonemap_exposure = 1.1
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = 1.08
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
 	var sun := DirectionalLight3D.new()
-	sun.light_energy = 1.5
+	sun.light_energy = 1.7
 	sun.light_color = Color(1.0, 0.95, 0.85)
 	sun.rotation = Vector3(-0.4, 0.6, 0.0)
 	add_child(sun)
+
+	# Cool fill light from the opposite side so ships read against the dark
+	var fill := DirectionalLight3D.new()
+	fill.light_energy = 0.35
+	fill.light_color = Color(0.45, 0.6, 1.0)
+	fill.rotation = Vector3(0.5, -2.4, 0.0)
+	fill.shadow_enabled = false
+	add_child(fill)
 
 func _build_scenery() -> void:
 	# Distant sun disc aligned with the directional light
@@ -93,30 +105,47 @@ func _build_scenery() -> void:
 	planet.position = Vector3(2300, -500, -2900)
 	add_child(planet)
 
+	# Thin additive atmosphere shell around the planet
+	var atmo := MeshInstance3D.new()
+	var am := SphereMesh.new()
+	am.radius = 1.03
+	am.height = 2.06
+	am.radial_segments = 64
+	am.rings = 32
+	var amat := StandardMaterial3D.new()
+	amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	amat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	amat.albedo_color = Color(0.9, 0.55, 0.3, 0.05)
+	amat.cull_mode = BaseMaterial3D.CULL_FRONT
+	am.material = amat
+	atmo.mesh = am
+	atmo.scale = planet.scale
+	atmo.position = planet.position
+	add_child(atmo)
+
 	# Imperial Star Destroyer looming below the battlefield
 	var destroyer := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 800.0, 0.0)
 	destroyer.position = Vector3(-450, -380, -700)
 	destroyer.rotation.y = 0.5
+	ModelUtil.tint(destroyer, Color(0.52, 0.55, 0.62))
 	add_child(destroyer)
 
-	# Asteroid field
+	# Asteroid field: noise-displaced faceted rocks, a few mesh variants reused
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1138
 	var rock_mat := StandardMaterial3D.new()
-	rock_mat.albedo_color = Color(0.38, 0.35, 0.33)
+	rock_mat.albedo_color = Color(0.30, 0.28, 0.26)
 	rock_mat.roughness = 1.0
+	var variants: Array = []
+	for v in 5:
+		variants.append(_make_rock_mesh(rng.randi(), rock_mat))
 	for i in 60:
 		var pos := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.5, 0.5), rng.randf_range(-1, 1)).normalized() * rng.randf_range(250.0, ARENA_RADIUS * 0.85)
 		var base_r := rng.randf_range(6.0, 34.0)
 		var mi := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = 1.0
-		mesh.height = 2.0
-		mesh.radial_segments = 10
-		mesh.rings = 6
-		mesh.material = rock_mat
-		mi.mesh = mesh
-		mi.scale = Vector3(base_r * rng.randf_range(0.7, 1.3), base_r * rng.randf_range(0.55, 1.1), base_r * rng.randf_range(0.7, 1.3))
+		mi.mesh = variants[rng.randi_range(0, variants.size() - 1)]
+		mi.scale = Vector3(base_r * rng.randf_range(0.8, 1.2), base_r * rng.randf_range(0.7, 1.1), base_r * rng.randf_range(0.8, 1.2))
 		mi.position = pos
 		mi.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
 		add_child(mi)
@@ -131,6 +160,40 @@ func _build_scenery() -> void:
 	amb.volume_db = -16.0
 	add_child(amb)
 	amb.play()
+
+# Builds a rocky asteroid mesh: a sphere displaced by 3D noise, with flat
+# (faceted) normals for a chunky rock look.
+func _make_rock_mesh(noise_seed: int, mat: Material) -> ArrayMesh:
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	sphere.radial_segments = 16
+	sphere.rings = 10
+	var arrays := sphere.get_mesh_arrays()
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var noise := FastNoiseLite.new()
+	noise.seed = noise_seed
+	noise.frequency = 0.55
+	noise.fractal_octaves = 3
+	# Displace along the radius; seam vertices share a direction so they stay welded
+	for i in verts.size():
+		var dir := verts[i].normalized()
+		var n := noise.get_noise_3dv(dir * 2.2)
+		verts[i] = dir * (1.0 + 0.38 * n)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var j := 0
+	while j < idx.size():
+		# Unindexed triangles -> per-face normals from generate_normals()
+		st.add_vertex(verts[idx[j]])
+		st.add_vertex(verts[idx[j + 1]])
+		st.add_vertex(verts[idx[j + 2]])
+		j += 3
+	st.generate_normals()
+	var mesh := st.commit()
+	mesh.surface_set_material(0, mat)
+	return mesh
 
 func _build_ships(player_id: String, enemy_id: String) -> void:
 	player = Ship.new()
@@ -333,17 +396,11 @@ func _show_end(won: bool) -> void:
 	add_child(_end_layer)
 	var panel := _overlay_panel(_end_layer)
 
-	var title := Label.new()
-	title.text = "VICTOIRE !" if won else "DÉFAITE…"
-	title.add_theme_font_size_override("font_size", 84)
-	title.add_theme_color_override("font_color", Hud.SW_YELLOW if won else Color(0.9, 0.25, 0.2))
+	var title := UiKit.label("VICTOIRE !" if won else "DÉFAITE…", 76, Hud.SW_YELLOW if won else Color(0.95, 0.3, 0.22), true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(title)
 
-	var sub := Label.new()
-	sub.text = ("La Force est puissante en toi." if won else enemy.cfg["quote"])
-	sub.add_theme_font_size_override("font_size", 26)
-	sub.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
+	var sub := UiKit.label("La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"], 24, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(sub)
 
@@ -364,10 +421,7 @@ func _toggle_pause() -> void:
 	_pause_layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_pause_layer)
 	var panel := _overlay_panel(_pause_layer)
-	var title := Label.new()
-	title.text = "PAUSE"
-	title.add_theme_font_size_override("font_size", 64)
-	title.add_theme_color_override("font_color", Hud.SW_YELLOW)
+	var title := UiKit.label("PAUSE", 58, Hud.SW_YELLOW, true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(title)
 	panel.add_child(_spacer(24))
@@ -386,6 +440,7 @@ func _overlay_panel(layer: CanvasLayer) -> VBoxContainer:
 	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 12)
 	layer.add_child(box)
 	return box
 
@@ -395,9 +450,7 @@ func _spacer(h: float) -> Control:
 	return c
 
 func _menu_button(text: String, action: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.add_theme_font_size_override("font_size", 26)
-	b.custom_minimum_size = Vector2(420, 56)
+	var b := UiKit.button(text, 22)
+	b.custom_minimum_size = Vector2(440, 58)
 	b.pressed.connect(action)
 	return b

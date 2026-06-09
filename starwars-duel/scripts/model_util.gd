@@ -23,6 +23,29 @@ static func load_model(path: String, target_len: float, extra_rot_y: float = 0.0
 	wrapper.rotation.y = extra_rot_y
 	return wrapper
 
+# Multiplies the albedo of every material in the subtree (e.g. to darken
+# an overly bright low-poly model so it sits in the scene lighting).
+static func tint(node: Node, factor: Color) -> void:
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			if mi.mesh != null:
+				for i in mi.mesh.get_surface_count():
+					var m := mi.get_active_material(i)
+					if m is BaseMaterial3D:
+						var dup: BaseMaterial3D = m.duplicate()
+						dup.albedo_color = Color(
+							dup.albedo_color.r * factor.r,
+							dup.albedo_color.g * factor.g,
+							dup.albedo_color.b * factor.b,
+							dup.albedo_color.a)
+						dup.roughness = minf(1.0, dup.roughness + 0.2)
+						mi.set_surface_override_material(i, dup)
+		for c in n.get_children():
+			stack.push_back(c)
+
 static func compute_aabb(node: Node, xform: Transform3D) -> AABB:
 	var result := AABB()
 	var has := false

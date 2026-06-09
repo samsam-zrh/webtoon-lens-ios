@@ -51,27 +51,29 @@ float star_layer(vec3 dir, float scale, float threshold, float tw) {
 
 void sky() {
 	vec3 dir = EYEDIR;
-	vec3 col = vec3(0.004, 0.005, 0.012);
+	// Deep space base: near-black with a cold blue cast
+	vec3 col = vec3(0.002, 0.003, 0.008);
 
-	// Nebula clouds (purple/blue, with a hint of orange near the band)
-	float band = exp(-3.0 * abs(dir.y + 0.15 * sin(dir.x * 2.0)));
-	float neb1 = fbm(dir * 3.0 + vec3(7.0));
-	float neb2 = fbm(dir * 6.0 - vec3(3.0));
-	vec3 nebcol = vec3(0.10, 0.05, 0.22) * pow(neb1, 2.2) * 1.6;
-	nebcol += vec3(0.18, 0.07, 0.05) * pow(neb2, 3.0) * band * 1.4;
-	nebcol += vec3(0.05, 0.08, 0.16) * pow(fbm(dir * 2.0 + vec3(21.0)), 2.5);
+	// Restrained nebula: deep indigo with a faint magenta vein along the band
+	float band = exp(-2.6 * abs(dir.y + 0.18 * sin(dir.x * 1.7)));
+	float neb1 = fbm(dir * 2.6 + vec3(7.0));
+	float neb2 = fbm(dir * 5.5 - vec3(3.0));
+	float neb3 = fbm(dir * 1.7 + vec3(21.0));
+	vec3 nebcol = vec3(0.035, 0.030, 0.10) * pow(neb1, 2.6) * 1.5;
+	nebcol += vec3(0.10, 0.025, 0.075) * pow(neb2, 3.6) * band * 1.2;
+	nebcol += vec3(0.015, 0.035, 0.075) * pow(neb3, 3.0);
 	col += nebcol;
 
-	// Milky-way style bright band
-	col += vec3(0.05, 0.05, 0.09) * band * (0.4 + 0.6 * neb1);
+	// Faint galactic band glow
+	col += vec3(0.018, 0.020, 0.038) * band * (0.35 + 0.65 * neb1);
 
-	// Stars: three layers of different densities/sizes
+	// Stars: dense fine dust + a few brighter ones
 	float s = 0.0;
-	s += star_layer(dir, 90.0, 0.92, 1.0) * 0.9;
-	s += star_layer(dir, 160.0, 0.90, 1.0) * 0.6;
-	s += star_layer(dir, 300.0, 0.88, 0.5) * 0.35;
-	// Slight color variation in stars
-	vec3 starcol = mix(vec3(1.0, 0.95, 0.85), vec3(0.8, 0.9, 1.0), hash13(floor(dir * 90.0)));
+	s += star_layer(dir, 80.0, 0.955, 1.0) * 1.1;
+	s += star_layer(dir, 150.0, 0.93, 1.0) * 0.55;
+	s += star_layer(dir, 280.0, 0.86, 0.5) * 0.28;
+	s += star_layer(dir, 480.0, 0.82, 0.3) * 0.16;
+	vec3 starcol = mix(vec3(1.0, 0.96, 0.88), vec3(0.78, 0.87, 1.0), hash13(floor(dir * 80.0)));
 	col += starcol * s;
 
 	COLOR = col;

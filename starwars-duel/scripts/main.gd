@@ -110,70 +110,103 @@ func _build_menu_ui() -> void:
 	var ui := CanvasLayer.new()
 	_menu_root.add_child(ui)
 
+	ui.add_child(UiKit.vignette())
+
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(root)
 
-	var title := Label.new()
-	title.text = "STAR WARS"
-	title.add_theme_font_size_override("font_size", 96)
-	title.add_theme_color_override("font_color", SW_YELLOW)
-	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	title.add_theme_constant_override("outline_size", 10)
-	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	title.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	title.position.y = 36
-	root.add_child(title)
+	var top := VBoxContainer.new()
+	top.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top.alignment = BoxContainer.ALIGNMENT_CENTER
+	top.position.y = 30
+	top.add_theme_constant_override("separation", 2)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(top)
 
-	var sub := Label.new()
-	sub.text = "D U E L   S P A T I A L"
-	sub.add_theme_font_size_override("font_size", 30)
-	sub.add_theme_color_override("font_color", Color(0.85, 0.85, 0.95))
-	sub.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	sub.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	sub.position.y = 150
-	root.add_child(sub)
+	var title := UiKit.label("STAR WARS", 92, SW_YELLOW, true)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(title)
 
-	_header = Label.new()
-	_header.text = "CHOISIS TON PILOTE"
-	_header.add_theme_font_size_override("font_size", 34)
-	_header.add_theme_color_override("font_color", SW_YELLOW)
-	_header.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_header.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_header.position.y = 210
-	root.add_child(_header)
+	var sub := UiKit.label("D U E L   S P A T I A L", 24, Color(0.82, 0.85, 0.95), true)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(sub)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 26)
+	top.add_child(spacer)
+
+	_header = UiKit.label("CHOISIS TON PILOTE", 28, SW_YELLOW, true)
+	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(_header)
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 40)
+	row.add_theme_constant_override("separation", 36)
 	row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	row.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	row.position.y = -60
+	row.position.y = -64
 	root.add_child(row)
 
 	for id in ORDER:
-		var cfg := ShipsDB.get_cfg(id)
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(360, 190)
-		b.text = "%s\n%s\n\nCoque %d   Vitesse %d   Agilité %.1f\n\n« %s »" % [
-			cfg["pilot"], cfg["ship"], int(cfg["hp"]), int(cfg["max_speed"]), cfg["turn_rate"], cfg["quote"]
-		]
-		b.add_theme_font_size_override("font_size", 18)
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.pressed.connect(_on_card_pressed.bind(id))
-		row.add_child(b)
-		_cards[id] = b
+		row.add_child(_make_card(id))
 
-	var help := Label.new()
-	help.text = "Souris : piloter  •  Clic / Espace : tirer  •  Maj : boost  •  W/S (Z/S) : gaz  •  A/D (Q/D) : tonneau  •  Échap : pause"
-	help.add_theme_font_size_override("font_size", 16)
-	help.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
+	var help := UiKit.label(
+		"Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause",
+		15, Color(0.62, 0.65, 0.75))
 	help.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	help.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	help.position.y = -24
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.position.y = -30
 	root.add_child(help)
+
+func _make_card(id: String) -> Button:
+	var cfg := ShipsDB.get_cfg(id)
+	var b := UiKit.button("")
+	b.custom_minimum_size = Vector2(370, 200)
+	b.pressed.connect(_on_card_pressed.bind(id))
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 18
+	box.offset_right = -18
+	box.offset_top = 14
+	box.offset_bottom = -14
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 6)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(box)
+
+	var name_l := UiKit.label(cfg["pilot"].to_upper(), 22, SW_YELLOW, true)
+	name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(name_l)
+
+	var ship_l := UiKit.label(cfg["ship"], 16, Color(0.85, 0.88, 1.0))
+	ship_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(ship_l)
+
+	var sep := ColorRect.new()
+	sep.color = UiKit.BORDER_DIM
+	sep.custom_minimum_size = Vector2(0, 1)
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(sep)
+
+	var stats_l := UiKit.label(
+		"COQUE %d    VITESSE %d    AGILITÉ %.1f" % [int(cfg["hp"]), int(cfg["max_speed"]), cfg["turn_rate"]],
+		13, Color(0.7, 0.9, 1.0), true)
+	stats_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(stats_l)
+
+	var quote_l := UiKit.label("« %s »" % cfg["quote"], 14, Color(0.6, 0.63, 0.72))
+	quote_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	quote_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	quote_l.custom_minimum_size = Vector2(320, 0)
+	box.add_child(quote_l)
+
+	_cards[id] = b
+	return b
 
 func _on_card_pressed(id: String) -> void:
 	if _phase == 0:
@@ -182,7 +215,8 @@ func _on_card_pressed(id: String) -> void:
 		_header.text = "CHOISIS TON ADVERSAIRE"
 		var card: Button = _cards[id]
 		card.disabled = true
-		card.modulate = Color(1.0, 0.95, 0.4)
+		var picked := UiKit.panel_style(SW_YELLOW, Color(0.07, 0.065, 0.03, 0.92))
+		card.add_theme_stylebox_override("disabled", picked)
 	else:
 		if id == _player_pick:
 			return
