@@ -9,6 +9,16 @@
 | Jedi Star Fighter | Petri Liuhto | [CC-BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) | [Sketchfab](https://sketchfab.com/3d-models/jedi-star-fighter-0b641c2f2b854f1f9ae7f2a731e44dbd) |
 | Star Destroyer 1 | Joe Scalise | [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/) | [Poly Pizza](https://poly.pizza/m/dl2aVTlVph1) |
 
+| Asteroids (champ décoratif) | Jarlan Perez | CC-BY 3.0 | [Poly Pizza](https://poly.pizza/m/9k18F9bT43N) |
+| Asteroid | J-Toastie | CC-BY 4.0 | [Poly Pizza](https://poly.pizza/m/YS1jpm3mNr) |
+
+## Textures planétaires et ciel
+
+Voie lactée (8K), Jupiter, Saturne + anneaux, Lune : textures du pack
+[Solar System Scope](https://www.solarsystemscope.com/textures/) (INOVE),
+licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), basées sur
+les données NASA.
+
 Merci à ces artistes pour leur travail partagé librement.
 
 ## Audio

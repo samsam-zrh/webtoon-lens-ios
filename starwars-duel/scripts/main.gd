@@ -64,8 +64,9 @@ func show_menu() -> void:
 func _build_menu_world() -> void:
 	var env := Environment.new()
 	var sky := Sky.new()
-	var sky_mat := ShaderMaterial.new()
-	sky_mat.shader = load("res://shaders/space_sky.gdshader")
+	var sky_mat := PanoramaSkyMaterial.new()
+	sky_mat.panorama = load("res://assets/textures/milky_way.jpg")
+	sky_mat.energy_multiplier = 1.5
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky

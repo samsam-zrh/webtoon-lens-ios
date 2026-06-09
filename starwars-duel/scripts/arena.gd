@@ -36,8 +36,9 @@ func start(player_id: String, enemy_id: String) -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	var sky := Sky.new()
-	var sky_mat := ShaderMaterial.new()
-	sky_mat.shader = load("res://shaders/space_sky.gdshader")
+	var sky_mat := PanoramaSkyMaterial.new()
+	sky_mat.panorama = load("res://assets/textures/milky_way.jpg")
+	sky_mat.energy_multiplier = 1.7
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
@@ -89,75 +90,24 @@ func _build_scenery() -> void:
 	sun_ball.position = Vector3(-2600, 1700, -3200)
 	add_child(sun_ball)
 
-	# Gas giant planet
-	var planet := MeshInstance3D.new()
-	var pm := SphereMesh.new()
-	pm.radius = 1.0
-	pm.height = 2.0
-	pm.radial_segments = 96
-	pm.rings = 48
-	var pmat := ShaderMaterial.new()
-	pmat.shader = load("res://shaders/planet.gdshader")
-	pmat.set_shader_parameter("sun_dir", Vector3(-0.55, 0.4, -0.6))
-	pm.material = pmat
-	planet.mesh = pm
-	planet.scale = Vector3.ONE * 1100.0
-	planet.position = Vector3(2300, -500, -2900)
-	add_child(planet)
+	# Jupiter: real NASA-derived surface map (Solar System Scope, CC-BY 4.0)
+	var jupiter := _make_textured_planet("res://assets/textures/jupiter.jpg", 1100.0, Vector3(2300, -500, -2900))
+	add_child(jupiter)
+	_add_atmosphere(Vector3(2300, -500, -2900), 1100.0, Color(0.95, 0.7, 0.45, 0.045))
 
-	# Planetary ring: a flattened torus with a soft sand color
+	# Saturn with its real ring system, far on the other side
+	var saturn := _make_textured_planet("res://assets/textures/saturn.jpg", 620.0, Vector3(-3100, 900, -2400))
+	add_child(saturn)
 	var ring := MeshInstance3D.new()
-	var rm := TorusMesh.new()
-	rm.inner_radius = 1.35
-	rm.outer_radius = 2.1
-	rm.rings = 96
-	rm.ring_segments = 6
-	var rmat := StandardMaterial3D.new()
-	rmat.albedo_color = Color(0.78, 0.68, 0.52, 0.32)
-	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	rm.material = rmat
-	ring.mesh = rm
-	ring.scale = Vector3(1100.0, 18.0, 1100.0)
-	ring.position = Vector3(2300, -500, -2900)
-	ring.rotation = Vector3(0.32, 0.0, 0.18)
+	ring.mesh = _make_ring_mesh(1.24, 2.27, load("res://assets/textures/saturn_ring.png"))
+	ring.scale = Vector3.ONE * 620.0
+	ring.position = Vector3(-3100, 900, -2400)
+	ring.rotation = Vector3(0.42, 0.0, 0.22)
 	add_child(ring)
 
-	# Small moon orbit-frozen near the planet
-	var moon := MeshInstance3D.new()
-	var mm := SphereMesh.new()
-	mm.radius = 1.0
-	mm.height = 2.0
-	mm.radial_segments = 48
-	mm.rings = 24
-	var mmat := StandardMaterial3D.new()
-	mmat.albedo_color = Color(0.52, 0.5, 0.48)
-	mmat.roughness = 1.0
-	mm.material = mmat
-	moon.mesh = mm
-	moon.scale = Vector3.ONE * 180.0
-	moon.position = Vector3(950, 350, -2200)
+	# The Moon, with its real surface map, behind the spawn area
+	var moon := _make_textured_planet("res://assets/textures/moon.jpg", 200.0, Vector3(-700, 450, 2600))
 	add_child(moon)
-
-	# Thin additive atmosphere shell around the planet
-	var atmo := MeshInstance3D.new()
-	var am := SphereMesh.new()
-	am.radius = 1.03
-	am.height = 2.06
-	am.radial_segments = 64
-	am.rings = 32
-	var amat := StandardMaterial3D.new()
-	amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	amat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	amat.albedo_color = Color(0.9, 0.55, 0.3, 0.05)
-	amat.cull_mode = BaseMaterial3D.CULL_FRONT
-	am.material = amat
-	atmo.mesh = am
-	atmo.scale = planet.scale
-	atmo.position = planet.position
-	add_child(atmo)
 
 	# Imperial Star Destroyer looming below the battlefield
 	var destroyer := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 800.0, 0.0)
@@ -166,25 +116,40 @@ func _build_scenery() -> void:
 	ModelUtil.tint(destroyer, Color(0.52, 0.55, 0.62))
 	add_child(destroyer)
 
-	# Asteroid field: noise-displaced faceted rocks, a few mesh variants reused
+	# Asteroid field: real community 3D rock models (see CREDITS.md), plus
+	# noise-displaced procedural variants for variety
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1138
 	var rock_mat := StandardMaterial3D.new()
 	rock_mat.albedo_color = Color(0.30, 0.28, 0.26)
 	rock_mat.roughness = 1.0
-	var variants: Array = []
-	for v in 5:
-		variants.append(_make_rock_mesh(rng.randi(), rock_mat))
-	for i in 60:
+	var proc_variants: Array = []
+	for v in 3:
+		proc_variants.append(_make_rock_mesh(rng.randi(), rock_mat))
+	for i in 64:
 		var pos := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.5, 0.5), rng.randf_range(-1, 1)).normalized() * rng.randf_range(250.0, ARENA_RADIUS * 0.85)
 		var base_r := rng.randf_range(6.0, 34.0)
-		var mi := MeshInstance3D.new()
-		mi.mesh = variants[rng.randi_range(0, variants.size() - 1)]
-		mi.scale = Vector3(base_r * rng.randf_range(0.8, 1.2), base_r * rng.randf_range(0.7, 1.1), base_r * rng.randf_range(0.8, 1.2))
-		mi.position = pos
-		mi.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
-		add_child(mi)
+		var node: Node3D
+		if i % 2 == 0:
+			# Real model, normalized so its longest side = 2 (radius 1)
+			node = ModelUtil.load_model("res://assets/models/asteroids/asteroid_toastie.glb", 2.0, 0.0)
+		else:
+			var mi := MeshInstance3D.new()
+			mi.mesh = proc_variants[rng.randi_range(0, proc_variants.size() - 1)]
+			node = mi
+		node.scale = Vector3(base_r * rng.randf_range(0.8, 1.2), base_r * rng.randf_range(0.7, 1.1), base_r * rng.randf_range(0.8, 1.2))
+		node.position = pos
+		node.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
+		add_child(node)
 		asteroids.append({"pos": pos, "radius": base_r * 1.05})
+
+	# Decorative far clusters (no collision), outside the play zone
+	for i in 10:
+		var cluster := ModelUtil.load_model("res://assets/models/asteroids/asteroids_jarlan.glb", rng.randf_range(120.0, 280.0), 0.0)
+		var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.35, 0.35), rng.randf_range(-1, 1)).normalized()
+		cluster.position = dir * rng.randf_range(ARENA_RADIUS * 1.25, ARENA_RADIUS * 1.9)
+		cluster.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
+		add_child(cluster)
 
 	# Quiet ambient drone
 	var amb := AudioStreamPlayer.new()
@@ -195,6 +160,71 @@ func _build_scenery() -> void:
 	amb.volume_db = -16.0
 	add_child(amb)
 	amb.play()
+
+func _make_textured_planet(tex_path: String, radius: float, pos: Vector3) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	sm.radial_segments = 96
+	sm.rings = 48
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load(tex_path)
+	mat.roughness = 1.0
+	mat.metallic = 0.0
+	sm.material = mat
+	mi.mesh = sm
+	mi.scale = Vector3.ONE * radius
+	mi.position = pos
+	return mi
+
+func _add_atmosphere(pos: Vector3, radius: float, color: Color) -> void:
+	var atmo := MeshInstance3D.new()
+	var am := SphereMesh.new()
+	am.radius = 1.03
+	am.height = 2.06
+	am.radial_segments = 64
+	am.rings = 32
+	var amat := StandardMaterial3D.new()
+	amat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	amat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	amat.albedo_color = color
+	amat.cull_mode = BaseMaterial3D.CULL_FRONT
+	am.material = amat
+	atmo.mesh = am
+	atmo.scale = Vector3.ONE * radius
+	atmo.position = pos
+	add_child(atmo)
+
+# Flat annulus whose UV.x runs from the inner to the outer edge, so the
+# real Saturn ring strip texture (radial scan) maps correctly.
+func _make_ring_mesh(inner: float, outer: float, tex: Texture2D) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segs := 128
+	for i in segs:
+		var a0 := TAU * float(i) / segs
+		var a1 := TAU * float(i + 1) / segs
+		var i0 := Vector3(cos(a0), 0, sin(a0)) * inner
+		var i1 := Vector3(cos(a1), 0, sin(a1)) * inner
+		var o0 := Vector3(cos(a0), 0, sin(a0)) * outer
+		var o1 := Vector3(cos(a1), 0, sin(a1)) * outer
+		st.set_uv(Vector2(0.0, 0.5)); st.add_vertex(i0)
+		st.set_uv(Vector2(1.0, 0.5)); st.add_vertex(o0)
+		st.set_uv(Vector2(1.0, 0.5)); st.add_vertex(o1)
+		st.set_uv(Vector2(0.0, 0.5)); st.add_vertex(i0)
+		st.set_uv(Vector2(1.0, 0.5)); st.add_vertex(o1)
+		st.set_uv(Vector2(0.0, 0.5)); st.add_vertex(i1)
+	st.generate_normals()
+	var mesh := st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.surface_set_material(0, mat)
+	return mesh
 
 # Builds a rocky asteroid mesh: a sphere displaced by 3D noise, with flat
 # (faceted) normals for a chunky rock look.
