@@ -9,6 +9,7 @@ var _menu_root: Node
 var _arena: Arena
 var _preview_ships: Array = []
 var _phase := 0  # 0 = pick your pilot, 1 = pick the opponent
+var _mode := "ships"  # "ships" (dogfight) or "ground" (character duel)
 var _player_pick := ""
 var _enemy_pick := ""
 var _cards: Dictionary = {}
@@ -16,7 +17,10 @@ var _header: Label
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	if "--duel" in args:
+	if "--ground" in args:
+		_mode = "ground"
+		start_game("luke", "vader")
+	elif "--duel" in args:
 		start_game("anakin", "vader")
 	else:
 		show_menu()
@@ -142,6 +146,28 @@ func _build_menu_ui() -> void:
 	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(_header)
 
+	# Mode toggle: ship dogfight or character duel
+	var modes := HBoxContainer.new()
+	modes.alignment = BoxContainer.ALIGNMENT_CENTER
+	modes.add_theme_constant_override("separation", 16)
+	top.add_child(modes)
+	var bs := UiKit.button("VAISSEAUX", 16)
+	bs.custom_minimum_size = Vector2(220, 40)
+	bs.pressed.connect(func() -> void:
+		_mode = "ships"
+		show_menu())
+	modes.add_child(bs)
+	var bg := UiKit.button("PERSONNAGES", 16)
+	bg.custom_minimum_size = Vector2(220, 40)
+	bg.pressed.connect(func() -> void:
+		_mode = "ground"
+		show_menu())
+	modes.add_child(bg)
+	if _mode == "ships":
+		bs.disabled = true
+	else:
+		bg.disabled = true
+
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 36)
@@ -151,7 +177,7 @@ func _build_menu_ui() -> void:
 	row.position.y = -64
 	root.add_child(row)
 
-	for id in ORDER:
+	for id in (ORDER if _mode == "ships" else ["vader", "luke", "han"]):
 		row.add_child(_make_card(id))
 
 	var help := UiKit.label(
@@ -164,7 +190,8 @@ func _build_menu_ui() -> void:
 	root.add_child(help)
 
 func _make_card(id: String) -> Button:
-	var cfg := ShipsDB.get_cfg(id)
+	var ship_mode := _mode == "ships"
+	var cfg: Dictionary = ShipsDB.get_cfg(id) if ship_mode else GroundArena.ROSTER[id]
 	var b := UiKit.button("")
 	b.custom_minimum_size = Vector2(370, 200)
 	b.pressed.connect(_on_card_pressed.bind(id))
@@ -180,11 +207,13 @@ func _make_card(id: String) -> Button:
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(box)
 
-	var name_l := UiKit.label(cfg["pilot"].to_upper(), 22, SW_YELLOW, true)
+	var disp_name: String = cfg["pilot"] if ship_mode else cfg["name"]
+	var name_l := UiKit.label(disp_name.to_upper(), 22, SW_YELLOW, true)
 	name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(name_l)
 
-	var ship_l := UiKit.label(cfg["ship"], 16, Color(0.85, 0.88, 1.0))
+	var sub_txt: String = cfg["ship"] if ship_mode else ("Sabre laser" if cfg["melee"] else "Blaster")
+	var ship_l := UiKit.label(sub_txt, 16, Color(0.85, 0.88, 1.0))
 	ship_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(ship_l)
 
@@ -194,9 +223,12 @@ func _make_card(id: String) -> Button:
 	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(sep)
 
-	var stats_l := UiKit.label(
-		"COQUE %d    VITESSE %d    AGILITÉ %.1f" % [int(cfg["hp"]), int(cfg["max_speed"]), cfg["turn_rate"]],
-		13, Color(0.7, 0.9, 1.0), true)
+	var stats_txt: String
+	if ship_mode:
+		stats_txt = "COQUE %d    VITESSE %d    AGILITÉ %.1f" % [int(cfg["hp"]), int(cfg["max_speed"]), cfg["turn_rate"]]
+	else:
+		stats_txt = "VIE %d    VITESSE %d    DÉGÂTS %d" % [int(cfg["hp"]), int(cfg["speed"]), int(cfg["dmg"])]
+	var stats_l := UiKit.label(stats_txt, 13, Color(0.7, 0.9, 1.0), true)
 	stats_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(stats_l)
 
@@ -228,6 +260,14 @@ func _on_card_pressed(id: String) -> void:
 
 func start_game(player_id: String, enemy_id: String) -> void:
 	_clear()
+	if _mode == "ground":
+		var ga := GroundArena.new()
+		ga.name = "GroundArena"
+		add_child(ga)
+		ga.start(player_id, enemy_id)
+		ga.request_restart.connect(func() -> void: start_game(player_id, enemy_id))
+		ga.request_menu.connect(show_menu)
+		return
 	_arena = Arena.new()
 	_arena.name = "Arena"
 	add_child(_arena)
