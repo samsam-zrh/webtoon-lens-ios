@@ -14,7 +14,7 @@ const ROSTER := {
 		"model": "res://assets/models/characters/jedi.glb",
 		"model_yaw": 0.0, "model_scale": 1.0,
 		"saber_color": Color(0.3, 1.0, 0.4),
-		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5,
+		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
 		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.3,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
 		"quote": "Je suis un Jedi, comme mon père avant moi.",
@@ -30,7 +30,7 @@ const ROSTER := {
 		"model": "res://assets/models/vader/scene.gltf",
 		"normalize_len": 2.25, "model_yaw": PI, "model_offset_y": 1.14,
 		"saber_color": Color(1.0, 0.12, 0.08),
-		"hp": 170.0, "speed": 3.4, "dmg": 26.0, "reach": 2.8, "lunge": 4.5,
+		"hp": 170.0, "speed": 3.4, "dmg": 26.0, "reach": 2.8, "lunge": 4.5, "turn_speed": 6.5,
 		"attack_time": 0.85, "attack_move_factor": 0.5,
 		"ai_skill": 0.5, "ai_block_chance": 0.3,
 		"quote": "Je trouve votre manque de foi déplorable.",
@@ -41,7 +41,7 @@ const ROSTER := {
 		"model": "res://assets/models/characters/trooper.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(1.0, 0.3, 0.2),
-		"hp": 90.0, "speed": 6.2, "dmg": 8.0,
+		"hp": 90.0, "speed": 6.2, "dmg": 8.0, "turn_speed": 11.0,
 		"attack_time": 0.5, "attack_move_factor": 0.8,
 		"ai_skill": 0.5, "ai_block_chance": 0.0,
 		"quote": "Vous êtes en état d'arrestation, au nom de l'Empire !",
@@ -53,10 +53,6 @@ const ROSTER := {
 		},
 	},
 }
-
-const HALL_W := 10.0
-const HALL_L := 42.0
-const HALL_H := 4.4
 
 var player: GroundFighter
 var enemy: GroundFighter
@@ -136,187 +132,205 @@ func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float) -> GroundFigh
 		_trails[f] = {"points": [], "mesh": trail}
 	return f
 
-# ------------------------------------------------------------ corridor
+# ------------------------------------------------------------ Tatooine arena
+
+const ARENA_R := 24.0
 
 func _build_corridor() -> void:
+	_build_environment()
+	_build_terrain()
+	_build_scenery()
+	_build_boundary()
+
+	var amb := AudioStreamPlayer.new()
+	var wind: AudioStreamWAV = load("res://assets/audio/wind.wav").duplicate()
+	wind.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wind.loop_end = wind.data.size() / 2
+	amb.stream = wind
+	amb.volume_db = -14.0
+	add_child(amb)
+	amb.play()
+
+func _build_environment() -> void:
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.012, 0.013, 0.02)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.5, 0.55, 0.68)
-	env.ambient_light_energy = 0.42
-	env.glow_enabled = true
-	env.glow_intensity = 0.75
-	env.glow_hdr_threshold = 1.05
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(0.33, 0.45, 0.62)
+	sm.sky_horizon_color = Color(0.82, 0.73, 0.60)
+	sm.ground_bottom_color = Color(0.42, 0.36, 0.29)
+	sm.ground_horizon_color = Color(0.80, 0.71, 0.58)
+	sm.sun_angle_max = 18.0
+	sm.sun_curve = 0.12
+	sky.sky_material = sm
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 1.0
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.12
+	env.tonemap_exposure = 1.0
+	env.glow_enabled = true
+	env.glow_intensity = 0.3
+	env.glow_hdr_threshold = 1.25
 	env.ssao_enabled = true
-	env.ssao_intensity = 1.6
-	env.ssr_enabled = true
-	env.ssr_max_steps = 48
+	env.ssao_intensity = 1.0
 	env.sdfgi_enabled = true
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.06, 0.07, 0.1)
-	env.fog_density = 0.012
-	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.05
+	env.fog_light_color = Color(0.78, 0.70, 0.58)
+	env.fog_density = 0.0012
+	env.fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	var key := DirectionalLight3D.new()
-	key.rotation = Vector3(-0.9, 0.4, 0)
-	key.light_energy = 0.35
-	key.light_color = Color(0.85, 0.9, 1.0)
-	key.shadow_enabled = true
-	add_child(key)
+	# Twin suns: the procedural sky renders both directional lights as discs
+	var sun1 := DirectionalLight3D.new()
+	sun1.light_energy = 1.25
+	sun1.light_color = Color(1.0, 0.93, 0.80)
+	sun1.rotation = Vector3(-0.62, 0.85, 0.0)
+	sun1.shadow_enabled = true
+	sun1.directional_shadow_max_distance = 80.0
+	add_child(sun1)
+	var sun2 := DirectionalLight3D.new()
+	sun2.light_energy = 0.35
+	sun2.light_color = Color(1.0, 0.78, 0.55)
+	sun2.rotation = Vector3(-0.50, 1.05, 0.0)
+	sun2.shadow_enabled = false
+	add_child(sun2)
 
-	# Materials
-	var wall_mat := StandardMaterial3D.new()
-	wall_mat.albedo_color = Color(0.62, 0.64, 0.68)
-	wall_mat.metallic = 0.15
-	wall_mat.roughness = 0.55
-	var dark_mat := StandardMaterial3D.new()
-	dark_mat.albedo_color = Color(0.18, 0.19, 0.23)
-	dark_mat.metallic = 0.4
-	dark_mat.roughness = 0.5
-	var floor_mat := StandardMaterial3D.new()
-	floor_mat.albedo_color = Color(0.38, 0.40, 0.45)
-	floor_mat.metallic = 0.62
-	floor_mat.roughness = 0.22
-	var red_mat := StandardMaterial3D.new()
-	red_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	red_mat.albedo_color = Color(1.0, 0.12, 0.1)
-	red_mat.emission_enabled = true
-	red_mat.emission = Color(1.0, 0.12, 0.1)
-	red_mat.emission_energy_multiplier = 2.2
-	var neon_mat := StandardMaterial3D.new()
-	neon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	neon_mat.albedo_color = Color(1.0, 1.0, 1.0)
-	neon_mat.emission_enabled = true
-	neon_mat.emission = Color(0.95, 0.97, 1.0)
-	neon_mat.emission_energy_multiplier = 4.0
-	var window_mat := StandardMaterial3D.new()
-	window_mat.albedo_color = Color(0.04, 0.05, 0.08)
-	window_mat.metallic = 0.8
-	window_mat.roughness = 0.1
-	window_mat.emission_enabled = true
-	window_mat.emission = Color(0.15, 0.3, 0.45)
-	window_mat.emission_energy_multiplier = 0.5
+# Dune height: flat in the duel zone, rolling dunes beyond it.
+var _tnoise: FastNoiseLite
 
-	# Floor: real textured deck tiles from the Jedi Outcast remake (2x2 m,
-	# 5 variants), over an invisible collision slab. Ceiling stays flat.
-	_collision_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L))
-	var tiles: Array = _collect_floor_tiles()
-	if tiles.is_empty():
-		_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L), floor_mat)
-	else:
-		var trng := RandomNumberGenerator.new()
-		trng.seed = 42
-		var nx := int(HALL_W / 2.0)
-		var nz := int(HALL_L / 2.0)
-		for ix in nx:
-			for iz in nz:
-				var mi := MeshInstance3D.new()
-				mi.mesh = tiles[trng.randi_range(0, tiles.size() - 1)]
-				mi.position = Vector3(-HALL_W / 2.0 + 1.0 + ix * 2.0, -0.161, -HALL_L / 2.0 + 1.0 + iz * 2.0)
-				mi.rotation.y = (PI / 2.0) * trng.randi_range(0, 3)
-				add_child(mi)
-	_box(Vector3(0, HALL_H + 0.1, 0), Vector3(HALL_W, 0.2, HALL_L), wall_mat)
+func _terrain_height(x: float, z: float) -> float:
+	if _tnoise == null:
+		_tnoise = FastNoiseLite.new()
+		_tnoise.seed = 1977
+		_tnoise.frequency = 0.013
+		_tnoise.fractal_octaves = 3
+	var d := Vector2(x, z).length()
+	var flat := smoothstep(ARENA_R - 4.0, ARENA_R + 22.0, d)
+	return _tnoise.get_noise_2d(x, z) * 6.0 * flat
 
-	# Walls with panel details
-	for side: float in [-1.0, 1.0]:
-		var x := side * HALL_W / 2.0
-		_box(Vector3(x, HALL_H / 2.0, 0), Vector3(0.2, HALL_H, HALL_L), wall_mat)
-		# Red accent stripe (like the BF2 corridors)
-		_box(Vector3(x - side * 0.12, 0.55, 0), Vector3(0.05, 0.1, HALL_L), red_mat, false)
-		# Dark baseboard
-		_box(Vector3(x - side * 0.1, 0.15, 0), Vector3(0.08, 0.3, HALL_L), dark_mat, false)
-		var n := int(HALL_L / 4.0)
-		for i in n:
-			var z := -HALL_L / 2.0 + 2.0 + i * 4.0
-			# Vertical pillars between panels
-			_box(Vector3(x - side * 0.18, HALL_H / 2.0, z + 2.0), Vector3(0.18, HALL_H, 0.35), dark_mat, false)
-			# Inset window band on alternating panels
-			if i % 2 == 0:
-				_box(Vector3(x - side * 0.08, 2.3, z), Vector3(0.06, 0.9, 2.6), window_mat, false)
-			else:
-				# Tech greeble panel
-				_box(Vector3(x - side * 0.07, 1.5, z), Vector3(0.05, 1.4, 2.2), dark_mat, false)
-
-	# Conduits/pipes running along the top of each wall + floor light strips
-	var pipe_mat := StandardMaterial3D.new()
-	pipe_mat.albedo_color = Color(0.28, 0.29, 0.33)
-	pipe_mat.metallic = 0.75
-	pipe_mat.roughness = 0.35
-	var strip_mat := StandardMaterial3D.new()
-	strip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	strip_mat.albedo_color = Color(0.6, 0.8, 1.0)
-	strip_mat.emission_enabled = true
-	strip_mat.emission = Color(0.55, 0.75, 1.0)
-	strip_mat.emission_energy_multiplier = 1.4
-	for side: float in [-1.0, 1.0]:
-		var x2 := side * (HALL_W / 2.0 - 0.22)
-		for pi in 2:
-			var pipe := MeshInstance3D.new()
-			var cm := CylinderMesh.new()
-			cm.top_radius = 0.07 - pi * 0.025
-			cm.bottom_radius = cm.top_radius
-			cm.height = HALL_L
-			cm.material = pipe_mat
-			pipe.mesh = cm
-			pipe.rotation.x = PI / 2.0
-			pipe.position = Vector3(x2, HALL_H - 0.45 - pi * 0.22, 0)
-			add_child(pipe)
-		# Soft blue-white light strip at floor level
-		var strip := MeshInstance3D.new()
-		var sm := BoxMesh.new()
-		sm.size = Vector3(0.03, 0.04, HALL_L)
-		sm.material = strip_mat
-		strip.mesh = sm
-		strip.position = Vector3(side * (HALL_W / 2.0 - 0.13), 0.05, 0)
-		add_child(strip)
-
-	# Dark cross beams under the ceiling
-	var n_beams := int(HALL_L / 6.0)
-	for i in n_beams:
-		var z3 := -HALL_L / 2.0 + 6.0 + i * 6.0
-		_box(Vector3(0, HALL_H - 0.12, z3), Vector3(HALL_W, 0.22, 0.4), dark_mat, false)
-
-	# Ceiling light fixtures + lights
-	var n_lights := int(HALL_L / 6.0)
-	for i in n_lights + 1:
-		var z := -HALL_L / 2.0 + 3.0 + i * 6.0
-		_box(Vector3(0, HALL_H - 0.03, z), Vector3(1.8, 0.06, 0.5), neon_mat, false)
-		_box(Vector3(0, HALL_H - 0.08, z), Vector3(2.1, 0.1, 0.8), dark_mat, false)
-		var l := OmniLight3D.new()
-		l.position = Vector3(0, HALL_H - 0.6, z)
-		l.light_color = Color(0.92, 0.95, 1.0)
-		l.light_energy = 1.5
-		l.omni_range = 8.5
-		l.shadow_enabled = i % 2 == 0
-		add_child(l)
-
-	# Blast doors at both ends
-	for endz: float in [-1.0, 1.0]:
-		var z2 := endz * HALL_L / 2.0
-		_box(Vector3(0, HALL_H / 2.0, z2), Vector3(HALL_W, HALL_H, 0.3), dark_mat)
-		_box(Vector3(0, HALL_H / 2.0, z2 - endz * 0.18), Vector3(3.6, 3.4, 0.1), wall_mat, false)
-		_box(Vector3(0, HALL_H / 2.0, z2 - endz * 0.26), Vector3(0.08, 3.4, 0.06), red_mat, false)
-
-	_place_props()
-
-# Adds a box mesh; with_collision also registers a static collider.
-func _box(pos: Vector3, size: Vector3, mat: Material, with_collision: bool = true) -> void:
+func _build_terrain() -> void:
+	var size := 320.0
+	var n := 80
+	var step := size / n
+	var half := size / 2.0
+	var sand := Color(0.78, 0.65, 0.47)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for iz in range(n + 1):
+		for ix in range(n + 1):
+			var x := -half + ix * step
+			var z := -half + iz * step
+			var h := _terrain_height(x, z)
+			var tone := 0.92 + 0.08 * _tnoise.get_noise_2d(x * 7.0 + 100.0, z * 7.0)
+			st.set_color(Color(sand.r * tone, sand.g * tone, sand.b * tone))
+			st.add_vertex(Vector3(x, h, z))
+	for iz in range(n):
+		for ix in range(n):
+			var a := iz * (n + 1) + ix
+			st.add_index(a)
+			st.add_index(a + n + 1)
+			st.add_index(a + 1)
+			st.add_index(a + 1)
+			st.add_index(a + n + 1)
+			st.add_index(a + n + 2)
+	st.generate_normals()
+	var mesh := st.commit()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color(1, 1, 1)
+	mat.roughness = 1.0
+	mesh.surface_set_material(0, mat)
 	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	bm.material = mat
-	mi.mesh = bm
-	mi.position = pos
+	mi.mesh = mesh
 	add_child(mi)
-	if with_collision:
-		_collision_box(pos, size)
+	# Flat physical ground for the duel zone
+	_collision_box(Vector3(0, -0.5, 0), Vector3(120, 1.0, 120))
+
+func _build_scenery() -> void:
+	# Sandstone rocks ringing the arena (real community rock models, tinted)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4
+	for i in 10:
+		var ang := TAU * i / 10.0 + rng.randf_range(-0.15, 0.15)
+		var r := rng.randf_range(ARENA_R + 1.5, ARENA_R + 7.0)
+		var s := rng.randf_range(2.2, 5.0)
+		var rock := ModelUtil.load_model("res://assets/models/asteroids/asteroid_toastie.glb", s, rng.randf() * TAU)
+		var pos := Vector3(cos(ang) * r, 0, sin(ang) * r)
+		rock.position = Vector3(pos.x, _terrain_height(pos.x, pos.z) + s * 0.18, pos.z)
+		ModelUtil.tint(rock, Color(0.95, 0.78, 0.58))
+		add_child(rock)
+		_collision_box(rock.position, Vector3(s * 0.8, s, s * 0.8))
+	# Larger mesas on the far dunes
+	for i in 5:
+		var ang2 := TAU * i / 5.0 + 0.4
+		var r2 := rng.randf_range(70.0, 120.0)
+		var s2 := rng.randf_range(14.0, 26.0)
+		var mesa := ModelUtil.load_model("res://assets/models/asteroids/asteroids_jarlan.glb", s2, rng.randf() * TAU)
+		var p2 := Vector3(cos(ang2) * r2, 0, sin(ang2) * r2)
+		mesa.position = Vector3(p2.x, _terrain_height(p2.x, p2.z) + s2 * 0.1, p2.z)
+		ModelUtil.tint(mesa, Color(0.92, 0.74, 0.55))
+		add_child(mesa)
+
+	# Small camp: real crates/barrel + a moisture vaporator
+	_place_props()
+	_build_vaporator(Vector3(-9.5, 0, 6.5))
+
+func _build_vaporator(at: Vector3) -> void:
+	var metal := StandardMaterial3D.new()
+	metal.albedo_color = Color(0.52, 0.48, 0.43)
+	metal.metallic = 0.55
+	metal.roughness = 0.55
+	var holder := Node3D.new()
+	holder.position = at
+	add_child(holder)
+	var pole := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = 0.14
+	pm.bottom_radius = 0.22
+	pm.height = 4.6
+	pm.material = metal
+	pole.mesh = pm
+	pole.position.y = 2.3
+	holder.add_child(pole)
+	for i in 3:
+		var fin := MeshInstance3D.new()
+		var fm := BoxMesh.new()
+		fm.size = Vector3(0.55, 0.55, 0.1)
+		fm.material = metal
+		fin.mesh = fm
+		fin.position = Vector3(0, 1.6 + i * 1.1, 0)
+		fin.rotation.y = i * 0.6
+		holder.add_child(fin)
+	var top := MeshInstance3D.new()
+	var tm := CylinderMesh.new()
+	tm.top_radius = 0.3
+	tm.bottom_radius = 0.18
+	tm.height = 0.5
+	tm.material = metal
+	top.mesh = tm
+	top.position.y = 4.85
+	holder.add_child(top)
+	_collision_box(at + Vector3(0, 2.3, 0), Vector3(0.5, 4.6, 0.5))
+
+func _build_boundary() -> void:
+	# Invisible ring keeping the duel inside the rock circle
+	var segs := 14
+	for i in segs:
+		var ang := TAU * i / segs
+		var pos := Vector3(cos(ang) * ARENA_R, 2.0, sin(ang) * ARENA_R)
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(2.0 * PI * ARENA_R / segs + 1.0, 4.0, 0.4)
+		cs.shape = shape
+		sb.add_child(cs)
+		sb.position = pos
+		sb.rotation.y = -ang + PI / 2.0
+		add_child(sb)
 
 func _collision_box(pos: Vector3, size: Vector3) -> void:
 	var sb := StaticBody3D.new()
@@ -329,26 +343,7 @@ func _collision_box(pos: Vector3, size: Vector3) -> void:
 	sb.position = pos
 	add_child(sb)
 
-# One deck-tile mesh per LevelFloor variant in the remake's instanced file.
-func _collect_floor_tiles() -> Array:
-	var tiles: Array = []
-	var ps: PackedScene = load("res://assets/models/imperial_base.glb")
-	if ps == null:
-		return tiles
-	var inst: Node = ps.instantiate()
-	var stack: Array = [inst]
-	var seen: Dictionary = {}
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		if n is MeshInstance3D and "Floor" in n.get_parent().name and not seen.has(n.get_parent().name):
-			seen[n.get_parent().name] = true
-			tiles.append((n as MeshInstance3D).mesh)
-		for c in n.get_children():
-			stack.push_back(c)
-	inst.free()
-	return tiles
-
-# Real crates/barrels from the Jedi Outcast remake, placed along the walls.
+# Real crates/barrels from the Jedi Outcast remake as a small camp.
 func _place_props() -> void:
 	var sources: Array = []
 	for path in ["res://assets/models/imperial_base.glb", "res://assets/models/imperial_base_dc.glb"]:
@@ -359,29 +354,25 @@ func _place_props() -> void:
 		var stack: Array = [inst]
 		var seen: Dictionary = {}
 		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			if n is MeshInstance3D:
-				var mi := n as MeshInstance3D
+			var nd: Node = stack.pop_back()
+			if nd is MeshInstance3D:
+				var mi := nd as MeshInstance3D
 				var base: String = mi.name.get_slice("_", 0)
 				if not seen.has(base) and (base.begins_with("Create") or "Barrel" in mi.name or "barrel" in mi.name):
 					seen[base] = true
 					sources.append(mi.mesh)
-			for c in n.get_children():
+			for c in nd.get_children():
 				stack.push_back(c)
 		inst.free()
 	if sources.is_empty():
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 66
-	var spots := [
-		Vector3(-3.8, 0, -16), Vector3(3.7, 0, -14), Vector3(-3.6, 0, -7),
-		Vector3(3.8, 0, 7), Vector3(-3.7, 0, 14), Vector3(3.6, 0, 16),
-		Vector3(-3.9, 0, 2), Vector3(3.9, 0, -2),
-	]
+	var spots := [Vector3(8.5, 0, -7.0), Vector3(9.8, 0, -5.6), Vector3(-10.5, 0, 5.0)]
 	for spot in spots:
 		var mesh: Mesh = sources[rng.randi_range(0, sources.size() - 1)]
 		var aabb := mesh.get_aabb()
-		var target_h := rng.randf_range(0.9, 1.4)
+		var target_h := rng.randf_range(0.9, 1.3)
 		var s := target_h / maxf(aabb.size.y, 0.01)
 		var mi2 := MeshInstance3D.new()
 		mi2.mesh = mesh
@@ -389,16 +380,7 @@ func _place_props() -> void:
 		mi2.position = spot - Vector3(aabb.get_center().x, aabb.position.y, aabb.get_center().z) * s
 		mi2.rotation.y = rng.randf_range(0, TAU)
 		add_child(mi2)
-		var sb := StaticBody3D.new()
-		sb.collision_layer = 1
-		var cs := CollisionShape3D.new()
-		var shape := BoxShape3D.new()
-		shape.size = Vector3(aabb.size.x * s, target_h, aabb.size.z * s)
-		cs.shape = shape
-		cs.position = Vector3(0, target_h / 2.0, 0)
-		sb.add_child(cs)
-		sb.position = spot
-		add_child(sb)
+		_collision_box(spot + Vector3(0, target_h / 2.0, 0), Vector3(aabb.size.x * s, target_h, aabb.size.z * s))
 
 # ------------------------------------------------------------ HUD
 
@@ -486,9 +468,27 @@ func _physics_process(delta: float) -> void:
 			mv.x += 1.0
 		if Input.is_action_pressed("roll_left"):
 			mv.x -= 1.0
-		player.move_input = mv
-		player.face_yaw = _cam_yaw
+		# Free movement: the character faces where it runs; it squares up to
+		# the enemy while attacking or blocking (soft lock).
+		var fwd := Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw))
+		var right := Vector3(-fwd.z, 0, fwd.x)
+		var wdir := fwd * mv.y + right * mv.x
+		var lock := player.attacking or player.blocking
+		if lock and enemy.alive:
+			var to_e := enemy.global_position - player.global_position
+			player.face_yaw = atan2(-to_e.x, -to_e.z)
+			var pfwd := Vector3(-sin(player.face_yaw), 0, -cos(player.face_yaw))
+			var pright := Vector3(-pfwd.z, 0, pfwd.x)
+			player.move_input = Vector2(wdir.dot(pright), wdir.dot(pfwd)).limit_length(1.0)
+		elif wdir.length() > 0.1:
+			player.face_yaw = atan2(-wdir.x, -wdir.z)
+			player.move_input = Vector2(0, wdir.length())
+		else:
+			player.move_input = Vector2.ZERO
 		if Input.is_action_just_pressed("fire"):
+			if enemy.alive:
+				var to_e2 := enemy.global_position - player.global_position
+				player.face_yaw = atan2(-to_e2.x, -to_e2.z)
 			player.try_attack()
 		player.set_blocking(Input.is_action_pressed("block"))
 		if Input.is_action_just_pressed("boost"):
@@ -507,7 +507,7 @@ func _update_camera(delta: float) -> void:
 	_cam_pivot.rotation.y = _cam_yaw
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
-	camera.fov = lerpf(camera.fov, 65.0 + hv * 1.1, 5.0 * delta)
+	camera.fov = lerpf(camera.fov, 65.0 + hv * 0.35, 5.0 * delta)
 
 # ------------------------------------------------------------ combat services
 
@@ -572,9 +572,11 @@ func _update_bolts(delta: float) -> void:
 				f.take_hit(b["from"].cfg["dmg"], b["from"])
 				_hit_flash(center, Color(1, 0.4, 0.2))
 				dead = true
-		# Hit walls
-		if absf(node.position.x) > HALL_W / 2.0 - 0.2 or absf(node.position.z) > HALL_L / 2.0 - 0.2 or node.position.y < 0.05 or node.position.y > HALL_H:
+		# Hit the ground or fly out of the arena
+		if node.position.y < 0.05:
 			_hit_flash(node.position, Color(1, 0.5, 0.2))
+			dead = true
+		elif Vector2(node.position.x, node.position.z).length() > ARENA_R + 14.0 or node.position.y > 25.0:
 			dead = true
 		if dead:
 			node.queue_free()
@@ -590,11 +592,11 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 	return (a + ab * t).distance_to(p)
 
 func saber_clash(at: Vector3) -> void:
-	_sparks(at, Color(1.0, 0.9, 0.5), 90, 7.0)
+	_sparks(at, Color(1.0, 0.9, 0.5), 36, 4.5)
 	var flash := OmniLight3D.new()
 	flash.light_color = Color(1.0, 0.95, 0.8)
-	flash.light_energy = 6.0
-	flash.omni_range = 7.0
+	flash.light_energy = 3.0
+	flash.omni_range = 4.0
 	flash.position = at
 	add_child(flash)
 	var tw := create_tween()
@@ -610,7 +612,7 @@ func saber_clash(at: Vector3) -> void:
 	sp.finished.connect(sp.queue_free)
 
 func _hit_flash(at: Vector3, color: Color) -> void:
-	_sparks(at, color, 30, 4.0)
+	_sparks(at, color, 14, 3.0)
 
 func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
 	var p := GPUParticles3D.new()
@@ -657,7 +659,7 @@ func _update_trails() -> void:
 		var pts: Array = t["points"]
 		if f.alive and f.attacking:
 			pts.append([f.trail_base, f.trail_tip])
-		if pts.size() > 10 or (not f.attacking and pts.size() > 0):
+		if pts.size() > 8 or (not f.attacking and pts.size() > 0):
 			pts.pop_front()
 		if not f.attacking and pts.size() > 0:
 			pts.pop_front()
@@ -668,7 +670,7 @@ func _update_trails() -> void:
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
 		var col: Color = f.cfg["saber_color"]
 		for i in pts.size():
-			var alpha := float(i) / pts.size() * 0.25
+			var alpha := float(i) / pts.size() * 0.16
 			im.surface_set_color(Color(col.r, col.g, col.b, alpha))
 			im.surface_add_vertex(pts[i][0])
 			im.surface_add_vertex(pts[i][1])

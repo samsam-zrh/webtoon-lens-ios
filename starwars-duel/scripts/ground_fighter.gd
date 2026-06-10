@@ -285,8 +285,8 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 	move_and_slide()
 
-	# Face direction (strafe-lock toward face_yaw)
-	rotation.y = lerp_angle(rotation.y, face_yaw, 12.0 * delta)
+	# Turn toward face_yaw (heavier characters turn slower)
+	rotation.y = lerp_angle(rotation.y, face_yaw, cfg.get("turn_speed", 12.0) * delta)
 
 	_update_animation(delta)
 	_update_saber(delta)
@@ -306,28 +306,27 @@ func _update_animation(delta: float) -> void:
 		var pitch := 0.0
 		var roll := 0.0
 		if attacking:
+			# Smooth windup then eased strike: no snapping
 			var t: float = 1.0 - attack_timer / float(cfg["attack_time"])
-			if t < 0.3:
-				# Windup: coil back
-				var w := t / 0.3
-				yaw_off = 0.55 * w
-				pitch = -0.1 * w
+			if t < 0.35:
+				var w := smoothstep(0.0, 1.0, t / 0.35)
+				yaw_off = 0.5 * w
+				pitch = -0.08 * w
 			else:
-				# Strike: sweep across
-				var s := (t - 0.3) / 0.7
-				yaw_off = lerpf(0.55, -1.05, minf(s * 1.4, 1.0))
-				pitch = lerpf(-0.1, 0.3, minf(s * 1.4, 1.0)) * (1.0 - s * 0.5)
+				var s := smoothstep(0.0, 1.0, (t - 0.35) / 0.65)
+				yaw_off = lerpf(0.5, -1.0, s)
+				pitch = 0.2 * sin(s * PI)
 		elif hit_stun > 0.0:
-			pitch = -0.18 * (hit_stun / 0.45)
+			pitch = -0.12 * smoothstep(0.0, 1.0, hit_stun / 0.45)
 		else:
-			pitch = walk * 0.06
-			roll = sin(_walk_phase) * 0.035 * walk
+			pitch = walk * 0.05
+			roll = sin(_walk_phase) * 0.015 * walk
 		# Idle breathing
 		var breath := sin(_walk_phase * 0.6) * 0.012 * (1.0 - walk)
-		model.position.y = cfg.get("model_offset_y", 0.0) + breath + sin(_walk_phase * 2.0) * 0.03 * walk
-		model.rotation.y = lerp_angle(model.rotation.y, _base_yaw + yaw_off, 14.0 * delta)
-		model.rotation.x = lerpf(model.rotation.x, pitch, 10.0 * delta)
-		model.rotation.z = lerpf(model.rotation.z, roll, 8.0 * delta)
+		model.position.y = cfg.get("model_offset_y", 0.0) + breath + sin(_walk_phase * 2.0) * 0.02 * walk
+		model.rotation.y = lerp_angle(model.rotation.y, _base_yaw + yaw_off, 9.0 * delta)
+		model.rotation.x = lerpf(model.rotation.x, pitch, 7.0 * delta)
+		model.rotation.z = lerpf(model.rotation.z, roll, 6.0 * delta)
 		return
 	if attacking or hit_stun > 0.3:
 		return
@@ -428,8 +427,8 @@ func take_hit(dmg: float, from: GroundFighter) -> void:
 	if blocking and facing > 0.25 and from.cfg["melee"]:
 		# Saber clash: blocked!
 		arena.saber_clash((global_position + from.global_position) / 2.0 + Vector3(0, 1.3, 0))
-		velocity -= to_attacker.normalized() * 3.0
-		from.velocity += to_attacker.normalized() * 3.0
+		velocity -= to_attacker.normalized() * 1.8
+		from.velocity += to_attacker.normalized() * 1.8
 		hp -= dmg * 0.15
 	elif blocking and facing > 0.25:
 		# Blaster bolt deflected
@@ -438,7 +437,7 @@ func take_hit(dmg: float, from: GroundFighter) -> void:
 	else:
 		hp -= dmg
 		hit_stun = 0.45
-		velocity -= to_attacker.normalized() * 4.0
+		velocity -= to_attacker.normalized() * 2.4
 		if anim != null and not attacking:
 			_play_oneshot(cfg["anims"]["hit"], 0.1, 1.2)
 		play_sound("res://assets/audio/hit.wav", -6.0)
@@ -487,7 +486,7 @@ func _ai_think(delta: float) -> void:
 	var skill: float = cfg.get("ai_skill", 0.6)
 	if cfg["melee"]:
 		var want := clampf((dist - saber_reach() * 0.75) * 0.8, -1.0, 1.0)
-		move_input = Vector2(_ai_strafe, want)
+		move_input = Vector2(_ai_strafe * 0.5, want)
 		# Block reactively when the player is mid-swing
 		set_blocking(_ai_want_block and enemy.attacking and dist < 4.0)
 		if dist < saber_reach() + 0.4 and not blocking and randf() < skill * 2.2 * delta * 60.0 * 0.02:

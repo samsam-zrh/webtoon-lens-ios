@@ -87,7 +87,7 @@ shader_type canvas_item;
 void fragment() {
 	vec2 uv = SCREEN_UV - 0.5;
 	float d = dot(uv, uv);
-	float v = smoothstep(0.18, 0.62, d) * 0.55;
+	float v = smoothstep(0.2, 0.65, d) * 0.35;
 	COLOR = vec4(0.0, 0.0, 0.02, v);
 }
 """
