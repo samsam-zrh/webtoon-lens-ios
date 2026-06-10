@@ -44,11 +44,14 @@ var _ai_want_block := false
 
 var model: Node3D
 var anim: AnimationPlayer
-var saber_pivot: Node3D          # Vader procedural swing pivot
+var saber_pivot: Node3D          # (unused for model-integrated blades)
 var blade_mesh: MeshInstance3D
 var blade_light: OmniLight3D
 var trail_base := Vector3.ZERO   # world-space saber base/tip, updated each frame
 var trail_tip := Vector3.ZERO
+var _blade_local_base := Vector3.ZERO
+var _blade_local_tip := Vector3.ZERO
+var _base_yaw := 0.0             # model rest yaw (procedural swing pivots around it)
 
 var _sfx_hum: AudioStreamPlayer3D
 var _sfx_step_t := 0.0
@@ -80,6 +83,7 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 		model.position.y = cfg["model_offset_y"]
 	add_child(model)
 
+	_base_yaw = cfg.get("model_yaw", 0.0)
 	anim = model.find_child("AnimationPlayer", true, false)
 	if anim != null:
 		_play(cfg["anims"]["idle"], 0.0)
@@ -115,43 +119,50 @@ func _setup_blade() -> void:
 			blade_light.omni_range = 2.6
 			blade_mesh.add_child(blade_light)
 	else:
-		# Vader: static Sketchfab model — attach a glowing blade on a pivot so
-		# we can swing it procedurally.
-		saber_pivot = Node3D.new()
-		saber_pivot.position = Vector3(0.5, 1.05, -0.25)
-		add_child(saber_pivot)
-		blade_mesh = MeshInstance3D.new()
-		var bm := CapsuleMesh.new()
-		bm.radius = 0.032
-		bm.height = 1.3
+		# Vader: the Sketchfab model ships with its own saber (blade mesh
+		# "Sabel svart" + glow core "Laser"): tint them into a red energy
+		# blade instead of bolting on a second saber.
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = color.lerp(Color.WHITE, 0.45)
+		mat.albedo_color = color.lerp(Color.WHITE, 0.35)
 		mat.emission_enabled = true
 		mat.emission = color
 		mat.emission_energy_multiplier = 4.5
-		bm.material = mat
-		blade_mesh.mesh = bm
-		blade_mesh.position = Vector3(0, 0.75, 0)
-		saber_pivot.add_child(blade_mesh)
-		var hilt := MeshInstance3D.new()
-		var hm := CylinderMesh.new()
-		hm.top_radius = 0.035
-		hm.bottom_radius = 0.04
-		hm.height = 0.28
-		var hmat := StandardMaterial3D.new()
-		hmat.albedo_color = Color(0.35, 0.36, 0.4)
-		hmat.metallic = 0.9
-		hmat.roughness = 0.3
-		hm.material = hmat
-		hilt.mesh = hm
-		saber_pivot.add_child(hilt)
-		blade_light = OmniLight3D.new()
-		blade_light.light_color = color
-		blade_light.light_energy = 1.0
-		blade_light.omni_range = 2.6
-		blade_light.position = Vector3(0, 0.7, 0)
-		saber_pivot.add_child(blade_light)
+		for mesh_name in ["DARTH_Sabel svart_0", "DARTH_Laser_0", "DARTH_Sabel vit_0"]:
+			var found := model.find_child(mesh_name, true, false)
+			if found is MeshInstance3D:
+				var fmi := found as MeshInstance3D
+				if mesh_name == "DARTH_Sabel vit_0":
+					# Stray white glow mesh from the source model: hide it
+					fmi.visible = false
+					continue
+				for i in fmi.mesh.get_surface_count():
+					fmi.set_surface_override_material(i, mat)
+				if blade_mesh == null or "svart" in mesh_name:
+					blade_mesh = fmi
+		if blade_mesh != null:
+			blade_light = OmniLight3D.new()
+			blade_light.light_color = color
+			blade_light.light_energy = 1.0
+			blade_light.omni_range = 2.6
+			blade_mesh.add_child(blade_light)
+
+	# Blade endpoints (local space) along the mesh's longest axis, for the
+	# swing trail and to position the light.
+	if blade_mesh != null:
+		var ab := blade_mesh.mesh.get_aabb()
+		var c := ab.get_center()
+		if ab.size.y >= ab.size.x and ab.size.y >= ab.size.z:
+			_blade_local_base = Vector3(c.x, ab.position.y, c.z)
+			_blade_local_tip = Vector3(c.x, ab.end.y, c.z)
+		elif ab.size.z >= ab.size.x:
+			_blade_local_base = Vector3(c.x, c.y, ab.end.z if absf(ab.end.z) < absf(ab.position.z) else ab.position.z)
+			_blade_local_tip = Vector3(c.x, c.y, ab.position.z if absf(ab.end.z) < absf(ab.position.z) else ab.end.z)
+		else:
+			_blade_local_base = Vector3(ab.position.x, c.y, c.z)
+			_blade_local_tip = Vector3(ab.end.x, c.y, c.z)
+		if blade_light != null:
+			blade_light.position = (_blade_local_base + _blade_local_tip) / 2.0
 
 func _setup_audio() -> void:
 	if cfg["melee"]:
@@ -283,13 +294,40 @@ func _physics_process(delta: float) -> void:
 
 func _update_animation(delta: float) -> void:
 	if anim == null:
-		# Vader procedural motion: slow bob + lean while walking
+		# Vader procedural motion: heavy walk sway, breathing bob, and a
+		# full-body swing while attacking (his blade is held raised, so
+		# twisting the torso sweeps it through a wide arc).
+		if model == null:
+			return
 		var hv := Vector2(velocity.x, velocity.z).length()
-		_walk_phase += delta * (1.0 + hv * 1.6)
-		if model != null:
-			model.position.y = cfg.get("model_offset_y", 0.0) + sin(_walk_phase * 2.0) * 0.02 * minf(hv, 1.0)
-			model.rotation.z = sin(_walk_phase) * 0.015 * minf(hv, 1.0)
-			model.rotation.x = clampf(hv * 0.015, 0.0, 0.05)
+		var walk := clampf(hv / 3.0, 0.0, 1.0)
+		_walk_phase += delta * (1.4 + hv * 1.8)
+		var yaw_off := 0.0
+		var pitch := 0.0
+		var roll := 0.0
+		if attacking:
+			var t: float = 1.0 - attack_timer / float(cfg["attack_time"])
+			if t < 0.3:
+				# Windup: coil back
+				var w := t / 0.3
+				yaw_off = 0.55 * w
+				pitch = -0.1 * w
+			else:
+				# Strike: sweep across
+				var s := (t - 0.3) / 0.7
+				yaw_off = lerpf(0.55, -1.05, minf(s * 1.4, 1.0))
+				pitch = lerpf(-0.1, 0.3, minf(s * 1.4, 1.0)) * (1.0 - s * 0.5)
+		elif hit_stun > 0.0:
+			pitch = -0.18 * (hit_stun / 0.45)
+		else:
+			pitch = walk * 0.06
+			roll = sin(_walk_phase) * 0.035 * walk
+		# Idle breathing
+		var breath := sin(_walk_phase * 0.6) * 0.012 * (1.0 - walk)
+		model.position.y = cfg.get("model_offset_y", 0.0) + breath + sin(_walk_phase * 2.0) * 0.03 * walk
+		model.rotation.y = lerp_angle(model.rotation.y, _base_yaw + yaw_off, 14.0 * delta)
+		model.rotation.x = lerpf(model.rotation.x, pitch, 10.0 * delta)
+		model.rotation.z = lerpf(model.rotation.z, roll, 8.0 * delta)
 		return
 	if attacking or hit_stun > 0.3:
 		return
@@ -316,22 +354,10 @@ func _update_saber(_delta: float) -> void:
 		if blade_light != null:
 			blade_light.visible = show
 	# Track world-space blade endpoints for the trail
-	if cfg["type"] == "jedi" and blade_mesh != null:
+	if blade_mesh != null:
 		var xf := blade_mesh.global_transform
-		trail_base = xf.origin
-		trail_tip = xf * Vector3(0, 0, -1.1)
-	elif saber_pivot != null:
-		var xf2 := saber_pivot.global_transform
-		trail_base = xf2 * Vector3(0, 0.1, 0)
-		trail_tip = xf2 * Vector3(0, 1.4, 0)
-	# Vader saber swing: animate the pivot during the attack
-	if saber_pivot != null:
-		if attacking:
-			var t: float = 1.0 - attack_timer / float(cfg["attack_time"])
-			var swing := sin(t * PI)
-			saber_pivot.rotation = Vector3(-swing * 2.2, 0.3 - t * 1.2, swing * 0.4)
-		else:
-			saber_pivot.rotation = saber_pivot.rotation.lerp(Vector3(0.55, 0.0, -0.25), 0.15)
+		trail_base = xf * _blade_local_base
+		trail_tip = xf * _blade_local_tip
 
 func _footsteps(delta: float) -> void:
 	var hv := Vector2(velocity.x, velocity.z).length()

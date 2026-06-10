@@ -30,8 +30,8 @@ const ROSTER := {
 		"model": "res://assets/models/vader/scene.gltf",
 		"normalize_len": 2.25, "model_yaw": PI, "model_offset_y": 1.14,
 		"saber_color": Color(1.0, 0.12, 0.08),
-		"hp": 170.0, "speed": 3.1, "dmg": 26.0, "reach": 2.7, "lunge": 3.5,
-		"attack_time": 0.8, "attack_move_factor": 0.5,
+		"hp": 170.0, "speed": 3.4, "dmg": 26.0, "reach": 2.8, "lunge": 4.5,
+		"attack_time": 0.85, "attack_move_factor": 0.5,
 		"ai_skill": 0.5, "ai_block_chance": 0.3,
 		"quote": "Je trouve votre manque de foi déplorable.",
 		"anims": {},
@@ -39,7 +39,7 @@ const ROSTER := {
 	"trooper": {
 		"name": "Stormtrooper", "type": "shooter", "melee": false,
 		"model": "res://assets/models/characters/trooper.glb",
-		"model_yaw": 0.0, "model_scale": 1.0,
+		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(1.0, 0.3, 0.2),
 		"hp": 90.0, "speed": 6.2, "dmg": 8.0,
 		"attack_time": 0.5, "attack_move_factor": 0.8,
@@ -154,6 +154,10 @@ func _build_corridor() -> void:
 	env.ssao_intensity = 1.6
 	env.ssr_enabled = true
 	env.ssr_max_steps = 48
+	env.sdfgi_enabled = true
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.06, 0.07, 0.1)
+	env.fog_density = 0.012
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.05
 	var we := WorldEnvironment.new()
@@ -200,12 +204,25 @@ func _build_corridor() -> void:
 	window_mat.emission = Color(0.15, 0.3, 0.45)
 	window_mat.emission_energy_multiplier = 0.5
 
-	# Floor + ceiling
-	_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L), floor_mat)
+	# Floor: real textured deck tiles from the Jedi Outcast remake (2x2 m,
+	# 5 variants), over an invisible collision slab. Ceiling stays flat.
+	_collision_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L))
+	var tiles: Array = _collect_floor_tiles()
+	if tiles.is_empty():
+		_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L), floor_mat)
+	else:
+		var trng := RandomNumberGenerator.new()
+		trng.seed = 42
+		var nx := int(HALL_W / 2.0)
+		var nz := int(HALL_L / 2.0)
+		for ix in nx:
+			for iz in nz:
+				var mi := MeshInstance3D.new()
+				mi.mesh = tiles[trng.randi_range(0, tiles.size() - 1)]
+				mi.position = Vector3(-HALL_W / 2.0 + 1.0 + ix * 2.0, -0.161, -HALL_L / 2.0 + 1.0 + iz * 2.0)
+				mi.rotation.y = (PI / 2.0) * trng.randi_range(0, 3)
+				add_child(mi)
 	_box(Vector3(0, HALL_H + 0.1, 0), Vector3(HALL_W, 0.2, HALL_L), wall_mat)
-	# Center floor walkway accents
-	_box(Vector3(-2.4, 0.011, 0), Vector3(0.12, 0.004, HALL_L), dark_mat, false)
-	_box(Vector3(2.4, 0.011, 0), Vector3(0.12, 0.004, HALL_L), dark_mat, false)
 
 	# Walls with panel details
 	for side: float in [-1.0, 1.0]:
@@ -226,6 +243,45 @@ func _build_corridor() -> void:
 			else:
 				# Tech greeble panel
 				_box(Vector3(x - side * 0.07, 1.5, z), Vector3(0.05, 1.4, 2.2), dark_mat, false)
+
+	# Conduits/pipes running along the top of each wall + floor light strips
+	var pipe_mat := StandardMaterial3D.new()
+	pipe_mat.albedo_color = Color(0.28, 0.29, 0.33)
+	pipe_mat.metallic = 0.75
+	pipe_mat.roughness = 0.35
+	var strip_mat := StandardMaterial3D.new()
+	strip_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	strip_mat.albedo_color = Color(0.6, 0.8, 1.0)
+	strip_mat.emission_enabled = true
+	strip_mat.emission = Color(0.55, 0.75, 1.0)
+	strip_mat.emission_energy_multiplier = 1.4
+	for side: float in [-1.0, 1.0]:
+		var x2 := side * (HALL_W / 2.0 - 0.22)
+		for pi in 2:
+			var pipe := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.07 - pi * 0.025
+			cm.bottom_radius = cm.top_radius
+			cm.height = HALL_L
+			cm.material = pipe_mat
+			pipe.mesh = cm
+			pipe.rotation.x = PI / 2.0
+			pipe.position = Vector3(x2, HALL_H - 0.45 - pi * 0.22, 0)
+			add_child(pipe)
+		# Soft blue-white light strip at floor level
+		var strip := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(0.03, 0.04, HALL_L)
+		sm.material = strip_mat
+		strip.mesh = sm
+		strip.position = Vector3(side * (HALL_W / 2.0 - 0.13), 0.05, 0)
+		add_child(strip)
+
+	# Dark cross beams under the ceiling
+	var n_beams := int(HALL_L / 6.0)
+	for i in n_beams:
+		var z3 := -HALL_L / 2.0 + 6.0 + i * 6.0
+		_box(Vector3(0, HALL_H - 0.12, z3), Vector3(HALL_W, 0.22, 0.4), dark_mat, false)
 
 	# Ceiling light fixtures + lights
 	var n_lights := int(HALL_L / 6.0)
@@ -260,15 +316,37 @@ func _box(pos: Vector3, size: Vector3, mat: Material, with_collision: bool = tru
 	mi.position = pos
 	add_child(mi)
 	if with_collision:
-		var sb := StaticBody3D.new()
-		sb.collision_layer = 1
-		var cs := CollisionShape3D.new()
-		var shape := BoxShape3D.new()
-		shape.size = size
-		cs.shape = shape
-		sb.add_child(cs)
-		sb.position = pos
-		add_child(sb)
+		_collision_box(pos, size)
+
+func _collision_box(pos: Vector3, size: Vector3) -> void:
+	var sb := StaticBody3D.new()
+	sb.collision_layer = 1
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	cs.shape = shape
+	sb.add_child(cs)
+	sb.position = pos
+	add_child(sb)
+
+# One deck-tile mesh per LevelFloor variant in the remake's instanced file.
+func _collect_floor_tiles() -> Array:
+	var tiles: Array = []
+	var ps: PackedScene = load("res://assets/models/imperial_base.glb")
+	if ps == null:
+		return tiles
+	var inst: Node = ps.instantiate()
+	var stack: Array = [inst]
+	var seen: Dictionary = {}
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D and "Floor" in n.get_parent().name and not seen.has(n.get_parent().name):
+			seen[n.get_parent().name] = true
+			tiles.append((n as MeshInstance3D).mesh)
+		for c in n.get_children():
+			stack.push_back(c)
+	inst.free()
+	return tiles
 
 # Real crates/barrels from the Jedi Outcast remake, placed along the walls.
 func _place_props() -> void:

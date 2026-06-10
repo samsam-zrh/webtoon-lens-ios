@@ -20,6 +20,12 @@ func _ready() -> void:
 	if "--ground" in args:
 		_mode = "ground"
 		start_game("luke", "vader")
+	elif "--ground2" in args:
+		_mode = "ground"
+		start_game("luke", "trooper")
+	elif "--groundmenu" in args:
+		_mode = "ground"
+		show_menu()
 	elif "--duel" in args:
 		start_game("anakin", "vader")
 	else:
@@ -94,13 +100,51 @@ func _build_menu_world() -> void:
 	_menu_root.add_child(cam)
 	cam.make_current()
 
-	var xs := [-14.0, 0.0, 14.0]
-	for i in ORDER.size():
-		var cfg := ShipsDB.get_cfg(ORDER[i])
-		var m := ModelUtil.load_model(cfg["model"], cfg["target_len"], cfg["model_rot"])
-		m.position = Vector3(xs[i], 1.5, 0)
-		_menu_root.add_child(m)
-		_preview_ships.append(m)
+	if _mode == "ships":
+		var xs := [-14.0, 0.0, 14.0]
+		for i in ORDER.size():
+			var cfg := ShipsDB.get_cfg(ORDER[i])
+			var m := ModelUtil.load_model(cfg["model"], cfg["target_len"], cfg["model_rot"])
+			m.position = Vector3(xs[i], 1.5, 0)
+			_menu_root.add_child(m)
+			_preview_ships.append(m)
+	else:
+		# Character previews on pedestals, playing their idle animation
+		var pedestal_mat := StandardMaterial3D.new()
+		pedestal_mat.albedo_color = Color(0.12, 0.13, 0.18)
+		pedestal_mat.metallic = 0.7
+		pedestal_mat.roughness = 0.3
+		var specs := [
+			["luke", Vector3(-2.6, 0.7, 19.5), PI, "01_IdleArmed"],
+			["vader", Vector3(0.0, 0.7, 19.0), 0.0, ""],
+			["trooper", Vector3(2.6, 0.7, 19.5), 0.0, "01_Idle"],
+		]
+		for spec in specs:
+			var gcfg: Dictionary = GroundArena.ROSTER[spec[0]]
+			var holder := Node3D.new()
+			holder.position = spec[1]
+			holder.rotation.y = spec[2]
+			_menu_root.add_child(holder)
+			var m2: Node3D
+			if gcfg.has("normalize_len"):
+				m2 = ModelUtil.load_model(gcfg["model"], gcfg["normalize_len"], gcfg.get("model_yaw", 0.0))
+				m2.position.y = gcfg["normalize_len"] / 2.0
+			else:
+				m2 = load(gcfg["model"]).instantiate()
+			holder.add_child(m2)
+			var ap: AnimationPlayer = m2.find_child("AnimationPlayer", true, false)
+			if ap != null and spec[3] != "" and ap.has_animation(spec[3]):
+				ap.play(spec[3])
+			var ped := MeshInstance3D.new()
+			var pm := CylinderMesh.new()
+			pm.top_radius = 1.0
+			pm.bottom_radius = 1.1
+			pm.height = 0.1
+			pm.material = pedestal_mat
+			ped.mesh = pm
+			ped.position.y = -0.05
+			holder.add_child(ped)
+			_preview_ships.append(holder)
 
 	var amb := AudioStreamPlayer.new()
 	var stream: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
@@ -180,9 +224,12 @@ func _build_menu_ui() -> void:
 	for id in (ORDER if _mode == "ships" else ["luke", "vader", "trooper"]):
 		row.add_child(_make_card(id))
 
-	var help := UiKit.label(
-		"Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause",
-		15, Color(0.62, 0.65, 0.75))
+	var help_text: String
+	if _mode == "ships":
+		help_text = "Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause"
+	else:
+		help_text = "ZQSD : se déplacer   •   Clic : attaque (enchaîne le combo !)   •   Clic droit : parade   •   Maj : esquive   •   Échap : menu"
+	var help := UiKit.label(help_text, 15, Color(0.62, 0.65, 0.75))
 	help.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
