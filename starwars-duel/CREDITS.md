@@ -22,6 +22,8 @@ Voie lactée (8K), Jupiter, Saturne + anneaux, Lune : textures du pack
 licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), basées sur
 les données NASA.
 
+| Ciel HDR du désert (goegap), texture de sable PBR (aerial_sand), rocher photoscanné (boulder_01) | Poly Haven | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [polyhaven.com](https://polyhaven.com) |
+
 Merci à ces artistes pour leur travail partagé librement.
 
 ## Audio

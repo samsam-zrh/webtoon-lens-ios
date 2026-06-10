@@ -154,13 +154,9 @@ func _build_corridor() -> void:
 func _build_environment() -> void:
 	var env := Environment.new()
 	var sky := Sky.new()
-	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.33, 0.45, 0.62)
-	sm.sky_horizon_color = Color(0.82, 0.73, 0.60)
-	sm.ground_bottom_color = Color(0.42, 0.36, 0.29)
-	sm.ground_horizon_color = Color(0.80, 0.71, 0.58)
-	sm.sun_angle_max = 18.0
-	sm.sun_curve = 0.12
+	var sm := PanoramaSkyMaterial.new()
+	sm.panorama = load("res://assets/textures/desert_sky.hdr")
+	sm.energy_multiplier = 1.6
 	sky.sky_material = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
@@ -168,7 +164,7 @@ func _build_environment() -> void:
 	env.ambient_light_energy = 1.0
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.0
+	env.tonemap_exposure = 1.08
 	env.glow_enabled = true
 	env.glow_intensity = 0.3
 	env.glow_hdr_threshold = 1.25
@@ -183,18 +179,34 @@ func _build_environment() -> void:
 	we.environment = env
 	add_child(we)
 
-	# Twin suns: the procedural sky renders both directional lights as discs
+	# Key light roughly aligned with the HDRI sun
 	var sun1 := DirectionalLight3D.new()
-	sun1.light_energy = 1.25
+	sun1.light_energy = 1.3
 	sun1.light_color = Color(1.0, 0.93, 0.80)
-	sun1.rotation = Vector3(-0.62, 0.85, 0.0)
+	sun1.rotation = Vector3(-0.55, 0.9, 0.0)
 	sun1.shadow_enabled = true
-	sun1.directional_shadow_max_distance = 80.0
+	sun1.directional_shadow_max_distance = 90.0
+	sun1.shadow_blur = 1.2
 	add_child(sun1)
+	# Tatooine touch: a faint second sun disc in the sky + its fill light
+	var disc := MeshInstance3D.new()
+	var dm := SphereMesh.new()
+	dm.radius = 28.0
+	dm.height = 56.0
+	var dmm := StandardMaterial3D.new()
+	dmm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dmm.albedo_color = Color(1.0, 0.85, 0.6)
+	dmm.emission_enabled = true
+	dmm.emission = Color(1.0, 0.82, 0.55)
+	dmm.emission_energy_multiplier = 4.0
+	dm.material = dmm
+	disc.mesh = dm
+	disc.position = Vector3(-900, 520, -1300)
+	add_child(disc)
 	var sun2 := DirectionalLight3D.new()
-	sun2.light_energy = 0.35
-	sun2.light_color = Color(1.0, 0.78, 0.55)
-	sun2.rotation = Vector3(-0.50, 1.05, 0.0)
+	sun2.light_energy = 0.25
+	sun2.light_color = Color(1.0, 0.8, 0.58)
+	sun2.rotation = Vector3(-0.32, 2.53, 0.0)
 	sun2.shadow_enabled = false
 	add_child(sun2)
 
@@ -216,7 +228,7 @@ func _build_terrain() -> void:
 	var n := 80
 	var step := size / n
 	var half := size / 2.0
-	var sand := Color(0.78, 0.65, 0.47)
+	var sand := Color(0.97, 0.93, 0.88)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for iz in range(n + 1):
@@ -224,8 +236,9 @@ func _build_terrain() -> void:
 			var x := -half + ix * step
 			var z := -half + iz * step
 			var h := _terrain_height(x, z)
-			var tone := 0.92 + 0.08 * _tnoise.get_noise_2d(x * 7.0 + 100.0, z * 7.0)
+			var tone := 0.9 + 0.1 * _tnoise.get_noise_2d(x * 7.0 + 100.0, z * 7.0)
 			st.set_color(Color(sand.r * tone, sand.g * tone, sand.b * tone))
+			st.set_uv(Vector2(x / 5.0, z / 5.0))
 			st.add_vertex(Vector3(x, h, z))
 	for iz in range(n):
 		for ix in range(n):
@@ -237,10 +250,15 @@ func _build_terrain() -> void:
 			st.add_index(a + n + 1)
 			st.add_index(a + n + 2)
 	st.generate_normals()
+	st.generate_tangents()
 	var mesh := st.commit()
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
-	mat.albedo_color = Color(1, 1, 1)
+	mat.albedo_color = Color(1.06, 0.98, 0.86)
+	mat.albedo_texture = load("res://assets/textures/sand_diff.jpg")
+	mat.normal_enabled = true
+	mat.normal_texture = load("res://assets/textures/sand_nor.jpg")
+	mat.normal_scale = 0.8
 	mat.roughness = 1.0
 	mesh.surface_set_material(0, mat)
 	var mi := MeshInstance3D.new()
@@ -253,30 +271,73 @@ func _build_scenery() -> void:
 	# Sandstone rocks ringing the arena (real community rock models, tinted)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4
-	for i in 10:
-		var ang := TAU * i / 10.0 + rng.randf_range(-0.15, 0.15)
-		var r := rng.randf_range(ARENA_R + 1.5, ARENA_R + 7.0)
-		var s := rng.randf_range(2.2, 5.0)
-		var rock := ModelUtil.load_model("res://assets/models/asteroids/asteroid_toastie.glb", s, rng.randf() * TAU)
+	for i in 11:
+		var ang := TAU * i / 11.0 + rng.randf_range(-0.15, 0.15)
+		var r := rng.randf_range(ARENA_R + 1.0, ARENA_R + 7.0)
+		var s := rng.randf_range(2.0, 5.5)
+		var rock := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", s, rng.randf() * TAU)
 		var pos := Vector3(cos(ang) * r, 0, sin(ang) * r)
-		rock.position = Vector3(pos.x, _terrain_height(pos.x, pos.z) + s * 0.18, pos.z)
-		ModelUtil.tint(rock, Color(0.95, 0.78, 0.58))
+		rock.position = Vector3(pos.x, _terrain_height(pos.x, pos.z) + s * 0.22, pos.z)
+		rock.rotation.z = rng.randf_range(-0.15, 0.15)
 		add_child(rock)
 		_collision_box(rock.position, Vector3(s * 0.8, s, s * 0.8))
-	# Larger mesas on the far dunes
-	for i in 5:
-		var ang2 := TAU * i / 5.0 + 0.4
-		var r2 := rng.randf_range(70.0, 120.0)
-		var s2 := rng.randf_range(14.0, 26.0)
-		var mesa := ModelUtil.load_model("res://assets/models/asteroids/asteroids_jarlan.glb", s2, rng.randf() * TAU)
+	# Larger rock formations on the far dunes
+	for i in 6:
+		var ang2 := TAU * i / 6.0 + 0.35
+		var r2 := rng.randf_range(65.0, 125.0)
+		var s2 := rng.randf_range(16.0, 30.0)
+		var mesa := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", s2, rng.randf() * TAU)
 		var p2 := Vector3(cos(ang2) * r2, 0, sin(ang2) * r2)
-		mesa.position = Vector3(p2.x, _terrain_height(p2.x, p2.z) + s2 * 0.1, p2.z)
-		ModelUtil.tint(mesa, Color(0.92, 0.74, 0.55))
+		mesa.position = Vector3(p2.x, _terrain_height(p2.x, p2.z) + s2 * 0.12, p2.z)
 		add_child(mesa)
-
-	# Small camp: real crates/barrel + a moisture vaporator
-	_place_props()
+	_scatter_pebbles()
+	# Small camp: a moisture vaporator and a couple of camp rocks
 	_build_vaporator(Vector3(-9.5, 0, 6.5))
+	for spot in [Vector3(8.5, 0, -7.0), Vector3(-10.8, 0, 4.6)]:
+		var camp_rock := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", 1.2, randf() * TAU)
+		camp_rock.position = spot + Vector3(0, 0.25, 0)
+		add_child(camp_rock)
+		_collision_box(spot + Vector3(0, 0.5, 0), Vector3(1.1, 1.0, 1.1))
+
+func _scatter_pebbles() -> void:
+	var ps: PackedScene = load("res://assets/models/boulder/boulder_01_2k.gltf")
+	if ps == null:
+		return
+	var inst: Node = ps.instantiate()
+	var src: MeshInstance3D = inst.find_child("*", true, false) as MeshInstance3D
+	if src == null:
+		var stack: Array = [inst]
+		while not stack.is_empty():
+			var nd: Node = stack.pop_back()
+			if nd is MeshInstance3D:
+				src = nd
+				break
+			for c in nd.get_children():
+				stack.push_back(c)
+	if src == null:
+		inst.free()
+		return
+	var mesh: Mesh = src.mesh
+	var native := mesh.get_aabb().get_longest_axis_size()
+	inst.free()
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = 160
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9
+	for i in mm.instance_count:
+		var ang := rng.randf() * TAU
+		var r := sqrt(rng.randf()) * 70.0
+		var x := cos(ang) * r
+		var z := sin(ang) * r
+		var sc := rng.randf_range(0.12, 0.5) / maxf(native, 0.01)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc)
+		var y := _terrain_height(x, z) + native * sc * 0.1
+		mm.set_instance_transform(i, Transform3D(basis, Vector3(x, y, z)))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	add_child(mmi)
 
 func _build_vaporator(at: Vector3) -> void:
 	var metal := StandardMaterial3D.new()
@@ -342,45 +403,6 @@ func _collision_box(pos: Vector3, size: Vector3) -> void:
 	sb.add_child(cs)
 	sb.position = pos
 	add_child(sb)
-
-# Real crates/barrels from the Jedi Outcast remake as a small camp.
-func _place_props() -> void:
-	var sources: Array = []
-	for path in ["res://assets/models/imperial_base.glb", "res://assets/models/imperial_base_dc.glb"]:
-		var ps: PackedScene = load(path)
-		if ps == null:
-			continue
-		var inst: Node = ps.instantiate()
-		var stack: Array = [inst]
-		var seen: Dictionary = {}
-		while not stack.is_empty():
-			var nd: Node = stack.pop_back()
-			if nd is MeshInstance3D:
-				var mi := nd as MeshInstance3D
-				var base: String = mi.name.get_slice("_", 0)
-				if not seen.has(base) and (base.begins_with("Create") or "Barrel" in mi.name or "barrel" in mi.name):
-					seen[base] = true
-					sources.append(mi.mesh)
-			for c in nd.get_children():
-				stack.push_back(c)
-		inst.free()
-	if sources.is_empty():
-		return
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 66
-	var spots := [Vector3(8.5, 0, -7.0), Vector3(9.8, 0, -5.6), Vector3(-10.5, 0, 5.0)]
-	for spot in spots:
-		var mesh: Mesh = sources[rng.randi_range(0, sources.size() - 1)]
-		var aabb := mesh.get_aabb()
-		var target_h := rng.randf_range(0.9, 1.3)
-		var s := target_h / maxf(aabb.size.y, 0.01)
-		var mi2 := MeshInstance3D.new()
-		mi2.mesh = mesh
-		mi2.scale = Vector3.ONE * s
-		mi2.position = spot - Vector3(aabb.get_center().x, aabb.position.y, aabb.get_center().z) * s
-		mi2.rotation.y = rng.randf_range(0, TAU)
-		add_child(mi2)
-		_collision_box(spot + Vector3(0, target_h / 2.0, 0), Vector3(aabb.size.x * s, target_h, aabb.size.z * s))
 
 # ------------------------------------------------------------ HUD
 
