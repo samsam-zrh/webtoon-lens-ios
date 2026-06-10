@@ -71,14 +71,7 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 	shape.position.y = 0.9
 	add_child(shape)
 
-	if cfg.has("normalize_len"):
-		# Sketchfab model in centimeters: normalize height and recenter
-		model = ModelUtil.load_model(cfg["model"], cfg["normalize_len"], cfg.get("model_yaw", 0.0))
-	else:
-		model = load(cfg["model"]).instantiate()
-		if cfg.has("model_scale"):
-			model.scale = Vector3.ONE * cfg["model_scale"]
-		model.rotation.y = cfg.get("model_yaw", 0.0)
+	model = build_character_model(cfg)
 	if cfg.has("model_offset_y"):
 		model.position.y = cfg["model_offset_y"]
 	add_child(model)
@@ -90,6 +83,53 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 
 	_setup_blade()
 	_setup_audio()
+
+# Builds the visual model for a roster entry; the "vader" variant dresses the
+# animated Kyle rig as Dark Vader (real helmet model, blackened suit).
+static func build_character_model(cfg: Dictionary) -> Node3D:
+	var m: Node3D
+	if cfg.has("normalize_len"):
+		m = ModelUtil.load_model(cfg["model"], cfg["normalize_len"], cfg.get("model_yaw", 0.0))
+	else:
+		m = load(cfg["model"]).instantiate()
+		if cfg.has("model_scale"):
+			m.scale = Vector3.ONE * cfg["model_scale"]
+		m.rotation.y = cfg.get("model_yaw", 0.0)
+	if cfg.get("variant", "") == "vader":
+		_apply_vader_look(m)
+	return m
+
+static func _apply_vader_look(m: Node3D) -> void:
+	# Hide Kyle's head/hair so the helmet replaces them
+	for n in ["Kyle_Katarn_FaceMesh_LOD2", "Kyle_Katarn_FaceMesh_LOD2_Eyes",
+			"Hair_S_Casual_CardsMesh_Group0_LOD1", "Beard_L_Full_CardsMesh_Group0_LOD1",
+			"Mustache_L_Full_CardsMesh_Group0_LOD2"]:
+		var found := m.find_child(n, true, false)
+		if found is MeshInstance3D:
+			(found as MeshInstance3D).visible = false
+	# Blacken the outfit into the dark armor
+	ModelUtil.tint(m, Color(0.10, 0.10, 0.13))
+	# Menu/preview coherence: tint the rig's blade red for Vader
+	var bl := m.find_child("lightblade_Cylinder_001", true, false)
+	var blm: MeshInstance3D = bl if bl is MeshInstance3D else (bl.find_child("*", true, false) as MeshInstance3D if bl != null else null)
+	if blm != null:
+		var bmat := StandardMaterial3D.new()
+		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bmat.albedo_color = Color(1.0, 0.35, 0.3)
+		bmat.emission_enabled = true
+		bmat.emission = Color(1.0, 0.12, 0.08)
+		bmat.emission_energy_multiplier = 4.5
+		for i in blm.mesh.get_surface_count():
+			blm.set_surface_override_material(i, bmat)
+	# Real Darth Vader helmet (Lae11, CC-BY) attached to the head bone
+	var sk: Skeleton3D = m.find_child("Skeleton3D", true, false)
+	if sk != null:
+		var att := BoneAttachment3D.new()
+		sk.add_child(att)
+		att.bone_name = "mixamorig_Head"
+		var helmet := ModelUtil.load_model("res://assets/models/vader_helmet.glb", 44.0, 0.0)
+		helmet.position = Vector3(0, 8.0, 1.0)
+		att.add_child(helmet)
 
 func _setup_blade() -> void:
 	if not cfg["melee"]:
@@ -173,9 +213,9 @@ func _setup_audio() -> void:
 		_sfx_hum.stream = hum
 		_sfx_hum.unit_size = 6.0
 		_sfx_hum.volume_db = -10.0
-		_sfx_hum.pitch_scale = 1.0 if cfg["type"] == "jedi" else 0.82
+		_sfx_hum.pitch_scale = 0.82 if cfg.get("variant", "") == "vader" else 1.0
 		add_child(_sfx_hum)
-	if cfg["type"] == "vader":
+	if cfg.get("variant", "") == "vader":
 		var breath := AudioStreamPlayer3D.new()
 		var bs: AudioStreamWAV = load("res://assets/audio/vader_breath.wav").duplicate()
 		bs.loop_mode = AudioStreamWAV.LOOP_FORWARD

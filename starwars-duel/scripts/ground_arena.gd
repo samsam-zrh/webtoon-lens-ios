@@ -26,15 +26,20 @@ const ROSTER := {
 		},
 	},
 	"vader": {
-		"name": "Dark Vador", "type": "vader", "melee": true,
-		"model": "res://assets/models/vader/scene.gltf",
-		"normalize_len": 2.25, "model_yaw": PI, "model_offset_y": 1.14,
+		"name": "Dark Vador", "type": "jedi", "variant": "vader", "melee": true,
+		"model": "res://assets/models/characters/jedi.glb",
+		"model_yaw": 0.0, "model_scale": 1.0,
 		"saber_color": Color(1.0, 0.12, 0.08),
-		"hp": 170.0, "speed": 3.4, "dmg": 26.0, "reach": 2.8, "lunge": 4.5, "turn_speed": 6.5,
-		"attack_time": 0.85, "attack_move_factor": 0.5,
-		"ai_skill": 0.5, "ai_block_chance": 0.3,
+		"hp": 160.0, "speed": 4.6, "dmg": 22.0, "reach": 2.5, "lunge": 4.5, "turn_speed": 9.0,
+		"attack_time": 0.7, "attack_anim_speed": 1.1, "attack_move_factor": 0.35,
+		"ai_skill": 0.5, "ai_block_chance": 0.35,
 		"quote": "Je trouve votre manque de foi déplorable.",
-		"anims": {},
+		"anims": {
+			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
+			"run_l": "10_RunLeft", "run_r": "09_RunRight",
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
+			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
+		},
 	},
 	"trooper": {
 		"name": "Stormtrooper", "type": "shooter", "melee": false,
@@ -221,6 +226,9 @@ func _terrain_height(x: float, z: float) -> float:
 		_tnoise.fractal_octaves = 3
 	var d := Vector2(x, z).length()
 	var flat := smoothstep(ARENA_R - 4.0, ARENA_R + 22.0, d)
+	# Keep the ground level around the village too
+	var dv := Vector2(x - 0.0, z + 42.0).length()
+	flat *= smoothstep(16.0, 30.0, dv)
 	return _tnoise.get_noise_2d(x, z) * 6.0 * flat
 
 func _build_terrain() -> void:
@@ -291,6 +299,20 @@ func _build_scenery() -> void:
 		mesa.position = Vector3(p2.x, _terrain_height(p2.x, p2.z) + s2 * 0.12, p2.z)
 		add_child(mesa)
 	_scatter_pebbles()
+	# Tatooine settlement (real Sketchfab scene, CC-BY) on the north side
+	for spec in [[Vector3(0, 0, -42), 0.2, 29.0], [Vector3(-24, 0, -34), 1.1, 22.0]]:
+		var village := ModelUtil.load_model("res://assets/models/tatooine/tatooine.glb", spec[2], spec[1])
+		var vb := ModelUtil.compute_aabb(village, Transform3D.IDENTITY)
+		village.position = spec[0] - Vector3(0, vb.position.y, 0)
+		add_child(village)
+		var vstack: Array = [village]
+		while not vstack.is_empty():
+			var vn: Node = vstack.pop_back()
+			if vn is MeshInstance3D:
+				(vn as MeshInstance3D).create_trimesh_collision()
+			for c in vn.get_children():
+				vstack.push_back(c)
+
 	# Small camp: a moisture vaporator and a couple of camp rocks
 	_build_vaporator(Vector3(-9.5, 0, 6.5))
 	for spot in [Vector3(8.5, 0, -7.0), Vector3(-10.8, 0, 4.6)]:

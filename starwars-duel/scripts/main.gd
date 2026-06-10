@@ -116,7 +116,7 @@ func _build_menu_world() -> void:
 		pedestal_mat.roughness = 0.3
 		var specs := [
 			["luke", Vector3(-2.6, 0.7, 19.5), PI, "01_IdleArmed"],
-			["vader", Vector3(0.0, 0.7, 19.0), 0.0, ""],
+			["vader", Vector3(0.0, 0.7, 19.0), PI, "01_IdleArmed"],
 			["trooper", Vector3(2.6, 0.7, 19.5), 0.0, "01_Idle"],
 		]
 		for spec in specs:
@@ -125,12 +125,7 @@ func _build_menu_world() -> void:
 			holder.position = spec[1]
 			holder.rotation.y = spec[2]
 			_menu_root.add_child(holder)
-			var m2: Node3D
-			if gcfg.has("normalize_len"):
-				m2 = ModelUtil.load_model(gcfg["model"], gcfg["normalize_len"], gcfg.get("model_yaw", 0.0))
-				m2.position.y = gcfg["normalize_len"] / 2.0
-			else:
-				m2 = load(gcfg["model"]).instantiate()
+			var m2: Node3D = GroundFighter.build_character_model(gcfg)
 			holder.add_child(m2)
 			var ap: AnimationPlayer = m2.find_child("AnimationPlayer", true, false)
 			if ap != null and spec[3] != "" and ap.has_animation(spec[3]):
