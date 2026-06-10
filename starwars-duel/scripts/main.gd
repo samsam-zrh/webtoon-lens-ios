@@ -177,7 +177,7 @@ func _build_menu_ui() -> void:
 	row.position.y = -64
 	root.add_child(row)
 
-	for id in (ORDER if _mode == "ships" else ["vader", "luke", "han"]):
+	for id in (ORDER if _mode == "ships" else ["luke", "vader", "trooper"]):
 		row.add_child(_make_card(id))
 
 	var help := UiKit.label(

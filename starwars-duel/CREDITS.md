@@ -11,6 +11,9 @@
 
 | Asteroids (champ décoratif) | Jarlan Perez | CC-BY 3.0 | [Poly Pizza](https://poly.pizza/m/9k18F9bT43N) |
 | Asteroid | J-Toastie | CC-BY 4.0 | [Poly Pizza](https://poly.pizza/m/YS1jpm3mNr) |
+| Darth Vader (personnage) | AFTONBLADET / Makeamo | CC-BY 4.0 | [Sketchfab](https://sketchfab.com/3d-models/darth-vader-by-makeamo-5b3371f4789c41eeaa691c9a3dfe1a96) |
+| Jedi animé (Kyle Katarn), Stormtrooper animé, caisses/tonneaux | projet fan « Jedi Outcast remake » (pxmaschine) | usage fan non commercial | [GitHub](https://github.com/pxmaschine/prj010-jedi-outcast-remake) |
+| Sabre laser (menu) | Martin Calviello | CC-BY | [Poly Pizza](https://poly.pizza/m/bsFV-B_VG17) |
 
 ## Textures planétaires et ciel
 

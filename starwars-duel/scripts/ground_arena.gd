@@ -1,213 +1,328 @@
 class_name GroundArena
 extends Node3D
 
-# Second game mode: 1v1 character duel on a platform.
-# Vader is a real community 3D model; Luke and Han are dark silhouettes
-# wielding a real lightsaber model / a blaster.
+# Battlefront-style 1v1 character duel inside an Imperial corridor.
+# Real animated character models (see CREDITS.md), over-shoulder camera,
+# saber combos, blocking, clashes and blaster fire.
 
 signal request_restart
 signal request_menu
 
 const ROSTER := {
-	"vader": {"name": "Dark Vador", "hp": 130.0, "speed": 6.5, "melee": true,
-		"saber_color": Color(1.0, 0.15, 0.1), "dmg": 14.0, "quote": "Je trouve votre manque de foi déplorable."},
-	"luke": {"name": "Luke Skywalker", "hp": 100.0, "speed": 8.5, "melee": true,
-		"saber_color": Color(0.3, 1.0, 0.4), "dmg": 12.0, "quote": "Je suis un Jedi, comme mon père avant moi."},
-	"han": {"name": "Han Solo", "hp": 90.0, "speed": 8.0, "melee": false,
-		"saber_color": Color(1.0, 0.3, 0.2), "dmg": 9.0, "quote": "Ne me dites jamais quelles sont mes chances !"},
+	"luke": {
+		"name": "Luke Skywalker", "type": "jedi", "melee": true,
+		"model": "res://assets/models/characters/jedi.glb",
+		"model_yaw": 0.0, "model_scale": 1.0,
+		"saber_color": Color(0.3, 1.0, 0.4),
+		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5,
+		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.3,
+		"ai_skill": 0.55, "ai_block_chance": 0.4,
+		"quote": "Je suis un Jedi, comme mon père avant moi.",
+		"anims": {
+			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
+			"run_l": "10_RunLeft", "run_r": "09_RunRight",
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
+			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
+		},
+	},
+	"vader": {
+		"name": "Dark Vador", "type": "vader", "melee": true,
+		"model": "res://assets/models/vader/scene.gltf",
+		"normalize_len": 2.25, "model_yaw": PI, "model_offset_y": 1.14,
+		"saber_color": Color(1.0, 0.12, 0.08),
+		"hp": 170.0, "speed": 3.1, "dmg": 26.0, "reach": 2.7, "lunge": 3.5,
+		"attack_time": 0.8, "attack_move_factor": 0.5,
+		"ai_skill": 0.5, "ai_block_chance": 0.3,
+		"quote": "Je trouve votre manque de foi déplorable.",
+		"anims": {},
+	},
+	"trooper": {
+		"name": "Stormtrooper", "type": "shooter", "melee": false,
+		"model": "res://assets/models/characters/trooper.glb",
+		"model_yaw": 0.0, "model_scale": 1.0,
+		"saber_color": Color(1.0, 0.3, 0.2),
+		"hp": 90.0, "speed": 6.2, "dmg": 8.0,
+		"attack_time": 0.5, "attack_move_factor": 0.8,
+		"ai_skill": 0.5, "ai_block_chance": 0.0,
+		"quote": "Vous êtes en état d'arrestation, au nom de l'Empire !",
+		"anims": {
+			"idle": "20_FightIdle", "run_f": "14_RunForward", "run_b": "19_RunBack",
+			"run_l": "17_RunLeft", "run_r": "18_RunRight",
+			"attack": ["21_ShootStanding"],
+			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
+		},
+	},
 }
 
-var fighters: Array = []  # [{id,cfg,node,saber_blade,hp,is_player,cool,ai_t,ai_dir,swing}]
+const HALL_W := 10.0
+const HALL_L := 42.0
+const HALL_H := 4.4
+
+var player: GroundFighter
+var enemy: GroundFighter
 var camera: Camera3D
+var _spring: SpringArm3D
+var _cam_pivot: Node3D
+var _cam_pitch_node: Node3D
 var _cam_yaw := 0.0
-var _ended := false
+var _cam_pitch := -0.12
+
 var _started := false
+var _ended := false
 var _hud: Control
 var _msg: Label
 var _bolts: Array = []
+var _trails: Dictionary = {}  # fighter -> {points: Array, mesh: MeshInstance3D}
 
 func start(player_id: String, enemy_id: String) -> void:
-	_build_world()
-	fighters.append(_spawn_fighter(player_id, true, Vector3(0, 0, 9)))
-	fighters.append(_spawn_fighter(enemy_id, false, Vector3(0, 0, -9)))
+	_build_corridor()
+	player = _spawn(player_id, true, Vector3(0, 0.1, 12), PI)
+	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), 0.0)
+	player.enemy = enemy
+	enemy.enemy = player
+	player.died.connect(_on_died)
+	enemy.died.connect(_on_died)
+
+	_cam_pivot = Node3D.new()
+	add_child(_cam_pivot)
+	_cam_pitch_node = Node3D.new()
+	_cam_pitch_node.position = Vector3(0.55, 0, 0)
+	_cam_pivot.add_child(_cam_pitch_node)
+	_spring = SpringArm3D.new()
+	_spring.spring_length = 2.9
+	_spring.margin = 0.25
+	_spring.collision_mask = 1
+	_cam_pitch_node.add_child(_spring)
 	camera = Camera3D.new()
-	camera.fov = 70.0
-	add_child(camera)
+	camera.fov = 65.0
+	camera.near = 0.1
+	_spring.add_child(camera)
 	camera.make_current()
+
 	_build_hud()
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	var seq := ["3", "2", "1", "EN GARDE !"]
 	for i in seq.size():
 		var txt: String = seq[i]
-		get_tree().create_timer(0.8 * i + 0.3).timeout.connect(func() -> void:
+		get_tree().create_timer(0.8 * i + 0.4).timeout.connect(func() -> void:
+			if not is_instance_valid(self):
+				return
 			_show_msg(txt)
 			if txt == "EN GARDE !":
-				_started = true)
+				_started = true
+				player.controls_enabled = true
+				enemy.controls_enabled = true)
 
-func _build_world() -> void:
+func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float) -> GroundFighter:
+	var f := GroundFighter.new()
+	f.collision_layer = 2
+	f.collision_mask = 3
+	add_child(f)
+	f.setup(ROSTER[id].duplicate(true), is_player, self)
+	f.global_position = pos
+	f.face_yaw = yaw
+	f.rotation.y = yaw
+	if f.cfg["melee"]:
+		var trail := MeshInstance3D.new()
+		trail.mesh = ImmediateMesh.new()
+		var tm := StandardMaterial3D.new()
+		tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		tm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		tm.vertex_color_use_as_albedo = true
+		tm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		trail.material_override = tm
+		add_child(trail)
+		_trails[f] = {"points": [], "mesh": trail}
+	return f
+
+# ------------------------------------------------------------ corridor
+
+func _build_corridor() -> void:
 	var env := Environment.new()
-	var sky := Sky.new()
-	var sm := PanoramaSkyMaterial.new()
-	sm.panorama = load("res://assets/textures/milky_way.jpg")
-	sm.energy_multiplier = 1.6
-	sky.sky_material = sm
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.012, 0.013, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.25, 0.27, 0.38)
-	env.ambient_light_energy = 0.8
+	env.ambient_light_color = Color(0.5, 0.55, 0.68)
+	env.ambient_light_energy = 0.42
 	env.glow_enabled = true
+	env.glow_intensity = 0.75
+	env.glow_hdr_threshold = 1.05
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.12
+	env.ssao_enabled = true
+	env.ssao_intensity = 1.6
+	env.ssr_enabled = true
+	env.ssr_max_steps = 48
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.05
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation = Vector3(-0.7, 0.5, 0)
-	sun.light_energy = 1.3
-	sun.shadow_enabled = true
-	add_child(sun)
+	var key := DirectionalLight3D.new()
+	key.rotation = Vector3(-0.9, 0.4, 0)
+	key.light_energy = 0.35
+	key.light_color = Color(0.85, 0.9, 1.0)
+	key.shadow_enabled = true
+	add_child(key)
 
-	# Duel platform floating in space
-	var floor_mesh := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 16.0
-	cm.bottom_radius = 17.5
-	cm.height = 1.6
-	var fmat := StandardMaterial3D.new()
-	fmat.albedo_color = Color(0.16, 0.17, 0.2)
-	fmat.metallic = 0.6
-	fmat.roughness = 0.45
-	cm.material = fmat
-	floor_mesh.mesh = cm
-	floor_mesh.position.y = -0.8
-	add_child(floor_mesh)
+	# Materials
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = Color(0.62, 0.64, 0.68)
+	wall_mat.metallic = 0.15
+	wall_mat.roughness = 0.55
+	var dark_mat := StandardMaterial3D.new()
+	dark_mat.albedo_color = Color(0.18, 0.19, 0.23)
+	dark_mat.metallic = 0.4
+	dark_mat.roughness = 0.5
+	var floor_mat := StandardMaterial3D.new()
+	floor_mat.albedo_color = Color(0.38, 0.40, 0.45)
+	floor_mat.metallic = 0.62
+	floor_mat.roughness = 0.22
+	var red_mat := StandardMaterial3D.new()
+	red_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	red_mat.albedo_color = Color(1.0, 0.12, 0.1)
+	red_mat.emission_enabled = true
+	red_mat.emission = Color(1.0, 0.12, 0.1)
+	red_mat.emission_energy_multiplier = 2.2
+	var neon_mat := StandardMaterial3D.new()
+	neon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	neon_mat.albedo_color = Color(1.0, 1.0, 1.0)
+	neon_mat.emission_enabled = true
+	neon_mat.emission = Color(0.95, 0.97, 1.0)
+	neon_mat.emission_energy_multiplier = 4.0
+	var window_mat := StandardMaterial3D.new()
+	window_mat.albedo_color = Color(0.04, 0.05, 0.08)
+	window_mat.metallic = 0.8
+	window_mat.roughness = 0.1
+	window_mat.emission_enabled = true
+	window_mat.emission = Color(0.15, 0.3, 0.45)
+	window_mat.emission_energy_multiplier = 0.5
 
-	# Glowing rim ring
-	var rim := MeshInstance3D.new()
-	var tm := TorusMesh.new()
-	tm.inner_radius = 15.8
-	tm.outer_radius = 16.2
-	var rmat := StandardMaterial3D.new()
-	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	rmat.emission_enabled = true
-	rmat.emission = Color(1.0, 0.85, 0.2)
-	rmat.emission_energy_multiplier = 2.5
-	rmat.albedo_color = Color(1.0, 0.85, 0.2)
-	tm.material = rmat
-	rim.mesh = tm
-	rim.position.y = 0.02
-	add_child(rim)
+	# Floor + ceiling
+	_box(Vector3(0, -0.1, 0), Vector3(HALL_W, 0.2, HALL_L), floor_mat)
+	_box(Vector3(0, HALL_H + 0.1, 0), Vector3(HALL_W, 0.2, HALL_L), wall_mat)
+	# Center floor walkway accents
+	_box(Vector3(-2.4, 0.011, 0), Vector3(0.12, 0.004, HALL_L), dark_mat, false)
+	_box(Vector3(2.4, 0.011, 0), Vector3(0.12, 0.004, HALL_L), dark_mat, false)
 
-	# Jupiter looming overhead + Star Destroyer in the distance
-	var jup := MeshInstance3D.new()
-	var jm := SphereMesh.new()
-	jm.radius = 1.0
-	jm.height = 2.0
-	jm.radial_segments = 96
-	jm.rings = 48
-	var jmat := StandardMaterial3D.new()
-	jmat.albedo_texture = load("res://assets/textures/jupiter.jpg")
-	jmat.roughness = 1.0
-	jm.material = jmat
-	jup.mesh = jm
-	jup.scale = Vector3.ONE * 600.0
-	jup.position = Vector3(900, 350, -1400)
-	add_child(jup)
+	# Walls with panel details
+	for side: float in [-1.0, 1.0]:
+		var x := side * HALL_W / 2.0
+		_box(Vector3(x, HALL_H / 2.0, 0), Vector3(0.2, HALL_H, HALL_L), wall_mat)
+		# Red accent stripe (like the BF2 corridors)
+		_box(Vector3(x - side * 0.12, 0.55, 0), Vector3(0.05, 0.1, HALL_L), red_mat, false)
+		# Dark baseboard
+		_box(Vector3(x - side * 0.1, 0.15, 0), Vector3(0.08, 0.3, HALL_L), dark_mat, false)
+		var n := int(HALL_L / 4.0)
+		for i in n:
+			var z := -HALL_L / 2.0 + 2.0 + i * 4.0
+			# Vertical pillars between panels
+			_box(Vector3(x - side * 0.18, HALL_H / 2.0, z + 2.0), Vector3(0.18, HALL_H, 0.35), dark_mat, false)
+			# Inset window band on alternating panels
+			if i % 2 == 0:
+				_box(Vector3(x - side * 0.08, 2.3, z), Vector3(0.06, 0.9, 2.6), window_mat, false)
+			else:
+				# Tech greeble panel
+				_box(Vector3(x - side * 0.07, 1.5, z), Vector3(0.05, 1.4, 2.2), dark_mat, false)
 
-	var sd := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 500.0, 0.0)
-	sd.position = Vector3(-600, -80, -900)
-	ModelUtil.tint(sd, Color(0.5, 0.53, 0.6))
-	add_child(sd)
+	# Ceiling light fixtures + lights
+	var n_lights := int(HALL_L / 6.0)
+	for i in n_lights + 1:
+		var z := -HALL_L / 2.0 + 3.0 + i * 6.0
+		_box(Vector3(0, HALL_H - 0.03, z), Vector3(1.8, 0.06, 0.5), neon_mat, false)
+		_box(Vector3(0, HALL_H - 0.08, z), Vector3(2.1, 0.1, 0.8), dark_mat, false)
+		var l := OmniLight3D.new()
+		l.position = Vector3(0, HALL_H - 0.6, z)
+		l.light_color = Color(0.92, 0.95, 1.0)
+		l.light_energy = 1.5
+		l.omni_range = 8.5
+		l.shadow_enabled = i % 2 == 0
+		add_child(l)
 
-	var amb := AudioStreamPlayer.new()
-	var stream: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
-	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	stream.loop_end = stream.data.size() / 2
-	amb.stream = stream
-	amb.volume_db = -14.0
-	add_child(amb)
-	amb.play()
+	# Blast doors at both ends
+	for endz: float in [-1.0, 1.0]:
+		var z2 := endz * HALL_L / 2.0
+		_box(Vector3(0, HALL_H / 2.0, z2), Vector3(HALL_W, HALL_H, 0.3), dark_mat)
+		_box(Vector3(0, HALL_H / 2.0, z2 - endz * 0.18), Vector3(3.6, 3.4, 0.1), wall_mat, false)
+		_box(Vector3(0, HALL_H / 2.0, z2 - endz * 0.26), Vector3(0.08, 3.4, 0.06), red_mat, false)
 
-func _spawn_fighter(id: String, is_player: bool, pos: Vector3) -> Dictionary:
-	var cfg: Dictionary = ROSTER[id]
-	var node := Node3D.new()
-	node.position = pos
-	add_child(node)
+	_place_props()
 
-	var blade: MeshInstance3D = null
-	if id == "vader":
-		var m := ModelUtil.load_model("res://assets/models/vader/scene.gltf", 2.2, PI)
-		m.position.y = 1.1
-		node.add_child(m)
-	else:
-		# Dark silhouette body (capsule + head) holding a real prop
-		var body := MeshInstance3D.new()
-		var bm := CapsuleMesh.new()
-		bm.radius = 0.32
-		bm.height = 1.5
-		var bmat := StandardMaterial3D.new()
-		bmat.albedo_color = Color(0.13, 0.12, 0.11) if id == "luke" else Color(0.16, 0.13, 0.1)
-		bmat.roughness = 0.9
-		bm.material = bmat
-		body.mesh = bm
-		body.position.y = 0.95
-		node.add_child(body)
-		var head := MeshInstance3D.new()
-		var hm := SphereMesh.new()
-		hm.radius = 0.21
-		hm.height = 0.42
-		var hmat := StandardMaterial3D.new()
-		hmat.albedo_color = Color(0.85, 0.68, 0.55)
-		hmat.roughness = 0.7
-		hm.material = hmat
-		head.mesh = hm
-		head.position.y = 1.95
-		node.add_child(head)
-		if cfg["melee"]:
-			var saber := ModelUtil.load_model("res://assets/models/lightsaber.glb", 0.42, 0.0)
-			saber.position = Vector3(0.42, 1.15, -0.1)
-			node.add_child(saber)
-		else:
-			var gun := MeshInstance3D.new()
-			var gm := BoxMesh.new()
-			gm.size = Vector3(0.08, 0.14, 0.55)
-			var gmat := StandardMaterial3D.new()
-			gmat.albedo_color = Color(0.1, 0.1, 0.12)
-			gmat.metallic = 0.7
-			gm.material = gmat
-			gun.mesh = gm
-			gun.position = Vector3(0.42, 1.2, -0.25)
-			node.add_child(gun)
+# Adds a box mesh; with_collision also registers a static collider.
+func _box(pos: Vector3, size: Vector3, mat: Material, with_collision: bool = true) -> void:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	bm.material = mat
+	mi.mesh = bm
+	mi.position = pos
+	add_child(mi)
+	if with_collision:
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = size
+		cs.shape = shape
+		sb.add_child(cs)
+		sb.position = pos
+		add_child(sb)
 
-	# Glowing saber blade for melee fighters (Vader's model has its own prop,
-	# we add a visible energy blade for both)
-	if cfg["melee"]:
-		blade = MeshInstance3D.new()
-		var sbm := CapsuleMesh.new()
-		sbm.radius = 0.035
-		sbm.height = 1.25
-		var sbmat := StandardMaterial3D.new()
-		sbmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		var c: Color = cfg["saber_color"]
-		sbmat.albedo_color = c
-		sbmat.emission_enabled = true
-		sbmat.emission = c
-		sbmat.emission_energy_multiplier = 6.0
-		sbm.material = sbmat
-		blade.mesh = sbm
-		blade.position = Vector3(0.42, 1.85, -0.1)
-		node.add_child(blade)
-		var gl := OmniLight3D.new()
-		gl.light_color = c
-		gl.light_energy = 1.6
-		gl.omni_range = 4.0
-		gl.position = blade.position
-		node.add_child(gl)
+# Real crates/barrels from the Jedi Outcast remake, placed along the walls.
+func _place_props() -> void:
+	var sources: Array = []
+	for path in ["res://assets/models/imperial_base.glb", "res://assets/models/imperial_base_dc.glb"]:
+		var ps: PackedScene = load(path)
+		if ps == null:
+			continue
+		var inst: Node = ps.instantiate()
+		var stack: Array = [inst]
+		var seen: Dictionary = {}
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			if n is MeshInstance3D:
+				var mi := n as MeshInstance3D
+				var base: String = mi.name.get_slice("_", 0)
+				if not seen.has(base) and (base.begins_with("Create") or "Barrel" in mi.name or "barrel" in mi.name):
+					seen[base] = true
+					sources.append(mi.mesh)
+			for c in n.get_children():
+				stack.push_back(c)
+		inst.free()
+	if sources.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 66
+	var spots := [
+		Vector3(-3.8, 0, -16), Vector3(3.7, 0, -14), Vector3(-3.6, 0, -7),
+		Vector3(3.8, 0, 7), Vector3(-3.7, 0, 14), Vector3(3.6, 0, 16),
+		Vector3(-3.9, 0, 2), Vector3(3.9, 0, -2),
+	]
+	for spot in spots:
+		var mesh: Mesh = sources[rng.randi_range(0, sources.size() - 1)]
+		var aabb := mesh.get_aabb()
+		var target_h := rng.randf_range(0.9, 1.4)
+		var s := target_h / maxf(aabb.size.y, 0.01)
+		var mi2 := MeshInstance3D.new()
+		mi2.mesh = mesh
+		mi2.scale = Vector3.ONE * s
+		mi2.position = spot - Vector3(aabb.get_center().x, aabb.position.y, aabb.get_center().z) * s
+		mi2.rotation.y = rng.randf_range(0, TAU)
+		add_child(mi2)
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(aabb.size.x * s, target_h, aabb.size.z * s)
+		cs.shape = shape
+		cs.position = Vector3(0, target_h / 2.0, 0)
+		sb.add_child(cs)
+		sb.position = spot
+		add_child(sb)
 
-	var f := {"id": id, "cfg": cfg, "node": node, "blade": blade, "hp": cfg["hp"],
-		"is_player": is_player, "cool": 0.0, "ai_t": 0.0, "ai_dir": Vector2.ZERO, "swing": 0.0}
-	return f
+# ------------------------------------------------------------ HUD
 
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
@@ -221,199 +336,279 @@ func _build_hud() -> void:
 	_msg = UiKit.label("", 60, UiKit.SW_YELLOW, true)
 	_msg.visible = false
 	_hud.add_child(_msg)
-	var n1 := UiKit.label(fighters[0]["cfg"]["name"], 17, Color(0.85, 0.88, 1.0))
+	var n1 := UiKit.label(player.cfg["name"], 17, Color(0.85, 0.88, 1.0))
 	n1.position = Vector2(36, 24)
 	_hud.add_child(n1)
-	var n2 := UiKit.label(fighters[1]["cfg"]["name"], 17, Color(1, 0.5, 0.45))
+	var n2 := UiKit.label(enemy.cfg["name"], 17, Color(1, 0.5, 0.45))
 	n2.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	n2.position = Vector2(-260, 24)
+	n2.position = Vector2(-300, 24)
 	_hud.add_child(n2)
+	var help := UiKit.label(
+		("Clic : attaque (enchaîne !)  •  Clic droit : parade  •  Maj : esquive" if player.cfg["melee"]
+		else "Clic : rafale de blaster  •  Maj : esquive"),
+		14, Color(0.6, 0.64, 0.74))
+	help.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	help.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.position.y = -28
+	_hud.add_child(help)
 
 func _show_msg(t: String) -> void:
 	_msg.text = t
 	_msg.visible = true
 	_msg.reset_size()
-	_msg.position = (_hud.get_viewport_rect().size - _msg.size) / 2.0 - Vector2(0, 110)
+	_msg.position = (_hud.get_viewport_rect().size - _msg.size) / 2.0 - Vector2(0, 120)
 	get_tree().create_timer(0.7).timeout.connect(func() -> void:
 		if is_instance_valid(_msg):
 			_msg.visible = false)
 
 func _draw_hud() -> void:
+	if player == null or enemy == null:
+		return
 	var vp := _hud.get_viewport_rect().size
-	_bar(Vector2(36, 52), fighters[0]["hp"] / fighters[0]["cfg"]["hp"], Color(0.3, 0.9, 0.45))
-	_bar(Vector2(vp.x - 36 - 260, 52), fighters[1]["hp"] / fighters[1]["cfg"]["hp"], Color(1, 0.32, 0.27))
+	_bar(Vector2(36, 52), 300, player.hp / player.cfg["hp"], Color(0.3, 0.9, 0.45))
+	_bar(Vector2(vp.x - 36 - 300, 52), 300, enemy.hp / enemy.cfg["hp"], Color(1, 0.32, 0.27))
+	# Dash cooldown pip
+	_bar(Vector2(36, 74), 120, 1.0 - player.dash_cooldown / 1.1, Color(0.4, 0.7, 1.0))
+	# Crosshair for the shooter
+	if not player.cfg["melee"]:
+		var c := vp / 2.0
+		var col := Color(1, 1, 1, 0.8)
+		_hud.draw_arc(c, 3.0, 0, TAU, 12, col, 1.4, true)
+		for ang in [0.0, PI / 2.0, PI, 3.0 * PI / 2.0]:
+			var v := Vector2(cos(ang), sin(ang))
+			_hud.draw_line(c + v * 8.0, c + v * 14.0, col, 1.4, true)
 
-func _bar(pos: Vector2, ratio: float, col: Color) -> void:
+func _bar(pos: Vector2, w: float, ratio: float, col: Color) -> void:
 	ratio = clampf(ratio, 0.0, 1.0)
-	_hud.draw_rect(Rect2(pos, Vector2(260, 14)), Color(0, 0, 0, 0.5), true)
-	_hud.draw_rect(Rect2(pos + Vector2(1.5, 1.5), Vector2(257.0 * ratio, 11)), col, true)
-	_hud.draw_rect(Rect2(pos, Vector2(260, 14)), Color(1, 1, 1, 0.28), false, 1.0)
+	_hud.draw_rect(Rect2(pos, Vector2(w, 14)), Color(0, 0, 0, 0.55), true)
+	if ratio > 0.0:
+		_hud.draw_rect(Rect2(pos + Vector2(1.5, 1.5), Vector2((w - 3.0) * ratio, 11)), col, true)
+	_hud.draw_rect(Rect2(pos, Vector2(w, 14)), Color(1, 1, 1, 0.28), false, 1.0)
+
+# ------------------------------------------------------------ input & camera
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_cam_yaw -= event.relative.x * 0.004
+		_cam_yaw -= event.relative.x * 0.0032
+		_cam_pitch = clampf(_cam_pitch - event.relative.y * 0.0026, -0.95, 0.55)
 	if event.is_action_pressed("pause") and not _ended:
 		request_menu.emit()
 
 func _physics_process(delta: float) -> void:
-	if fighters.size() < 2:
+	if player == null:
 		return
-	var p: Dictionary = fighters[0]
-	var e: Dictionary = fighters[1]
-	for f in fighters:
-		f["cool"] = maxf(0.0, f["cool"] - delta)
-		# Saber swing animation: rotate the blade forward then back
-		if f["blade"] != null:
-			f["swing"] = maxf(0.0, f["swing"] - delta * 3.0)
-			(f["blade"] as MeshInstance3D).rotation.x = -f["swing"] * 1.9
+	if player.alive and player.controls_enabled:
+		var mv := Vector2.ZERO
+		if Input.is_action_pressed("throttle_up"):
+			mv.y += 1.0
+		if Input.is_action_pressed("throttle_down"):
+			mv.y -= 1.0
+		if Input.is_action_pressed("roll_right"):
+			mv.x += 1.0
+		if Input.is_action_pressed("roll_left"):
+			mv.x -= 1.0
+		player.move_input = mv
+		player.face_yaw = _cam_yaw
+		if Input.is_action_just_pressed("fire"):
+			player.try_attack()
+		player.set_blocking(Input.is_action_pressed("block"))
+		if Input.is_action_just_pressed("boost"):
+			player.try_dash()
 
-	if _started and not _ended:
-		_player_control(p, e, delta)
-		_ai_control(e, p, delta)
 	_update_bolts(delta)
-	_update_camera(p, delta)
+	_update_trails()
+	_update_camera(delta)
 	_hud.queue_redraw()
 
-func _player_control(p: Dictionary, e: Dictionary, delta: float) -> void:
-	var node: Node3D = p["node"]
-	var fwd := Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw))
-	var right := Vector3(-fwd.z, 0, fwd.x)
-	var mv := Vector3.ZERO
-	if Input.is_action_pressed("throttle_up"):
-		mv += fwd
-	if Input.is_action_pressed("throttle_down"):
-		mv -= fwd
-	if Input.is_action_pressed("roll_right"):
-		mv += right
-	if Input.is_action_pressed("roll_left"):
-		mv -= right
-	var spd: float = p["cfg"]["speed"]
-	if Input.is_action_pressed("boost"):
-		spd *= 1.7
-	node.position += mv.normalized() * spd * delta if mv.length() > 0.1 else Vector3.ZERO
-	node.position = Vector3(node.position.x, 0, node.position.z)
-	if node.position.length() > 15.0:
-		node.position = node.position.normalized() * 15.0
-	# Face the enemy
-	var look := (e["node"] as Node3D).position - node.position
-	if look.length() > 0.5:
-		node.rotation.y = atan2(-look.x, -look.z)
-	if Input.is_action_pressed("fire") and p["cool"] <= 0.0:
-		_attack(p, e)
+func _update_camera(delta: float) -> void:
+	var target := player
+	if not target.alive and enemy.alive:
+		target = enemy
+	_cam_pivot.position = _cam_pivot.position.lerp(target.global_position + Vector3(0, 1.55, 0), clampf(14.0 * delta, 0, 1))
+	_cam_pivot.rotation.y = _cam_yaw
+	_cam_pitch_node.rotation.x = _cam_pitch
+	var hv := Vector2(target.velocity.x, target.velocity.z).length()
+	camera.fov = lerpf(camera.fov, 65.0 + hv * 1.1, 5.0 * delta)
 
-func _ai_control(e: Dictionary, p: Dictionary, delta: float) -> void:
-	var node: Node3D = e["node"]
-	var pnode: Node3D = p["node"]
-	e["ai_t"] -= delta
-	if e["ai_t"] <= 0.0:
-		e["ai_t"] = randf_range(0.7, 1.6)
-		e["ai_dir"] = Vector2(randf_range(-1, 1), randf_range(0.2, 1.0)).normalized()
-	var to_p := pnode.position - node.position
-	var dist := to_p.length()
-	var fwd := to_p.normalized()
-	var strafe: Vector3 = Vector3(-fwd.z, 0, fwd.x) * float(e["ai_dir"].x)
-	var want_dist: float = 2.6 if e["cfg"]["melee"] else 8.5
-	var approach: float = clampf((dist - want_dist) * 0.6, -1.0, 1.0)
-	var mv: Vector3 = (fwd * approach + strafe * 0.7).normalized()
-	node.position += mv * e["cfg"]["speed"] * 0.8 * delta
-	node.position = Vector3(node.position.x, 0, node.position.z)
-	if node.position.length() > 15.0:
-		node.position = node.position.normalized() * 15.0
-	node.rotation.y = atan2(-fwd.x, -fwd.z)
-	var in_range := dist < 3.2 if e["cfg"]["melee"] else dist < 13.0
-	if in_range and e["cool"] <= 0.0 and randf() < 0.65:
-		_attack(e, p)
+# ------------------------------------------------------------ combat services
 
-func _attack(a: Dictionary, b: Dictionary) -> void:
-	var melee: bool = a["cfg"]["melee"]
-	a["cool"] = 0.65 if melee else 0.5
-	var anode: Node3D = a["node"]
-	var bnode: Node3D = b["node"]
-	if melee:
-		a["swing"] = 1.0
-		_play3d("res://assets/audio/laser_red.wav", anode.position, -4.0)
-		# Lunge forward
-		var dir := (bnode.position - anode.position)
-		var dist := dir.length()
-		if dist < 6.0:
-			anode.position += dir.normalized() * minf(2.2, maxf(0.0, dist - 1.2))
-		if dist < 3.6:
-			_damage(b, a["cfg"]["dmg"])
-	else:
-		_play3d("res://assets/audio/laser_green.wav", anode.position, -4.0)
-		var bolt := MeshInstance3D.new()
-		var bm := CapsuleMesh.new()
-		bm.radius = 0.05
-		bm.height = 0.7
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(1, 0.25, 0.2)
-		mat.emission_enabled = true
-		mat.emission = Color(1, 0.25, 0.2)
-		mat.emission_energy_multiplier = 6.0
-		bm.material = mat
-		bolt.mesh = bm
-		bolt.rotation.x = PI / 2.0
-		var origin: Vector3 = anode.position + Vector3(0, 1.2, 0)
-		var target: Vector3 = bnode.position + Vector3(0, 1.1, 0)
-		var dir2 := (target - origin).normalized()
-		# Slight aim error so it is dodgeable
-		dir2 = (dir2 + Vector3(randf_range(-0.05, 0.05), randf_range(-0.03, 0.03), randf_range(-0.05, 0.05))).normalized()
-		bolt.position = origin
-		add_child(bolt)
-		_bolts.append({"node": bolt, "dir": dir2, "life": 2.0, "from": a})
+func melee_hit(attacker: GroundFighter) -> void:
+	var target := enemy if attacker == player else player
+	if target == null or not target.alive:
+		return
+	var to_t := target.global_position - attacker.global_position
+	to_t.y = 0
+	var facing := (-attacker.global_transform.basis.z).dot(to_t.normalized())
+	if to_t.length() <= attacker.saber_reach() and facing > 0.35:
+		target.take_hit(attacker.cfg["dmg"], attacker)
+		_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
+
+func spawn_bolt(from: GroundFighter) -> void:
+	var origin := from.global_position + Vector3(0, 1.25, 0) - from.global_transform.basis.z * 0.5
+	var target := enemy if from == player else player
+	var dir := -from.global_transform.basis.z
+	if from.is_player:
+		# Shoot where the camera looks
+		dir = -camera.global_transform.basis.z
+	elif target != null:
+		dir = (target.global_position + Vector3(0, 1.1, 0) - origin).normalized()
+		dir = (dir + Vector3(randf_range(-0.04, 0.04), randf_range(-0.02, 0.02), randf_range(-0.04, 0.04))).normalized()
+	var bolt := MeshInstance3D.new()
+	var bm := CapsuleMesh.new()
+	bm.radius = 0.035
+	bm.height = 0.6
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1, 0.3, 0.2)
+	mat.emission_enabled = true
+	mat.emission = Color(1, 0.25, 0.15)
+	mat.emission_energy_multiplier = 6.0
+	bm.material = mat
+	bolt.mesh = bm
+	bolt.position = origin
+	add_child(bolt)
+	bolt.look_at(origin + dir)
+	bolt.rotate_object_local(Vector3.RIGHT, PI / 2.0)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1, 0.3, 0.2)
+	light.light_energy = 1.2
+	light.omni_range = 3.0
+	bolt.add_child(light)
+	_bolts.append({"node": bolt, "dir": dir, "life": 1.6, "from": from})
 
 func _update_bolts(delta: float) -> void:
 	var keep: Array = []
 	for b in _bolts:
 		var node: MeshInstance3D = b["node"]
 		b["life"] -= delta
-		node.position += b["dir"] * 26.0 * delta
-		node.look_at(node.position + b["dir"])
-		var hit := false
-		for f in fighters:
-			if f == b["from"]:
+		var prev: Vector3 = node.position
+		node.position += b["dir"] * 32.0 * delta
+		var dead: bool = b["life"] <= 0.0
+		# Hit fighters
+		for f: GroundFighter in [player, enemy]:
+			if f == b["from"] or not f.alive or dead:
 				continue
-			if node.position.distance_to((f["node"] as Node3D).position + Vector3(0, 1.1, 0)) < 0.8:
-				_damage(f, b["from"]["cfg"]["dmg"])
-				hit = true
-		if b["life"] <= 0.0 or hit:
+			var center: Vector3 = f.global_position + Vector3(0, 1.0, 0)
+			if _seg_point_dist(prev, node.position, center) < 0.55:
+				f.take_hit(b["from"].cfg["dmg"], b["from"])
+				_hit_flash(center, Color(1, 0.4, 0.2))
+				dead = true
+		# Hit walls
+		if absf(node.position.x) > HALL_W / 2.0 - 0.2 or absf(node.position.z) > HALL_L / 2.0 - 0.2 or node.position.y < 0.05 or node.position.y > HALL_H:
+			_hit_flash(node.position, Color(1, 0.5, 0.2))
+			dead = true
+		if dead:
 			node.queue_free()
 		else:
 			keep.append(b)
 	_bolts = keep
 
-func _damage(f: Dictionary, dmg: float) -> void:
-	if _ended:
-		return
-	f["hp"] -= dmg
-	_play3d("res://assets/audio/hit.wav", (f["node"] as Node3D).position, -2.0)
-	if f["hp"] <= 0.0:
-		f["hp"] = 0.0
-		_ended = true
-		(f["node"] as Node3D).rotation.x = PI / 2.0 * (1 if f["id"] != "vader" else -1)
-		_play3d("res://assets/audio/explosion.wav", (f["node"] as Node3D).position, -2.0)
-		var won: bool = not f["is_player"]
-		get_tree().create_timer(1.2).timeout.connect(func() -> void: _show_end(won))
+func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
+	var ab := b - a
+	var t := 0.0
+	if ab.length_squared() > 0.000001:
+		t = clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+	return (a + ab * t).distance_to(p)
 
-func _play3d(path: String, at: Vector3, db: float) -> void:
+func saber_clash(at: Vector3) -> void:
+	_sparks(at, Color(1.0, 0.9, 0.5), 90, 7.0)
+	var flash := OmniLight3D.new()
+	flash.light_color = Color(1.0, 0.95, 0.8)
+	flash.light_energy = 6.0
+	flash.omni_range = 7.0
+	flash.position = at
+	add_child(flash)
+	var tw := create_tween()
+	tw.tween_property(flash, "light_energy", 0.0, 0.35)
+	tw.tween_callback(flash.queue_free)
 	var sp := AudioStreamPlayer3D.new()
-	sp.stream = load(path)
+	sp.stream = load("res://assets/audio/saber_clash.wav")
 	sp.position = at
-	sp.volume_db = db
-	sp.unit_size = 20.0
+	sp.unit_size = 14.0
+	sp.pitch_scale = randf_range(0.92, 1.1)
 	add_child(sp)
 	sp.play()
 	sp.finished.connect(sp.queue_free)
 
-func _update_camera(p: Dictionary, delta: float) -> void:
-	var node: Node3D = p["node"]
-	var back := Vector3(sin(_cam_yaw), 0, cos(_cam_yaw))
-	var desired := node.position + back * 7.5 + Vector3(0, 3.4, 0)
-	camera.position = camera.position.lerp(desired, clampf(9.0 * delta, 0, 1))
-	camera.look_at(node.position + Vector3(0, 1.6, 0) - back * 3.0)
+func _hit_flash(at: Vector3, color: Color) -> void:
+	_sparks(at, color, 30, 4.0)
+
+func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
+	var p := GPUParticles3D.new()
+	var mat := ParticleProcessMaterial.new()
+	mat.direction = Vector3(0, 1, 0)
+	mat.spread = 180.0
+	mat.initial_velocity_min = vel * 0.4
+	mat.initial_velocity_max = vel
+	mat.gravity = Vector3(0, -9.0, 0)
+	mat.scale_min = 0.3
+	mat.scale_max = 0.7
+	mat.color = color
+	mat.damping_min = 2.0
+	mat.damping_max = 5.0
+	var dm := SphereMesh.new()
+	dm.radius = 0.022
+	dm.height = 0.044
+	dm.radial_segments = 4
+	dm.rings = 2
+	var dmm := StandardMaterial3D.new()
+	dmm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dmm.albedo_color = color
+	dmm.emission_enabled = true
+	dmm.emission = color
+	dmm.emission_energy_multiplier = 5.0
+	dm.material = dmm
+	p.draw_pass_1 = dm
+	p.process_material = mat
+	p.amount = count
+	p.lifetime = 0.6
+	p.one_shot = true
+	p.explosiveness = 0.95
+	p.emitting = true
+	p.position = at
+	add_child(p)
+	get_tree().create_timer(1.5).timeout.connect(func() -> void:
+		if is_instance_valid(p):
+			p.queue_free())
+
+# Ribbon trail behind each saber while swinging.
+func _update_trails() -> void:
+	for f: GroundFighter in _trails:
+		var t: Dictionary = _trails[f]
+		var pts: Array = t["points"]
+		if f.alive and f.attacking:
+			pts.append([f.trail_base, f.trail_tip])
+		if pts.size() > 10 or (not f.attacking and pts.size() > 0):
+			pts.pop_front()
+		if not f.attacking and pts.size() > 0:
+			pts.pop_front()
+		var im: ImmediateMesh = (t["mesh"] as MeshInstance3D).mesh
+		im.clear_surfaces()
+		if pts.size() < 2:
+			continue
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		var col: Color = f.cfg["saber_color"]
+		for i in pts.size():
+			var alpha := float(i) / pts.size() * 0.25
+			im.surface_set_color(Color(col.r, col.g, col.b, alpha))
+			im.surface_add_vertex(pts[i][0])
+			im.surface_add_vertex(pts[i][1])
+		im.surface_end()
+
+# ------------------------------------------------------------ match flow
+
+func _on_died(f: GroundFighter) -> void:
+	if _ended:
+		return
+	_ended = true
+	Engine.time_scale = 0.4
+	get_tree().create_timer(0.45).timeout.connect(func() -> void: Engine.time_scale = 1.0)
+	var won := f == enemy
+	get_tree().create_timer(1.8).timeout.connect(func() -> void: _show_end(won))
 
 func _show_end(won: bool) -> void:
+	Engine.time_scale = 1.0
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -431,7 +626,7 @@ func _show_end(won: bool) -> void:
 	var title := UiKit.label("VICTOIRE !" if won else "DÉFAITE…", 76, UiKit.SW_YELLOW if won else Color(0.95, 0.3, 0.22), true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
-	var sub := UiKit.label("« %s »" % fighters[1]["cfg"]["quote"] if not won else "La Force est puissante en toi.", 22, Color(0.85, 0.85, 0.92))
+	var sub := UiKit.label("La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"], 22, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 	var b1 := UiKit.button("REJOUER", 22)

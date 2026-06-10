@@ -12,10 +12,13 @@ communauté (Sketchfab / Poly Pizza) sous licences Creative Commons — voir
 
 ## Jouer (Windows)
 
-Le plus simple : récupérer `StarWarsDuel.exe` (build fourni) et double-cliquer.
-Aucune installation requise. Si Windows SmartScreen s'affiche :
-« Informations complémentaires » → « Exécuter quand même » (le binaire n'est
-pas signé, c'est normal pour un jeu amateur).
+Télécharger les **deux** archives du dossier `build/` :
+`StarWarsDuel-Windows-1de2.zip` (le programme) et
+`StarWarsDuel-Windows-2de2.zip` (les données). Extraire les deux **dans le
+même dossier** (on obtient `StarWarsDuel.exe` + `StarWarsDuel.pck` côte à
+côte), puis double-cliquer sur `StarWarsDuel.exe`. Aucune installation
+requise. Si Windows SmartScreen s'affiche : « Informations complémentaires »
+→ « Exécuter quand même » (binaire non signé, normal pour un jeu amateur).
 
 ## Lancer depuis les sources (toutes plateformes)
 
@@ -37,6 +40,20 @@ Pour recompiler un `.exe` : Projet → Exporter → Windows Desktop
 | Accélérer / ralentir | W / S (Z / S sur AZERTY) |
 | Tonneau gauche / droite | A / D (Q / D sur AZERTY) |
 | Pause | Échap |
+
+## Mode PERSONNAGES (style Battlefront)
+
+Dans le menu, bouton **PERSONNAGES** : duel au sol dans un couloir impérial,
+caméra à l'épaule. Luke Skywalker et le Stormtrooper sont de vrais modèles
+3D **animés** (combos de sabre, parades, courses, morts) ; Dark Vador est un
+modèle réaliste avec démarche et respiration mécanique.
+
+- ZQSD : se déplacer (la caméra suit la souris)
+- Clic gauche : attaque — **ré-appuie pendant le coup pour enchaîner le
+  combo (3 frappes)**
+- Clic droit : parade (bloque les coups de sabre → gerbe d'étincelles,
+  dévie les tirs de blaster)
+- Maj : esquive (dash)
 
 ## Gameplay
 
