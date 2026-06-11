@@ -13,7 +13,7 @@ const ROSTER := {
 	"luke": {
 		"name": "Luke Skywalker", "type": "jedi", "melee": true,
 		"model": "res://assets/models/characters/jedi.glb",
-		"model_yaw": 0.0, "model_scale": 1.0,
+		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 1.0, 0.4),
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
 		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.3,
@@ -29,7 +29,7 @@ const ROSTER := {
 	"vader": {
 		"name": "Dark Vador", "type": "jedi", "variant": "vader", "melee": true,
 		"model": "res://assets/models/characters/vader.glb",
-		"model_yaw": 0.0, "model_scale": 1.06,
+		"model_yaw": PI, "model_scale": 1.06,
 		"saber_color": Color(1.0, 0.12, 0.08),
 		"blade_mesh": "DARTH_Sabel svart_0",
 		"blade_extra": ["DARTH_Laser_0"],
@@ -81,8 +81,8 @@ var _trails: Dictionary = {}  # fighter -> {points: Array, mesh: MeshInstance3D}
 
 func start(player_id: String, enemy_id: String) -> void:
 	_build_corridor()
-	player = _spawn(player_id, true, Vector3(0, 0.1, 12), PI)
-	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), 0.0)
+	player = _spawn(player_id, true, Vector3(0, 0.1, 12), 0.0)
+	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), PI)
 	player.enemy = enemy
 	enemy.enemy = player
 	player.died.connect(_on_died)

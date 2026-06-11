@@ -23,6 +23,9 @@ func _ready() -> void:
 	elif "--ground2" in args:
 		_mode = "ground"
 		start_game("luke", "trooper")
+	elif "--groundv" in args:
+		_mode = "ground"
+		start_game("vader", "luke")
 	elif "--groundmenu" in args:
 		_mode = "ground"
 		show_menu()
@@ -30,6 +33,10 @@ func _ready() -> void:
 		start_game("anakin", "vader")
 	else:
 		show_menu()
+	if "--botfwd" in args:
+		# Headless testing: hold "forward" once the duel starts
+		get_tree().create_timer(5.0).timeout.connect(func() -> void:
+			Input.action_press("throttle_up"))
 	if "--shots" in args:
 		_capture_screenshots()
 
@@ -117,7 +124,7 @@ func _build_menu_world() -> void:
 		var specs := [
 			["luke", Vector3(-2.6, 0.7, 19.5), PI, "01_IdleArmed"],
 			["vader", Vector3(0.0, 0.7, 19.0), PI, "01_IdleArmed"],
-			["trooper", Vector3(2.6, 0.7, 19.5), 0.0, "01_Idle"],
+			["trooper", Vector3(2.6, 0.7, 19.5), PI, "01_Idle"],
 		]
 		for spec in specs:
 			var gcfg: Dictionary = GroundArena.ROSTER[spec[0]]

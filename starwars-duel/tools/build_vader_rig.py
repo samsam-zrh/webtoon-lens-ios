@@ -319,6 +319,28 @@ for act in bpy.data.actions:
     tr = ad.nla_tracks.new(); tr.name = act.name
     tr.strips.new(act.name, int(act.frame_range[0]), act)
 
+# Material pass: the Sketchfab import ships mirror-metal values that read
+# blue under the arena's space lighting. Matte suit, glossy black helmet.
+for name in allm:
+    o = bpy.data.objects[name]
+    for slot in o.material_slots:
+        m = slot.material
+        if m is None or not m.use_nodes: continue
+        bsdf = next((n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED'), None)
+        if bsdf is None: continue
+        if 'Sabel svart' in name or 'Laser' in name:
+            continue  # energy blade parts are recolored in-game
+        for inp in ('Metallic','Roughness'):
+            for l in list(bsdf.inputs[inp].links):
+                m.node_tree.links.remove(l)
+        if 'Capemat' in name:        # the helmet
+            bsdf.inputs['Metallic'].default_value = 0.5
+            bsdf.inputs['Roughness'].default_value = 0.28
+        else:                        # suit, cape, armor, hilt
+            bsdf.inputs['Metallic'].default_value = 0.12
+            bsdf.inputs['Roughness'].default_value = 0.62
+print('MATERIAL PASS DONE')
+
 select_only([arm] + [bpy.data.objects[n] for n in allm], arm)
 bpy.ops.export_scene.gltf(filepath=OUT, use_selection=True,
     export_animation_mode='ACTIONS',
