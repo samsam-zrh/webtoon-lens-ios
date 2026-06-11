@@ -85,6 +85,17 @@ licences et liens dans [CREDITS.md](CREDITS.md). Le modèle de l'Intercepteur
 Jedi est sous licence **CC-BY-NC** : toute redistribution de ce jeu doit
 rester non commerciale.
 
+## Contenu
+
+- **Deux modes** : dogfight spatial et duel de personnages (5 combattants :
+  Luke, Ben Kenobi, Dark Vador, Stormtrooper, Sith Trooper).
+- **Deux arènes** au choix en 1v1 : salle du trône et hangar impérial.
+- **Campagne** en 5 chapitres (dont une patrouille de deux troopers).
+- **Combat** : combos au sabre, parade qui renvoie les tirs de blaster,
+  esquive-annulation, poussée de Force (touche E), hit-stop, IA à états.
+- **Options** : sensibilité, FOV, volumes séparés, qualité graphique,
+  vibrations manette, plein écran, compteur FPS.
+
 ## Musique personnalisée
 
 Le jeu peut jouer **ta propre bande-son** à la place des musiques libres

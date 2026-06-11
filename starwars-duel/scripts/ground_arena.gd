@@ -698,7 +698,7 @@ func _build_hangar() -> void:
 	for x in [-7.0, -3.5, 3.5, 7.0]:
 		var t: Node3D = ps.instantiate()
 		t.position = Vector3(x, 0, HG_D - 1.6)
-		t.rotation.y = 0.0
+		t.rotation.y = PI    # mesh forward is +Z: face the arena (north)
 		add_child(t)
 		var ap: AnimationPlayer = t.find_child("AnimationPlayer", true, false)
 		if ap != null and ap.has_animation("01_Idle"):
@@ -879,7 +879,7 @@ func _build_hud() -> void:
 	n2.position = Vector2(-300, 24)
 	_hud.add_child(n2)
 	var help := UiKit.label(
-		("Clic : attaque (enchaîne !)  •  Clic droit : parade  •  Maj : esquive" if player.cfg["melee"]
+		("Clic : attaque (enchaîne !)  •  Clic droit : parade  •  Maj : esquive  •  E : poussée" if player.cfg["melee"]
 		else "Clic : rafale de blaster  •  Maj : esquive"),
 		14, Color(0.6, 0.64, 0.74))
 	help.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -1175,7 +1175,7 @@ func _update_bolts(delta: float) -> void:
 					b["from"] = f
 					b["life"] = 1.6
 					node.position += back * 0.7
-					saber_clash(center + Vector3(0, 0.3, 0))
+					_deflect_fx(center + Vector3(0, 0.3, 0))
 					if f == player:
 						_hitmark_t = 0.22
 				else:
@@ -1200,6 +1200,22 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 	if ab.length_squared() > 0.000001:
 		t = clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
 	return (a + ab * t).distance_to(p)
+
+func _deflect_fx(at: Vector3) -> void:
+	_sparks(at, Color(1.0, 0.85, 0.45), 18, 3.5)
+	_shake = maxf(_shake, 0.18)
+	var sp := AudioStreamPlayer3D.new()
+	sp.stream = load("res://assets/audio/saber_clash.wav")
+	sp.position = at
+	sp.unit_size = 12.0
+	sp.bus = "SFX"
+	sp.volume_db = -9.0
+	sp.pitch_scale = randf_range(1.25, 1.45)
+	add_child(sp)
+	sp.play()
+	sp.finished.connect(sp.queue_free)
+	if music != null:
+		music.combat_event(0.5)
 
 func saber_clash(at: Vector3) -> void:
 	_sparks(at, Color(1.0, 0.9, 0.5), 80, 6.5)

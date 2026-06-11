@@ -37,6 +37,10 @@ func _ready() -> void:
 	elif "--groundk" in args:
 		_mode = "ground"
 		start_game("kenobi", "sith", {"theme": "hangar"})
+	elif "--campaign2" in args:
+		_mode = "ground"
+		_campaign_hero = "luke"
+		_start_campaign_stage(1)
 	elif "--campaign" in args:
 		_mode = "ground"
 		_campaign_hero = "luke"
@@ -337,7 +341,7 @@ func _build_menu_ui() -> void:
 	if _mode == "ships":
 		help_text = "Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause"
 	else:
-		help_text = "ZQSD : se déplacer   •   Clic : attaque (enchaîne le combo !)   •   Clic droit : parade   •   Maj : esquive   •   Échap : menu"
+		help_text = "ZQSD : se déplacer   •   Clic : attaque   •   Clic droit : parade (renvoie les tirs !)   •   Maj : esquive   •   E : poussée de Force   •   Échap : menu"
 	var n_music := MusicDirector.detected_count()
 	var music_l := UiKit.label(
 		"♪ Musique personnalisée : %d piste(s) détectée(s)" % n_music if n_music > 0
