@@ -46,6 +46,22 @@ const ROSTER := {
 			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
 		},
 	},
+	"kenobi": {
+		"name": "Ben Kenobi", "type": "jedi", "variant": "kenobi", "melee": true,
+		"model": "res://assets/models/characters/jedi.glb",
+		"model_yaw": PI, "model_scale": 1.0,
+		"saber_color": Color(0.3, 0.6, 1.0),
+		"hp": 130.0, "speed": 5.2, "dmg": 17.0, "reach": 2.4, "turn_speed": 12.0,
+		"attack_time": 0.7, "attack_anim_speed": 1.35, "attack_move_factor": 0.12,
+		"ai_skill": 0.6, "ai_block_chance": 0.65,
+		"quote": "La Force sera avec toi. Toujours.",
+		"anims": {
+			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
+			"run_l": "10_RunLeft", "run_r": "09_RunRight",
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
+			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
+		},
+	},
 	"trooper": {
 		"name": "Stormtrooper", "type": "shooter", "melee": false,
 		"model": "res://assets/models/characters/trooper.glb",
@@ -55,6 +71,22 @@ const ROSTER := {
 		"attack_time": 0.5, "attack_move_factor": 0.8,
 		"ai_skill": 0.5, "ai_block_chance": 0.0,
 		"quote": "Vous êtes en état d'arrestation, au nom de l'Empire !",
+		"anims": {
+			"idle": "20_FightIdle", "run_f": "14_RunForward", "run_b": "19_RunBack",
+			"run_l": "17_RunLeft", "run_r": "18_RunRight",
+			"attack": ["21_ShootStanding"],
+			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
+		},
+	},
+	"sith": {
+		"name": "Sith Trooper", "type": "shooter", "variant": "sith", "melee": false,
+		"model": "res://assets/models/characters/trooper.glb",
+		"model_yaw": PI, "model_scale": 1.0,
+		"saber_color": Color(1.0, 0.3, 0.2),
+		"hp": 130.0, "speed": 3.6, "dmg": 11.0, "turn_speed": 12.0,
+		"attack_time": 0.45, "attack_move_factor": 0.8,
+		"ai_skill": 0.7, "ai_block_chance": 0.0,
+		"quote": "L'Ordre Final ne connaît pas la pitié.",
 		"anims": {
 			"idle": "20_FightIdle", "run_f": "14_RunForward", "run_b": "19_RunBack",
 			"run_l": "17_RunLeft", "run_r": "18_RunRight",
@@ -251,12 +283,15 @@ const ROOM_H := 10.0
 
 func _build_corridor() -> void:
 	_build_environment()
-	_build_floor()
-	_build_walls()
-	_build_ceiling()
-	_build_throne()
+	if theme == "hangar":
+		_build_hangar()
+	else:
+		_build_floor()
+		_build_walls()
+		_build_ceiling()
+		_build_throne()
+		_build_spectators()
 	_build_space_view()
-	_build_spectators()
 	_build_dust()
 	_build_boundary()
 
@@ -266,6 +301,7 @@ func _build_corridor() -> void:
 	hum.loop_end = hum.data.size() / 2
 	amb.stream = hum
 	amb.volume_db = -18.0
+	amb.bus = "SFX"
 	add_child(amb)
 	amb.play()
 
@@ -323,7 +359,7 @@ func _build_environment() -> void:
 	well.spot_range = ROOM_H + 4.0
 	well.spot_angle = 46.0
 	well.light_energy = 7.5
-	well.light_color = Color(0.85, 0.9, 1.0)
+	well.light_color = Color(0.85, 0.9, 1.0) if theme != "hangar" else Color(1.0, 0.95, 0.85)
 	well.shadow_enabled = true
 	well.light_volumetric_fog_energy = 1.2
 	add_child(well)
@@ -527,6 +563,148 @@ func _build_throne() -> void:
 	_box(Vector3(0.32, 0.85, 1.1), Vector3(0.92, seat_y + 0.7, 0.45), panel, holder)
 	_box(Vector3(1.2, 0.08, 0.1), Vector3(0, seat_y + 2.6, 0.84), _mat_emissive(Color(1.0, 0.2, 0.12), 2.0), holder)
 	_collision_box(holder.position + Vector3(0, 1.0, 0.3), Vector3(4.5, 2.0, 3.0))
+
+# --------------------------------------------------- Imperial hangar arena
+# Rectangular deck open onto space through a force-field bay: parked TIE
+# fighter, crate stacks, overhead light banks.
+
+const HG_W := 21.0   # half width  (x)
+const HG_D := 16.0   # half depth  (z)
+const HG_H := 12.0
+
+func _build_hangar() -> void:
+	var panel := _mat_panel()
+	# deck: brighter plates than the throne room, with guide markings
+	var floor_mat := StandardMaterial3D.new()
+	floor_mat.albedo_color = Color(0.42, 0.43, 0.47)
+	floor_mat.albedo_texture = load("res://assets/textures/metal_plate_diff_2k.jpg")
+	floor_mat.normal_enabled = true
+	floor_mat.normal_texture = load("res://assets/textures/metal_plate_nor_gl_2k.jpg")
+	floor_mat.normal_scale = 0.6
+	floor_mat.roughness_texture = load("res://assets/textures/metal_plate_rough_2k.jpg")
+	floor_mat.metallic = 0.45
+	floor_mat.roughness = 0.85
+	floor_mat.uv1_triplanar = true
+	floor_mat.uv1_scale = Vector3(0.5, 0.5, 0.5)
+	_box(Vector3(HG_W * 2, 0.3, HG_D * 2), Vector3(0, -0.15, 0), floor_mat)
+	_collision_box(Vector3(0, -0.5, 0), Vector3(HG_W * 2, 1.0, HG_D * 2))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(HG_W * 2, 0.5, HG_D * 2)
+	pcol.position.y = -0.25
+	add_child(pcol)
+	# yellow guide lines + duel circle marking
+	var line_y := _mat_emissive(Color(0.95, 0.75, 0.2), 0.9)
+	for x in [-12.0, 12.0]:
+		_box(Vector3(0.18, 0.02, HG_D * 2 - 4), Vector3(x, 0.012, 0), line_y)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 6.4
+	tm.outer_radius = 6.55
+	tm.rings = 64
+	tm.material = _mat_emissive(Color(0.95, 0.75, 0.2), 0.9)
+	ring.mesh = tm
+	ring.position = Vector3(0, 0.012, 0)
+	ring.scale.y = 0.06
+	add_child(ring)
+
+	# three solid walls with strip lights; the north side is the open bay
+	var strip_w := _mat_emissive(Color(0.85, 0.9, 1.0), 2.4)
+	var strip_r := _mat_emissive(Color(1.0, 0.15, 0.08), 1.3)
+	for spec in [[Vector3(0, HG_H / 2.0, HG_D), Vector3(HG_W * 2, HG_H, 0.6), 0.0],
+			[Vector3(-HG_W, HG_H / 2.0, 0), Vector3(0.6, HG_H, HG_D * 2), 0.0],
+			[Vector3(HG_W, HG_H / 2.0, 0), Vector3(0.6, HG_H, HG_D * 2), 0.0]]:
+		_box(spec[1], spec[0], panel)
+		_collision_box(spec[0], spec[1])
+	# wall pylons + lights on the side walls
+	for side in [-1.0, 1.0]:
+		for i in 5:
+			var z := -HG_D + 5.0 + i * 6.5
+			_box(Vector3(0.9, HG_H, 1.2), Vector3(side * (HG_W - 0.6), HG_H / 2.0, z), panel)
+			_box(Vector3(0.14, HG_H - 4.0, 0.14), Vector3(side * (HG_W - 1.25), HG_H / 2.0, z), strip_w)
+		_box(Vector3(0.12, 0.12, HG_D * 2 - 3), Vector3(side * (HG_W - 1.0), 1.0, 0), strip_r)
+	# bay frame (north, open onto space) + faint force field
+	_box(Vector3(HG_W * 2, 1.8, 1.2), Vector3(0, HG_H - 0.9, -HG_D), panel)
+	_box(Vector3(2.2, HG_H, 1.2), Vector3(-HG_W + 1.1, HG_H / 2.0, -HG_D), panel)
+	_box(Vector3(2.2, HG_H, 1.2), Vector3(HG_W - 1.1, HG_H / 2.0, -HG_D), panel)
+	_box(Vector3(HG_W * 2 - 4.4, 0.1, 0.9), Vector3(0, 0.05, -HG_D), strip_w)
+	var field := MeshInstance3D.new()
+	var fq := PlaneMesh.new()
+	fq.size = Vector2(HG_W * 2 - 4.4, HG_H - 1.8)
+	var fmat := StandardMaterial3D.new()
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	fmat.albedo_color = Color(0.45, 0.65, 1.0, 0.045)
+	fq.material = fmat
+	field.mesh = fq
+	field.rotation.x = PI / 2.0
+	field.position = Vector3(0, (HG_H - 1.8) / 2.0, -HG_D)
+	add_child(field)
+	_collision_box(Vector3(0, HG_H / 2.0, -HG_D), Vector3(HG_W * 2, HG_H * 2, 0.5))
+
+	# ceiling: lattice beams + hanging light banks
+	_box(Vector3(HG_W * 2, 0.5, HG_D * 2), Vector3(0, HG_H + 0.25, 0), panel)
+	for i in 4:
+		var z2 := -HG_D + 4.0 + i * 8.0
+		_box(Vector3(HG_W * 2, 0.8, 0.5), Vector3(0, HG_H - 0.4, z2), panel)
+		var bank := _box(Vector3(5.0, 0.18, 0.9), Vector3(0, HG_H - 0.9, z2), _mat_emissive(Color(1.0, 0.96, 0.85), 3.2))
+		var bl := SpotLight3D.new()
+		bl.rotation.x = -PI / 2.0
+		bl.spot_range = HG_H + 2.0
+		bl.spot_angle = 50.0
+		bl.light_energy = 3.4
+		bl.light_color = Color(1.0, 0.95, 0.82)
+		bl.position = Vector3(0, -0.2, 0)
+		bank.add_child(bl)
+
+	# parked TIE fighter on its landing circle (south-west corner)
+	var tie := ModelUtil.load_model("res://assets/models/tie/scene.gltf", 8.5, 0.9)
+	var tb := ModelUtil.compute_aabb(tie, Transform3D.IDENTITY)
+	tie.position = Vector3(-13.5, -tb.position.y + 0.05, 9.5)
+	add_child(tie)
+	_collision_box(Vector3(-13.5, 2.5, 9.5), Vector3(7.0, 5.0, 7.0))
+	var tring := MeshInstance3D.new()
+	var trm := TorusMesh.new()
+	trm.inner_radius = 5.2
+	trm.outer_radius = 5.35
+	trm.rings = 48
+	trm.material = _mat_emissive(Color(0.85, 0.9, 1.0), 1.2)
+	tring.mesh = trm
+	tring.position = Vector3(-13.5, 0.012, 9.5)
+	tring.scale.y = 0.06
+	add_child(tring)
+
+	# crate stacks along the east wall
+	var crate := StandardMaterial3D.new()
+	crate.albedo_color = Color(0.24, 0.26, 0.3)
+	crate.albedo_texture = load("res://assets/textures/metal_plate_diff_2k.jpg")
+	crate.metallic = 0.3
+	crate.roughness = 0.7
+	crate.uv1_triplanar = true
+	crate.uv1_scale = Vector3(0.8, 0.8, 0.8)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12
+	for spec in [[Vector3(15.5, 0, 10.0), 3], [Vector3(16.5, 0, 5.0), 2], [Vector3(14.5, 0, -8.0), 2], [Vector3(17.0, 0, -2.0), 1]]:
+		var base: Vector3 = spec[0]
+		for k: int in spec[1]:
+			var sz := rng.randf_range(1.5, 2.2)
+			var b := _box(Vector3(sz, 1.4, sz), base + Vector3(rng.randf_range(-0.3, 0.3), 0.7 + k * 1.4, rng.randf_range(-0.3, 0.3)), crate)
+			b.rotation.y = rng.randf_range(-0.2, 0.2)
+			_box(Vector3(sz + 0.02, 0.1, sz + 0.02), b.position + Vector3(0, 0.5, 0), strip_r)
+		_collision_box(base + Vector3(0, spec[1] * 0.7, 0), Vector3(2.4, spec[1] * 1.5, 2.4))
+
+	# honor guard: a few troopers at attention along the back wall
+	var ps: PackedScene = load("res://assets/models/characters/trooper.glb")
+	for x in [-7.0, -3.5, 3.5, 7.0]:
+		var t: Node3D = ps.instantiate()
+		t.position = Vector3(x, 0, HG_D - 1.6)
+		t.rotation.y = 0.0
+		add_child(t)
+		var ap: AnimationPlayer = t.find_child("AnimationPlayer", true, false)
+		if ap != null and ap.has_animation("01_Idle"):
+			ap.play("01_Idle")
+			ap.seek(randf() * 2.0)
+		_collision_box(t.position + Vector3(0, 1.0, 0), Vector3(0.8, 2.0, 0.8))
 
 func _build_space_view() -> void:
 	# Star Destroyer on patrol, far beyond the viewport
@@ -1043,6 +1221,7 @@ func saber_clash(at: Vector3) -> void:
 	sp.stream = load("res://assets/audio/saber_clash.wav")
 	sp.position = at
 	sp.unit_size = 14.0
+	sp.bus = "SFX"
 	sp.pitch_scale = randf_range(0.92, 1.1)
 	add_child(sp)
 	sp.play()

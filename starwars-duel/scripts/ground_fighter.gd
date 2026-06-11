@@ -179,7 +179,28 @@ static func build_character_model(cfg: Dictionary) -> Node3D:
 		if cfg.has("model_scale"):
 			m.scale = Vector3.ONE * cfg["model_scale"]
 		m.rotation.y = cfg.get("model_yaw", 0.0)
+	match cfg.get("variant", ""):
+		"kenobi":
+			# Jedi master robes: warm earth tones on the clothing only
+			_tint_meshes(m, ["Shirt", "TShirt"], Color(0.78, 0.70, 0.55))
+			_tint_meshes(m, ["Pants", "Boots"], Color(0.38, 0.30, 0.22))
+			_tint_meshes(m, ["Pouldron", "Belt", "Belt_Holster", "Gauntlets"], Color(0.45, 0.36, 0.26))
+		"sith":
+			# Sith trooper: crimson armor
+			ModelUtil.tint(m, Color(0.72, 0.10, 0.08))
 	return m
+
+static func _tint_meshes(root: Node3D, names: Array, color: Color) -> void:
+	for n: String in names:
+		var found := root.find_child(n, true, false)
+		if found is MeshInstance3D:
+			var mi := found as MeshInstance3D
+			for i in mi.mesh.get_surface_count():
+				var src := mi.mesh.surface_get_material(i)
+				if src is StandardMaterial3D:
+					var dup: StandardMaterial3D = src.duplicate()
+					dup.albedo_color = color
+					mi.set_surface_override_material(i, dup)
 
 func _setup_blade() -> void:
 	if not cfg["melee"]:
@@ -252,6 +273,7 @@ func _setup_audio() -> void:
 		hum.loop_end = hum.data.size() / 2
 		_sfx_hum.stream = hum
 		_sfx_hum.unit_size = 6.0
+		_sfx_hum.bus = "SFX"
 		_sfx_hum.volume_db = -10.0
 		_sfx_hum.pitch_scale = 0.82 if cfg.get("variant", "") == "vader" else 1.0
 		add_child(_sfx_hum)
@@ -262,6 +284,7 @@ func _setup_audio() -> void:
 		bs.loop_end = bs.data.size() / 2
 		breath.stream = bs
 		breath.unit_size = 8.0
+		breath.bus = "SFX"
 		breath.volume_db = -6.0
 		add_child(breath)
 		breath.play()
@@ -291,6 +314,7 @@ func play_sound(path: String, db: float = 0.0, pitch: float = 1.0) -> void:
 	sp.volume_db = db
 	sp.pitch_scale = pitch
 	sp.unit_size = 12.0
+	sp.bus = "SFX"
 	add_child(sp)
 	sp.play()
 	sp.finished.connect(sp.queue_free)
