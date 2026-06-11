@@ -262,8 +262,8 @@ for name in transfer_meshes:
                         6598,6615,6564,5885,6342,5862,6315,4631,4734}
         RARM_CHAIN = {767,2043,3735,2687,1987,2645,1995}
         LARM_CHAIN = {4435,4351,4695}
-        RHAND = {639,699}
-        LHAND = {2101,2279,4515,463}
+        RHAND = {639,699,2101,2279,4515,463}
+        LHAND = set()
         def assign_rigid(vs, bone):
             vg = o.vertex_groups.get(bone) or o.vertex_groups.new(name=bone)
             for g in o.vertex_groups:

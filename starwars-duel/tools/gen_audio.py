@@ -230,4 +230,15 @@ burst = bandpass_noise(n, 120, 2400, rng) * burst_env * 1.3
 airr2 = bandpass_noise(n, 600, 5200, rng) * np.exp(-np.maximum(t - 0.3, 0) * 16) * (t >= 0.3) * 0.6
 save("force_push.wav", (sub + burst + airr2) * env_ar(n, 0.01, 0.25), -1.2)
 
+# ---------------------------------------------------------------- saber hit
+# the blade connects: electric burn + flesh-of-armor thump + arc sizzle
+dur = 0.55
+t = t_axis(dur)
+n = len(t)
+zap = bandpass_noise(n, 1800, 9500, rng) * np.exp(-t * 16) * 1.4
+burn = bandpass_noise(n, 350, 2200, rng) * np.exp(-t * 7) * (0.7 + 0.3 * np.sin(2 * np.pi * 57 * t))
+thump2 = np.sin(2 * np.pi * np.exp(np.linspace(np.log(130), np.log(48), n)) * t) * np.exp(-t * 15) * 1.5
+arc = np.sin(2 * np.pi * 1170 * t) * np.exp(-t * 22) * 0.3
+save("saber_hit.wav", (zap + burn + thump2 + arc) * env_ar(n, 0.001, 0.12), -0.8)
+
 print("done.")

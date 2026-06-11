@@ -55,6 +55,8 @@ var _blade_local_base := Vector3.ZERO
 var _blade_local_tip := Vector3.ZERO
 var _base_yaw := 0.0             # model rest yaw (procedural swing pivots around it)
 
+var _flash_meshes: Array = []
+var _flash_energy := 0.0
 var _sfx_hum: AudioStreamPlayer3D
 var _sfx_step_t := 0.0
 var _walk_phase := 0.0
@@ -85,6 +87,32 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 
 	_setup_blade()
 	_setup_audio()
+	# additive white overlay on every mesh: tweened up briefly when hit
+	var stack: Array = [model]
+	while not stack.is_empty():
+		var nd: Node = stack.pop_back()
+		if nd is MeshInstance3D:
+			var fm := StandardMaterial3D.new()
+			fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			fm.albedo_color = Color(0, 0, 0)
+			fm.emission_enabled = true
+			fm.emission = Color(1.0, 0.45, 0.3)
+			fm.emission_energy_multiplier = 0.0
+			(nd as MeshInstance3D).material_overlay = fm
+			_flash_meshes.append(fm)
+		for c in nd.get_children():
+			stack.push_back(c)
+
+func damage_flash(strength := 1.0) -> void:
+	_flash_energy = strength
+	for fm: StandardMaterial3D in _flash_meshes:
+		fm.emission_energy_multiplier = strength * 1.6
+	var tw := create_tween()
+	tw.tween_method(func(v: float) -> void:
+		for fm: StandardMaterial3D in _flash_meshes:
+			fm.emission_energy_multiplier = v,
+		strength * 1.6, 0.0, 0.18)
 
 # Builds the visual model for a roster entry. Vader is a real Battlefront-style
 # model re-rigged onto the shared animated skeleton (see CREDITS.md).
@@ -434,6 +462,7 @@ func take_push(dir: Vector3) -> void:
 		combo_queued = false
 		combo_index = 0
 	hp -= 4.0
+	damage_flash(0.7)
 	if anim != null:
 		_play_oneshot(cfg["anims"]["hit"], 0.1, 0.9)
 	damaged.emit(self)
@@ -479,9 +508,13 @@ func take_hit(dmg: float, from: GroundFighter) -> void:
 		hp -= dmg
 		hit_stun = 0.45
 		velocity -= to_attacker.normalized() * 2.4
+		damage_flash(1.0)
 		if anim != null and not attacking:
 			_play_oneshot(cfg["anims"]["hit"], 0.1, 1.2)
-		play_sound("res://assets/audio/hit.wav", -6.0)
+		if from.cfg["melee"]:
+			play_sound("res://assets/audio/saber_hit.wav", -1.0, randf_range(0.92, 1.1))
+		else:
+			play_sound("res://assets/audio/hit.wav", -4.0)
 	damaged.emit(self)
 	if hp <= 0.0:
 		hp = 0.0

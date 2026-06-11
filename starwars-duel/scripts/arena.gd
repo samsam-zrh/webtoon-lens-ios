@@ -161,6 +161,20 @@ func _build_scenery() -> void:
 	add_child(amb)
 	amb.play()
 
+	# Dogfight music (the player's own "battle" track when present)
+	var bgm := AudioStreamPlayer.new()
+	var custom := MusicDirector.external_stream("battle")
+	if custom != null:
+		bgm.stream = custom
+	else:
+		var mp3: AudioStream = load("res://assets/audio/music_battle.mp3").duplicate()
+		mp3.loop = true
+		bgm.stream = mp3
+	bgm.volume_db = -13.0
+	bgm.bus = "Music"
+	add_child(bgm)
+	bgm.play()
+
 func _make_textured_planet(tex_path: String, radius: float, pos: Vector3) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var sm := SphereMesh.new()

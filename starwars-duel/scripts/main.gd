@@ -206,6 +206,7 @@ func _build_menu_world() -> void:
 		stream.loop_end = stream.data.size() / 2
 		amb.stream = stream
 		amb.volume_db = -10.0
+	amb.bus = "Music"
 	_menu_root.add_child(amb)
 	amb.play()
 
@@ -290,6 +291,14 @@ func _build_menu_ui() -> void:
 		help_text = "Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause"
 	else:
 		help_text = "ZQSD : se déplacer   •   Clic : attaque (enchaîne le combo !)   •   Clic droit : parade   •   Maj : esquive   •   Échap : menu"
+	var n_music := MusicDirector.detected_count()
+	var music_l := UiKit.label(
+		"♪ Musique personnalisée : %d piste(s) détectée(s)" % n_music if n_music > 0
+		else "♪ Dossier « music » non détecté (musique libre incluse)",
+		13, Color(0.45, 0.85, 0.5) if n_music > 0 else Color(0.5, 0.53, 0.6))
+	music_l.position = Vector2(18, 14)
+	root.add_child(music_l)
+
 	var help := UiKit.label(help_text, 15, Color(0.62, 0.65, 0.75))
 	help.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	help.grow_horizontal = Control.GROW_DIRECTION_BOTH

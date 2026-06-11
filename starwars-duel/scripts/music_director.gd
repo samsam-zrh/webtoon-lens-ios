@@ -68,6 +68,10 @@ static func _scan() -> void:
 	for slot in _assignments:
 		print("Musique personnalisée [", slot, "] : ", _assignments[slot].get_file())
 
+static func detected_count() -> int:
+	_scan()
+	return _assignments.size()
+
 static func external_stream(slot: String) -> AudioStream:
 	_scan()
 	if not _assignments.has(slot):
@@ -108,6 +112,7 @@ func _layer(path: String, db: float) -> AudioStreamPlayer:
 		stream.loop = true
 	p.stream = stream
 	p.volume_db = db
+	p.bus = "Music"
 	add_child(p)
 	p.play()
 	return p

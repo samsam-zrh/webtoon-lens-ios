@@ -77,6 +77,7 @@ var _cam_pitch := -0.12
 var _started := false
 var _ended := false
 var _shake := 0.0
+var _hitmark_t := 0.0
 var music: MusicDirector
 var campaign_next := false   # set by main: a "next chapter" exists after victory
 var campaign_mode := false
@@ -729,6 +730,14 @@ func _draw_hud() -> void:
 	_bar(Vector2(36, 74), 120, 1.0 - player.dash_cooldown / 1.1, Color(0.4, 0.7, 1.0))
 	if player.has_force():
 		_bar(Vector2(36, 90), 120, 1.0 - player.push_cooldown / 6.0, Color(0.65, 0.55, 1.0))
+	# Hitmarker: brief X at screen center when your strike lands
+	if _hitmark_t > 0.0:
+		_hitmark_t -= get_process_delta_time()
+		var c2 := vp / 2.0
+		var a := clampf(_hitmark_t / 0.22, 0.0, 1.0)
+		var col2 := Color(1, 1, 1, a)
+		for sgn in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
+			_hud.draw_line(c2 + sgn * 7.0, c2 + sgn * 16.0, col2, 2.2, true)
 	# Crosshair for the shooter
 	if not player.cfg["melee"]:
 		var c := vp / 2.0
@@ -869,6 +878,8 @@ func melee_hit(attacker: GroundFighter) -> void:
 			target.take_hit(attacker.cfg["dmg"], attacker)
 			_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
 			_shake = maxf(_shake, 0.55 if target == player else 0.35)
+			if attacker == player:
+				_hitmark_t = 0.22
 			hit_stop(0.09, 0.07)
 			_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
 			if music != null:
