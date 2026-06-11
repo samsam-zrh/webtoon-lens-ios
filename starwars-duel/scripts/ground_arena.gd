@@ -51,7 +51,7 @@ const ROSTER := {
 		"model": "res://assets/models/characters/trooper.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(1.0, 0.3, 0.2),
-		"hp": 90.0, "speed": 6.2, "dmg": 8.0, "turn_speed": 11.0,
+		"hp": 90.0, "speed": 3.1, "dmg": 8.0, "turn_speed": 11.0,
 		"attack_time": 0.5, "attack_move_factor": 0.8,
 		"ai_skill": 0.5, "ai_block_chance": 0.0,
 		"quote": "Vous êtes en état d'arrestation, au nom de l'Empire !",

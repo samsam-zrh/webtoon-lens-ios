@@ -24,7 +24,7 @@ static func _scan() -> void:
 		return
 	_scanned = true
 	var files: Array = []
-	for dir in [OS.get_executable_path().get_base_dir() + "/music", "user://music"]:
+	for dir in [OS.get_executable_path().get_base_dir() + "/music", "user://music", "res://assets/custom_music"]:
 		var da := DirAccess.open(dir)
 		if da == null:
 			continue
