@@ -63,6 +63,10 @@ func _ready() -> void:
 		t2.timeout.connect(func() -> void:
 			Input.action_press("force_push")
 			get_tree().create_timer(0.1).timeout.connect(func() -> void: Input.action_release("force_push")))
+	if "--botblock" in args:
+		# Headless testing: hold the saber in guard once the duel starts
+		get_tree().create_timer(6.0).timeout.connect(func() -> void:
+			Input.action_press("block"))
 	if "--botfwd" in args:
 		# Headless testing: hold "forward" once the duel starts
 		get_tree().create_timer(5.0).timeout.connect(func() -> void:

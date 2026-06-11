@@ -974,15 +974,30 @@ func _update_bolts(delta: float) -> void:
 		var prev: Vector3 = node.position
 		node.position += b["dir"] * 32.0 * delta
 		var dead: bool = b["life"] <= 0.0
-		# Hit fighters
+		# Hit fighters — a saber held in guard DEFLECTS the bolt back
 		for f: GroundFighter in [player] + enemies:
 			if f == b["from"] or not f.alive or dead:
 				continue
 			var center: Vector3 = f.global_position + Vector3(0, 1.0, 0)
 			if _seg_point_dist(prev, node.position, center) < 0.55:
-				f.take_hit(b["from"].cfg["dmg"], b["from"])
-				_hit_flash(center, Color(1, 0.4, 0.2))
-				dead = true
+				var facing: float = (-f.global_transform.basis.z).dot((-b["dir"] as Vector3).normalized())
+				if f.blocking and f.cfg["melee"] and facing > 0.2:
+					var shooter: GroundFighter = b["from"]
+					var back: Vector3 = -b["dir"]
+					if shooter != null and shooter.alive:
+						back = (shooter.global_position + Vector3(0, 1.1, 0) - node.position).normalized()
+						back = (back + Vector3(randf_range(-0.05, 0.05), randf_range(-0.03, 0.03), randf_range(-0.05, 0.05))).normalized()
+					b["dir"] = back
+					b["from"] = f
+					b["life"] = 1.6
+					node.position += back * 0.7
+					saber_clash(center + Vector3(0, 0.3, 0))
+					if f == player:
+						_hitmark_t = 0.22
+				else:
+					f.take_hit(b["from"].cfg["dmg"], b["from"])
+					_hit_flash(center, Color(1, 0.4, 0.2))
+					dead = true
 		# Hit the ground or fly out of the arena
 		if node.position.y < 0.05:
 			_hit_flash(node.position, Color(1, 0.5, 0.2))

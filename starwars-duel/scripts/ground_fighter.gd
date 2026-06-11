@@ -421,7 +421,12 @@ func _start_attack(index: int) -> void:
 		var n: String = names[mini(index, names.size() - 1)]
 		cfg["attack_time"] = _play_oneshot(n, 0.12, cfg.get("attack_anim_speed", 1.3))
 	attack_timer = cfg["attack_time"]
-	play_sound("res://assets/audio/saber_swing.wav" if cfg["melee"] else "res://assets/audio/laser_red.wav", -4.0, randf_range(0.92, 1.12))
+	if cfg["melee"]:
+		get_tree().create_timer(cfg["attack_time"] * 0.22).timeout.connect(func() -> void:
+			if is_instance_valid(self) and attacking:
+				play_sound("res://assets/audio/saber_swing.wav", -6.0, randf_range(0.94, 1.1)))
+	else:
+		play_sound("res://assets/audio/laser_red.wav", -4.0, randf_range(0.92, 1.12))
 	# Lunge toward the enemy
 	if cfg["melee"] and enemy != null:
 		var to_e := enemy.global_position - global_position
@@ -571,16 +576,19 @@ func _ai_think(delta: float) -> void:
 			try_force_push()
 	else:
 		var want2: float
-		if dist < 5.0:
-			want2 = -0.6          # give a little ground at point blank
-		elif dist > 11.0:
+		if dist < 2.8:
+			want2 = -0.35         # only a small step back at point blank
+		elif dist > 9.0:
 			want2 = 1.0           # close back in
 		else:
-			want2 = 0.15          # hold position, keep light pressure
+			want2 = 0.2           # hold position, keep light pressure
 		# never back into the arena edge
 		var flat := Vector2(global_position.x, global_position.z)
-		if want2 < 0.0 and flat.length() > 11.0:
+		if want2 < 0.0 and flat.length() > 10.0:
 			want2 = 0.4
-		move_input = Vector2(_ai_strafe, want2)
-		if dist < 20.0 and randf() < skill * delta * 60.0 * 0.022:
+		# a raised saber guard sends bolts back: flank instead of feeding it
+		var target_guarding: bool = enemy.blocking and enemy.cfg["melee"]
+		move_input = Vector2(_ai_strafe * (2.0 if target_guarding else 1.4), want2)
+		var rate := 0.008 if target_guarding else 0.022
+		if dist < 20.0 and randf() < skill * delta * 60.0 * rate:
 			try_attack()

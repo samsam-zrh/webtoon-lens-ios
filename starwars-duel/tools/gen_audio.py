@@ -92,20 +92,18 @@ hum = base * trem + hiss
 save("saber_hum.wav", loopable(hum), -6.0)
 
 # -------------------------------------------------------------- saber swing
-dur = 0.5
+# soft, rounded doppler whoosh: mostly the hum gliding, very little hiss
+dur = 0.45
 t = t_axis(dur)
 n = len(t)
-# doppler glide of the hum
-glide = np.exp(np.linspace(np.log(1.9), np.log(0.8), n))
-phase1 = np.cumsum(2 * np.pi * f1 * 2.2 * glide) / SR
-phase2 = np.cumsum(2 * np.pi * f2 * 2.2 * glide) / SR
-body = np.tanh((np.sin(phase1) + 0.6 * np.sin(phase2)) * 1.5)
-# whoosh: noise through a falling band
-sweep = bandpass_noise(n, 500, 3800, rng)
-swfade = np.exp(np.linspace(np.log(3000), np.log(500), n)) / 3000.0
-whoosh = sweep * swfade
-sw = (body * 0.7 + whoosh * 1.4) * env_ar(n, 0.02, 0.16)
-save("saber_swing.wav", sw, -2.0)
+glide = np.exp(np.linspace(np.log(1.55), np.log(0.85), n))
+phase1 = np.cumsum(2 * np.pi * f1 * 2.0 * glide) / SR
+phase2 = np.cumsum(2 * np.pi * f2 * 2.0 * glide) / SR
+body = np.tanh((np.sin(phase1) + 0.6 * np.sin(phase2)) * 1.2)
+sweep = bandpass_noise(n, 280, 1500, rng)
+swell = np.sin(np.pi * np.clip(t / dur, 0, 1)) ** 1.6
+sw = (body * 0.85 + sweep * 0.45) * swell * env_ar(n, 0.04, 0.14)
+save("saber_swing.wav", sw, -9.0)
 
 # -------------------------------------------------------------- saber clash
 dur = 0.85
