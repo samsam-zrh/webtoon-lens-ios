@@ -28,9 +28,15 @@ static func _scan() -> void:
 		var da := DirAccess.open(dir)
 		if da == null:
 			continue
+		var seen: Array = []
 		for f in da.get_files():
-			if f.get_extension().to_lower() in ["mp3", "ogg", "wav"]:
-				files.append(dir + "/" + f)
+			var name := f
+			# in exported builds, imported audio appears as .import/.remap stubs
+			if name.ends_with(".import") or name.ends_with(".remap"):
+				name = name.get_basename()
+			if name.get_extension().to_lower() in ["mp3", "ogg", "wav"] and name not in seen:
+				seen.append(name)
+				files.append(dir + "/" + name)
 	if files.is_empty():
 		return
 	var taken: Array = []
@@ -78,6 +84,17 @@ static func external_stream(slot: String) -> AudioStream:
 		return null
 	var path: String = _assignments[slot]
 	var stream: AudioStream
+	if path.begins_with("res://"):
+		# bundled track: goes through the imported-resource pipeline
+		stream = load(path)
+		if stream != null:
+			stream = stream.duplicate()
+			if "loop" in stream:
+				stream.loop = true
+			elif stream is AudioStreamWAV:
+				stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+				stream.loop_end = stream.data.size() / 2
+		return stream
 	match path.get_extension().to_lower():
 		"mp3":
 			var mp3 := AudioStreamMP3.new()
@@ -107,9 +124,15 @@ func setup(arena: GroundArena) -> void:
 func _layer(path: String, db: float) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
 	var stream: AudioStream = external_stream(path.get_file().get_basename().trim_prefix("music_"))
-	if stream == null:
+	if stream == null and ResourceLoader.exists(path):
 		stream = load(path).duplicate()
 		stream.loop = true
+	if stream == null and ResourceLoader.exists("res://assets/audio/music_tension.mp3"):
+		stream = load("res://assets/audio/music_tension.mp3").duplicate()
+		stream.loop = true
+	if stream == null:
+		add_child(p)
+		return p
 	p.stream = stream
 	p.volume_db = db
 	p.bus = "Music"

@@ -166,8 +166,8 @@ func _build_scenery() -> void:
 	var custom := MusicDirector.external_stream("battle")
 	if custom != null:
 		bgm.stream = custom
-	else:
-		var mp3: AudioStream = load("res://assets/audio/music_battle.mp3").duplicate()
+	elif ResourceLoader.exists("res://assets/audio/music_tension.mp3"):
+		var mp3: AudioStream = load("res://assets/audio/music_tension.mp3").duplicate()
 		mp3.loop = true
 		bgm.stream = mp3
 	bgm.volume_db = -13.0
