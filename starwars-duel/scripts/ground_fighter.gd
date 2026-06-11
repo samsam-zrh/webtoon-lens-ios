@@ -38,10 +38,15 @@ var burst_left := 0
 var move_input := Vector2.ZERO  # x = strafe right, y = forward
 var face_yaw := 0.0             # world yaw the body should face
 
-# AI state
+# AI state machine: approach -> pressure (attack chains) -> retreat, with
+# reactive guards timed on the opponent's windup.
+var _ai_state := "approach"
+var _ai_state_t := 0.0
 var _ai_timer := 0.0
 var _ai_strafe := 0.0
-var _ai_want_block := false
+var _ai_block_t := 0.0
+var _ai_atk_cd := 0.0
+var _ai_chain := 0
 
 var model: Node3D
 var anim: AnimationPlayer
@@ -55,6 +60,8 @@ var _blade_local_base := Vector3.ZERO
 var _blade_local_tip := Vector3.ZERO
 var _base_yaw := 0.0             # model rest yaw (procedural swing pivots around it)
 
+var attack_recoil_t := 0.0       # set when our swing gets parried
+var _blade_in_hand := false
 var _flash_meshes: Array = []
 var _flash_energy := 0.0
 var _sfx_hum: AudioStreamPlayer3D
@@ -86,6 +93,8 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 		_play(cfg["anims"]["idle"], 0.0)
 
 	_setup_blade()
+	if cfg["melee"] and not cfg.get("blade_always", false) and blade_mesh != null and anim != null:
+		_reparent_blade_to_hand.call_deferred()
 	_setup_audio()
 	# additive white overlay on every mesh: tweened up briefly when hit
 	var stack: Array = [model]
@@ -103,6 +112,51 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 			_flash_meshes.append(fm)
 		for c in nd.get_children():
 			stack.push_back(c)
+
+# The source rig only poses the blade bone inside combat animations; pose one
+# combat frame, measure the grip transform, then ride the hand bone forever.
+func _reparent_blade_to_hand() -> void:
+	await get_tree().process_frame
+	if not is_instance_valid(blade_mesh) or anim == null:
+		return
+	var sk: Skeleton3D = model.find_child("Skeleton3D", true, false)
+	if sk == null:
+		return
+	var bi := sk.find_bone("mixamorig_RightHand")
+	if bi == -1:
+		return
+	var a0: String = cfg["anims"]["attack"][0]
+	if not anim.has_animation(a0):
+		return
+	anim.play(a0)
+	anim.seek(anim.get_animation(a0).length * 0.35, true)
+	await get_tree().process_frame
+	if not is_instance_valid(self) or not is_instance_valid(blade_mesh):
+		return
+	var hand_g: Transform3D = sk.global_transform * sk.get_bone_global_pose(bi)
+	var rel: Transform3D = hand_g.affine_inverse() * blade_mesh.global_transform
+	var att := BoneAttachment3D.new()
+	sk.add_child(att)
+	att.bone_name = "mixamorig_RightHand"
+	blade_mesh.reparent(att, false)
+	blade_mesh.transform = rel
+	if is_instance_valid(halo_mesh):
+		halo_mesh.reparent(att, false)
+		halo_mesh.transform = rel
+	_blade_in_hand = true
+	blade_mesh.visible = true
+	if halo_mesh != null:
+		halo_mesh.visible = true
+	if blade_light != null:
+		blade_light.visible = true
+	anim.play(cfg["anims"]["idle"])
+
+func attack_recoil() -> void:
+	# our swing was parried: the chain breaks and we are briefly exposed
+	combo_queued = false
+	attack_recoil_t = 0.45
+	if attacking:
+		attack_timer = minf(attack_timer, 0.15)
 
 func damage_flash(strength := 1.0) -> void:
 	_flash_energy = strength
@@ -227,6 +281,7 @@ func _play(name: String, blend: float = 0.2, speed: float = 1.0) -> void:
 func _play_oneshot(name: String, blend: float = 0.15, speed: float = 1.0) -> float:
 	if anim == null or not anim.has_animation(name):
 		return 0.8
+	anim.speed_scale = 1.0
 	anim.play(name, blend, speed)
 	return anim.get_animation(name).length / speed
 
@@ -256,18 +311,29 @@ func _physics_process(delta: float) -> void:
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	dash_cooldown = maxf(0.0, dash_cooldown - delta)
 	push_cooldown = maxf(0.0, push_cooldown - delta)
+	attack_recoil_t = maxf(0.0, attack_recoil_t - delta)
 	hit_stun = maxf(0.0, hit_stun - delta)
 
 	if controls_enabled and not is_player:
 		_ai_think(delta)
 
-	# Attack progression
+	# Attack progression: the blade is "live" over a window of the swing
+	# (0.5 -> 0.82 of the animation), checked every tick until it connects.
 	if attacking:
 		attack_timer -= delta
-		if not hit_window_done and attack_timer < cfg["attack_time"] * 0.40:
-			hit_window_done = true
-			if cfg["melee"]:
-				arena.melee_hit(self)
+		var elapsed: float = 1.0 - attack_timer / float(cfg["attack_time"])
+		if cfg["melee"]:
+			if not hit_window_done and elapsed >= 0.5 and elapsed <= 0.82:
+				if arena.melee_hit(self):
+					hit_window_done = true
+			# motion warp: glide toward the target during the windup and stop
+			# at striking range, instead of an uncontrolled lunge impulse
+			if elapsed < 0.5 and enemy != null and enemy.alive:
+				var to_e := enemy.global_position - global_position
+				to_e.y = 0
+				var d := to_e.length()
+				if d > saber_reach() * 0.75 and d < 6.0:
+					velocity += to_e.normalized() * 26.0 * delta
 		if attack_timer <= 0.0:
 			if combo_queued and combo_index < cfg["anims"]["attack"].size() - 1 and cfg["melee"]:
 				combo_queued = false
@@ -285,6 +351,8 @@ func _physics_process(delta: float) -> void:
 
 	# Movement
 	var speed: float = cfg["speed"]
+	if attack_recoil_t > 0.0:
+		speed *= 0.45
 	if blocking:
 		speed *= 0.4
 	if attacking:
@@ -304,8 +372,9 @@ func _physics_process(delta: float) -> void:
 			desired = desired.normalized()
 		desired *= speed
 
-	velocity.x = lerpf(velocity.x, desired.x, 10.0 * delta)
-	velocity.z = lerpf(velocity.z, desired.z, 10.0 * delta)
+	var k := 1.0 - exp((-11.0 if desired.length_squared() > 0.05 else -16.0) * delta)
+	velocity.x = lerpf(velocity.x, desired.x, k)
+	velocity.z = lerpf(velocity.z, desired.z, k)
 	if is_on_floor():
 		velocity.y = -1.0
 	else:
@@ -355,19 +424,35 @@ func _update_animation(delta: float) -> void:
 		model.rotation.x = lerpf(model.rotation.x, pitch, 7.0 * delta)
 		model.rotation.z = lerpf(model.rotation.z, roll, 6.0 * delta)
 		return
+	# dash lean: the body tips into the dodge
+	if model != null:
+		var lean_x := -0.22 if dash_timer > 0.0 else 0.0
+		model.rotation.x = lerpf(model.rotation.x, lean_x, 9.0 * delta)
 	if attacking or hit_stun > 0.3:
+		if anim != null:
+			anim.speed_scale = 1.0
 		return
 	if blocking:
+		anim.speed_scale = 1.0
 		_play(cfg["anims"]["block"], 0.15)
 		return
 	var local_v := global_transform.basis.inverse() * Vector3(velocity.x, 0, velocity.z)
 	var a: Dictionary = cfg["anims"]
-	if local_v.length() < 0.6:
+	var hv := local_v.length()
+	if hv < 0.6:
+		anim.speed_scale = 1.0
 		_play(a["idle"], 0.25)
-	elif absf(local_v.z) >= absf(local_v.x):
-		_play(a["run_f"] if local_v.z < 0.0 else a["run_b"], 0.2)
 	else:
-		_play(a["run_r"] if local_v.x > 0.0 else a["run_l"], 0.2)
+		# hysteresis: keep the current direction anim unless clearly dominated
+		var fwdness := absf(local_v.z) / maxf(absf(local_v.x), 0.001)
+		var want: String
+		if fwdness > 0.8:
+			want = a["run_f"] if local_v.z < 0.0 else a["run_b"]
+		else:
+			want = a["run_r"] if local_v.x > 0.0 else a["run_l"]
+		_play(want, 0.22)
+		# feet match the ground speed: no more skating
+		anim.speed_scale = clampf(hv / maxf(cfg["speed"], 0.1), 0.65, 1.35)
 
 func _update_saber(_delta: float) -> void:
 	if not cfg["melee"]:
@@ -375,7 +460,7 @@ func _update_saber(_delta: float) -> void:
 	# Kyle's blade bone is only posed in combat animations; elsewhere it sits
 	# in bind pose inside the torso, so only show it while it is being swung.
 	# Vader's blade is skinned to his hand and stays drawn ("blade_always").
-	if cfg["type"] == "jedi" and blade_mesh != null and not cfg.get("blade_always", false):
+	if cfg["type"] == "jedi" and blade_mesh != null and not cfg.get("blade_always", false) and not _blade_in_hand:
 		var show := attacking or blocking
 		blade_mesh.visible = show
 		if halo_mesh != null:
@@ -427,12 +512,7 @@ func _start_attack(index: int) -> void:
 				play_sound("res://assets/audio/saber_swing.wav", -6.0, randf_range(0.94, 1.1)))
 	else:
 		play_sound("res://assets/audio/laser_red.wav", -4.0, randf_range(0.92, 1.12))
-	# Lunge toward the enemy
-	if cfg["melee"] and enemy != null:
-		var to_e := enemy.global_position - global_position
-		to_e.y = 0
-		if to_e.length() > 1.2 and to_e.length() < 5.5:
-			velocity += to_e.normalized() * cfg.get("lunge", 5.0)
+
 
 func set_blocking(want: bool) -> void:
 	if not cfg["melee"] or attacking or not alive:
@@ -500,10 +580,11 @@ func take_hit(dmg: float, from: GroundFighter) -> void:
 	to_attacker.y = 0
 	var facing := (-global_transform.basis.z).dot(to_attacker.normalized())
 	if blocking and facing > 0.25 and from.cfg["melee"]:
-		# Saber clash: blocked!
+		# Saber clash: blocked! The attacker recoils, exposed.
 		arena.saber_clash((global_position + from.global_position) / 2.0 + Vector3(0, 1.3, 0))
 		velocity -= to_attacker.normalized() * 1.8
-		from.velocity += to_attacker.normalized() * 1.8
+		from.velocity += to_attacker.normalized() * 2.6
+		from.attack_recoil()
 		hp -= dmg * 0.15
 	elif blocking and facing > 0.25:
 		# Blaster bolt deflected
@@ -560,20 +641,55 @@ func _ai_think(delta: float) -> void:
 	if _ai_timer <= 0.0:
 		_ai_timer = randf_range(0.5, 1.1)
 		_ai_strafe = [-1.0, 0.0, 1.0][randi() % 3] * randf_range(0.4, 1.0)
-		_ai_want_block = randf() < cfg.get("ai_block_chance", 0.3)
-		if randf() < 0.12 and dist < 6.0:
-			try_dash()
 
 	var skill: float = cfg.get("ai_skill", 0.6)
 	if cfg["melee"]:
-		var want := clampf((dist - saber_reach() * 0.75) * 0.8, -1.0, 1.0)
-		move_input = Vector2(_ai_strafe * 0.5, want)
-		# Block reactively when the player is mid-swing
-		set_blocking(_ai_want_block and enemy.attacking and dist < 4.0)
-		if dist < saber_reach() + 0.4 and not blocking and randf() < skill * 2.2 * delta * 60.0 * 0.02:
-			try_attack()
-		elif has_force() and push_cooldown <= 0.0 and dist < 4.5 and randf() < skill * delta * 60.0 * 0.012:
-			try_force_push()
+		_ai_state_t -= delta
+		_ai_block_t -= delta
+		_ai_atk_cd -= delta
+		var reach := saber_reach()
+		# reactive guard: read the opponent's windup and raise the blade
+		if (_ai_block_t <= 0.0 and enemy.attacking and dist < reach + 1.2
+				and not attacking and randf() < cfg.get("ai_block_chance", 0.3) * delta * 60.0 * 0.12):
+			_ai_block_t = randf_range(0.4, 0.7)
+		set_blocking(_ai_block_t > 0.0)
+		# parried? back off and reset the exchange
+		if attack_recoil_t > 0.2 and _ai_state != "retreat":
+			_ai_state = "retreat"
+			_ai_state_t = randf_range(0.7, 1.1)
+		match _ai_state:
+			"approach":
+				move_input = Vector2(_ai_strafe * 0.4, clampf((dist - reach * 0.8) * 0.9, -0.3, 1.0))
+				if dist < reach + 0.3:
+					_ai_state = "pressure"
+					_ai_state_t = randf_range(1.4, 2.4)
+					_ai_chain = 1 + randi() % 3
+			"pressure":
+				move_input = Vector2(_ai_strafe * 0.6, clampf((dist - reach * 0.7) * 0.8, -0.5, 0.6))
+				if not blocking and _ai_atk_cd <= 0.0 and dist < reach + 0.4 and _ai_chain > 0:
+					try_attack()
+					_ai_chain -= 1
+					_ai_atk_cd = randf_range(0.9, 1.5) - skill * 0.5
+				elif has_force() and push_cooldown <= 0.0 and dist < 4.0 and randf() < skill * delta * 2.0:
+					try_force_push()
+				if _ai_state_t <= 0.0 or _ai_chain <= 0:
+					if randf() < 0.45:
+						_ai_state = "retreat"
+						_ai_state_t = randf_range(0.6, 1.2)
+					else:
+						_ai_state = "pressure"
+						_ai_state_t = randf_range(1.2, 2.0)
+						_ai_chain = 1 + randi() % 3
+			"retreat":
+				move_input = Vector2(_ai_strafe, -0.7)
+				# punish a whiffed swing on the way out
+				if enemy.attacking and dist < reach and _ai_atk_cd <= 0.0:
+					try_attack()
+					_ai_atk_cd = 1.0
+				if _ai_state_t <= 0.0 or dist > reach * 2.2:
+					_ai_state = "approach"
+				if randf() < 0.5 * delta and dist < 4.0:
+					try_dash()
 	else:
 		var want2: float
 		if dist < 2.8:

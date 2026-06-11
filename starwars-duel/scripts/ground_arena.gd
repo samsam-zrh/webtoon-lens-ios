@@ -17,7 +17,7 @@ const ROSTER := {
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 1.0, 0.4),
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.3,
+		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.12,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
 		"quote": "Je suis un Jedi, comme mon père avant moi.",
 		"anims": {
@@ -36,7 +36,7 @@ const ROSTER := {
 		"blade_extra": ["DARTH_Laser_0"],
 		"blade_always": true,
 		"hp": 160.0, "speed": 4.6, "dmg": 22.0, "reach": 2.5, "lunge": 4.5, "turn_speed": 9.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.1, "attack_move_factor": 0.35,
+		"attack_time": 0.7, "attack_anim_speed": 1.15, "attack_move_factor": 0.15,
 		"ai_skill": 0.5, "ai_block_chance": 0.35,
 		"quote": "Je trouve votre manque de foi déplorable.",
 		"anims": {
@@ -78,6 +78,7 @@ var _started := false
 var _ended := false
 var _shake := 0.0
 var _hitmark_t := 0.0
+var _shake_t := 0.0
 var music: MusicDirector
 var campaign_next := false   # set by main: a "next chapter" exists after victory
 var campaign_mode := false
@@ -837,11 +838,13 @@ func _update_camera(delta: float) -> void:
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
 	camera.fov = lerpf(camera.fov, GameSettings.fov + hv * 0.35, 5.0 * delta)
-	# impact shake: decaying random jolt, echoed in the post shader
+	# impact shake: smooth decaying oscillation (reads as a thud, not static)
 	_shake = maxf(0.0, _shake - 3.2 * delta)
+	_shake_t += delta
 	var sh := _shake * _shake
-	camera.h_offset = randf_range(-1.0, 1.0) * 0.09 * sh
-	camera.v_offset = randf_range(-1.0, 1.0) * 0.09 * sh
+	camera.h_offset = sin(_shake_t * 41.0) * 0.085 * sh
+	camera.v_offset = sin(_shake_t * 53.0 + 1.7) * 0.075 * sh
+	camera.rotation.z = sin(_shake_t * 33.0 + 0.6) * 0.012 * sh
 	if _post_mat != null:
 		_post_mat.set_shader_parameter("shake", sh)
 	# victory cinematic: slow orbit around the winner
@@ -866,7 +869,8 @@ func _rumble(weak: float, strong: float, dur: float) -> void:
 	if GameSettings.rumble:
 		Input.start_joy_vibration(0, weak, strong, dur)
 
-func melee_hit(attacker: GroundFighter) -> void:
+func melee_hit(attacker: GroundFighter) -> bool:
+	var connected := false
 	var targets: Array = [player] if attacker != player else enemies.duplicate()
 	for target: GroundFighter in targets:
 		if target == null or not target.alive:
@@ -875,6 +879,7 @@ func melee_hit(attacker: GroundFighter) -> void:
 		to_t.y = 0
 		var facing := (-attacker.global_transform.basis.z).dot(to_t.normalized())
 		if to_t.length() <= attacker.saber_reach() and facing > 0.35:
+			connected = true
 			target.take_hit(attacker.cfg["dmg"], attacker)
 			_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
 			_shake = maxf(_shake, 0.55 if target == player else 0.35)
@@ -884,6 +889,7 @@ func melee_hit(attacker: GroundFighter) -> void:
 			_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
 			if music != null:
 				music.combat_event()
+	return connected
 
 # Telekinetic shove: knocks back every opponent caught in the front cone.
 func force_push(caster: GroundFighter) -> void:
