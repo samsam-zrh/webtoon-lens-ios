@@ -29,9 +29,21 @@ Merci à ces artistes pour leur travail partagé librement.
 
 ## Audio
 
-Tous les effets sonores (lasers, explosions, moteurs, ambiance) sont générés
-procéduralement par synthèse (script Python, ondes sinusoïdales et bruit
-filtré) — aucun sample externe.
+### Musique
+
+Bande originale adaptative composée de trois morceaux de **Kevin MacLeod**
+(incompetech.com), licence
+[CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/) :
+« Dark Times » (tension), « Five Armies » (combat) et
+« Final Battle of the Dark Wizards » (finale). Ce sont des compositions
+originales libres, choisies pour leur style orchestral épique — aucune
+musique des films n'est utilisée.
+
+### Effets sonores
+
+Tous les effets sonores (sabres, lasers, explosions, ambiance, respiration)
+sont générés procéduralement par synthèse (`tools/gen_audio.py`) — aucun
+sample externe.
 
 ## Univers
 

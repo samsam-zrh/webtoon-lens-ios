@@ -406,8 +406,13 @@ func set_blocking(want: bool) -> void:
 	blocking = want
 
 func try_dash() -> void:
-	if dash_cooldown > 0.0 or not alive or attacking:
+	if dash_cooldown > 0.0 or not alive:
 		return
+	if attacking:
+		# cancel the swing into the dodge
+		attacking = false
+		combo_queued = false
+		combo_index = 0
 	var fwd := Vector3(-sin(face_yaw), 0, -cos(face_yaw))
 	var right := Vector3(-fwd.z, 0, fwd.x)
 	var d := fwd * move_input.y + right * move_input.x

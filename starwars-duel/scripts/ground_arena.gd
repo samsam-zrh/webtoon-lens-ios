@@ -8,6 +8,7 @@ extends Node3D
 
 signal request_restart
 signal request_menu
+signal request_next
 
 const ROSTER := {
 	"luke": {
@@ -75,6 +76,10 @@ var _cam_pitch := -0.12
 var _started := false
 var _ended := false
 var _shake := 0.0
+var music: MusicDirector
+var campaign_next := false   # set by main: a "next chapter" exists after victory
+var campaign_mode := false
+var _intro_done := false
 var _post_mat: ShaderMaterial
 var _cine_pivot: Node3D
 var _cine_target: GroundFighter
@@ -83,10 +88,10 @@ var _msg: Label
 var _bolts: Array = []
 var _trails: Dictionary = {}  # fighter -> {points: Array, mesh: MeshInstance3D}
 
-func start(player_id: String, enemy_id: String) -> void:
+func start(player_id: String, enemy_id: String, enemy_mods: Dictionary = {}) -> void:
 	_build_corridor()
 	player = _spawn(player_id, true, Vector3(0, 0.1, 12), 0.0)
-	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), PI)
+	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), PI, enemy_mods)
 	player.enemy = enemy
 	enemy.enemy = player
 	player.died.connect(_on_died)
@@ -116,24 +121,97 @@ func start(player_id: String, enemy_id: String) -> void:
 
 	_build_hud()
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	var seq := ["3", "2", "1", "EN GARDE !"]
-	for i in seq.size():
-		var txt: String = seq[i]
-		get_tree().create_timer(0.8 * i + 0.4).timeout.connect(func() -> void:
-			if not is_instance_valid(self):
-				return
-			_show_msg(txt)
-			if txt == "EN GARDE !":
-				_started = true
-				player.controls_enabled = true
-				enemy.controls_enabled = true)
+	music = MusicDirector.new()
+	add_child(music)
+	music.setup(self)
+	_play_intro()
 
-func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float) -> GroundFighter:
+# ------------------------------------------------- cinematic duel intro
+# Three shots: arena sweep, the opponent, the hero. Click skips.
+
+var _intro_cam: Camera3D
+var _subtitle: Label
+
+func _play_intro() -> void:
+	_intro_cam = Camera3D.new()
+	_intro_cam.fov = 50.0
+	add_child(_intro_cam)
+	_intro_cam.make_current()
+	# soft key light riding with the intro camera so the close-ups read
+	var fill := OmniLight3D.new()
+	fill.light_energy = 1.6
+	fill.omni_range = 7.0
+	fill.light_color = Color(0.85, 0.88, 1.0)
+	fill.position = Vector3(0.4, 0.3, 0.2)
+	_intro_cam.add_child(fill)
+	var efwd := Vector3(-sin(enemy.face_yaw), 0, -cos(enemy.face_yaw))
+	var pfwd := Vector3(-sin(player.face_yaw), 0, -cos(player.face_yaw))
+	var tw := create_tween()
+	# shot 1: glide along the viewport, the whole arena in frame
+	_intro_shot(Vector3(-12, 4.2, -13), Vector3(0, 1.0, 0))
+	tw.tween_method(func(t: float) -> void:
+		if _intro_done: return
+		_intro_cam.position = Vector3(-12, 4.2, -13).lerp(Vector3(-5, 2.6, -15), t)
+		_intro_cam.look_at(Vector3(0, 1.0, 0)),
+		0.0, 1.0, 1.7)
+	# shot 2: the opponent, low angle
+	tw.tween_callback(func() -> void:
+		_intro_shot(enemy.global_position + efwd * 3.0 + Vector3(0, 1.1, 0),
+			enemy.global_position + Vector3(0, 1.5, 0))
+		_set_subtitle("« %s »" % enemy.cfg["quote"]))
+	tw.tween_method(func(t: float) -> void:
+		if _intro_done: return
+		_intro_cam.position = enemy.global_position + efwd * (3.0 - t * 0.9) + Vector3(t * 0.7, 1.1 + t * 0.3, 0)
+		_intro_cam.look_at(enemy.global_position + Vector3(0, 1.5, 0)),
+		0.0, 1.0, 1.9)
+	# shot 3: the hero, over the blade
+	tw.tween_callback(func() -> void:
+		_intro_shot(player.global_position + pfwd * 2.6 + Vector3(-0.6, 1.3, 0),
+			player.global_position + Vector3(0, 1.4, 0))
+		_set_subtitle("« %s »" % player.cfg["quote"]))
+	tw.tween_method(func(t: float) -> void:
+		if _intro_done: return
+		_intro_cam.position = player.global_position + pfwd * (2.6 - t * 0.7) + Vector3(-0.6 + t * 0.5, 1.3, 0)
+		_intro_cam.look_at(player.global_position + Vector3(0, 1.4, 0)),
+		0.0, 1.0, 1.7)
+	tw.tween_callback(_end_intro)
+
+func _intro_shot(pos: Vector3, target: Vector3) -> void:
+	_intro_cam.position = pos
+	_intro_cam.look_at_from_position(pos, target, Vector3.UP)
+
+func _set_subtitle(t: String) -> void:
+	if _subtitle == null:
+		return
+	_subtitle.text = t
+	_subtitle.visible = t != ""
+
+func _end_intro() -> void:
+	if _intro_done:
+		return
+	_intro_done = true
+	_set_subtitle("")
+	if is_instance_valid(_intro_cam):
+		_intro_cam.queue_free()
+	camera.make_current()
+	_show_msg("EN GARDE !")
+	_started = true
+	player.controls_enabled = true
+	enemy.controls_enabled = true
+
+func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Dictionary = {}) -> GroundFighter:
 	var f := GroundFighter.new()
 	f.collision_layer = 2
 	f.collision_mask = 3
 	add_child(f)
-	f.setup(ROSTER[id].duplicate(true), is_player, self)
+	var cfg: Dictionary = ROSTER[id].duplicate(true)
+	if mods.has("name"):
+		cfg["name"] = mods["name"]
+	for k in mods.get("mul", {}):
+		cfg[k] = cfg[k] * mods["mul"][k]
+	for k in mods.get("set", {}):
+		cfg[k] = mods["set"][k]
+	f.setup(cfg, is_player, self)
 	f.global_position = pos
 	f.face_yaw = yaw
 	f.rotation.y = yaw
@@ -594,6 +672,13 @@ func _build_hud() -> void:
 	_msg = UiKit.label("", 60, UiKit.SW_YELLOW, true)
 	_msg.visible = false
 	_hud.add_child(_msg)
+	_subtitle = UiKit.label("", 24, Color(0.95, 0.95, 1.0), true)
+	_subtitle.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_subtitle.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_subtitle.position.y = -86
+	_subtitle.visible = false
+	_hud.add_child(_subtitle)
 	var n1 := UiKit.label(player.cfg["name"], 17, Color(0.85, 0.88, 1.0))
 	n1.position = Vector2(36, 24)
 	_hud.add_child(n1)
@@ -647,6 +732,9 @@ func _bar(pos: Vector2, w: float, ratio: float, col: Color) -> void:
 # ------------------------------------------------------------ input & camera
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not _intro_done and event.is_action_pressed("fire"):
+		_end_intro()
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_cam_yaw -= event.relative.x * 0.0032
 		_cam_pitch = clampf(_cam_pitch - event.relative.y * 0.0026, -0.95, 0.55)
@@ -721,6 +809,19 @@ func _update_camera(delta: float) -> void:
 
 # ------------------------------------------------------------ combat services
 
+# Brief global freeze on impact: the blow "lands" (classic fighting-game trick).
+func hit_stop(duration := 0.09, scale := 0.07) -> void:
+	if _ended or Engine.time_scale < 0.9:
+		return
+	Engine.time_scale = scale
+	var t := get_tree().create_timer(duration, true, false, true)
+	t.timeout.connect(func() -> void:
+		if not _ended:
+			Engine.time_scale = 1.0)
+
+func _rumble(weak: float, strong: float, dur: float) -> void:
+	Input.start_joy_vibration(0, weak, strong, dur)
+
 func melee_hit(attacker: GroundFighter) -> void:
 	var target := enemy if attacker == player else player
 	if target == null or not target.alive:
@@ -732,6 +833,10 @@ func melee_hit(attacker: GroundFighter) -> void:
 		target.take_hit(attacker.cfg["dmg"], attacker)
 		_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
 		_shake = maxf(_shake, 0.55 if target == player else 0.35)
+		hit_stop(0.09, 0.07)
+		_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
+		if music != null:
+			music.combat_event()
 
 func spawn_bolt(from: GroundFighter) -> void:
 	var origin := from.global_position + Vector3(0, 1.25, 0) - from.global_transform.basis.z * 0.5
@@ -805,6 +910,10 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 func saber_clash(at: Vector3) -> void:
 	_sparks(at, Color(1.0, 0.9, 0.5), 80, 6.5)
 	_shake = maxf(_shake, 0.5)
+	hit_stop(0.07, 0.1)
+	_rumble(0.5, 0.7, 0.18)
+	if music != null:
+		music.combat_event()
 	var flash := OmniLight3D.new()
 	flash.light_color = Color(1.0, 0.95, 0.8)
 	flash.light_energy = 4.5
@@ -896,6 +1005,8 @@ func _update_trails() -> void:
 func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
+	if not _intro_done:
+		_end_intro()
 	_ended = true
 	Engine.time_scale = 0.32
 	get_tree().create_timer(0.5).timeout.connect(func() -> void:
@@ -937,10 +1048,18 @@ func _show_end(won: bool) -> void:
 	var title := UiKit.label("VICTOIRE !" if won else "DÉFAITE…", 76, UiKit.SW_YELLOW if won else Color(0.95, 0.3, 0.22), true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
-	var sub := UiKit.label("La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"], 22, Color(0.85, 0.85, 0.92))
+	var sub_txt := "La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"]
+	if won and campaign_mode and not campaign_next:
+		sub_txt = "La campagne est terminée. La galaxie se souviendra de toi."
+	var sub := UiKit.label(sub_txt, 22, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
-	var b1 := UiKit.button("REJOUER", 22)
+	if won and campaign_mode and campaign_next:
+		var bn := UiKit.button("CHAPITRE SUIVANT", 22)
+		bn.custom_minimum_size = Vector2(440, 58)
+		bn.pressed.connect(func() -> void: request_next.emit())
+		box.add_child(bn)
+	var b1 := UiKit.button("RECOMMENCER CE DUEL" if campaign_mode else "REJOUER", 22)
 	b1.custom_minimum_size = Vector2(440, 58)
 	b1.pressed.connect(func() -> void: request_restart.emit())
 	box.add_child(b1)

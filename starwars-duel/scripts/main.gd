@@ -14,6 +14,9 @@ var _player_pick := ""
 var _enemy_pick := ""
 var _cards: Dictionary = {}
 var _header: Label
+var _campaign_hero := ""    # "" = not in campaign
+var _campaign_stage := -1
+var _campaign_picking := false
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -26,6 +29,10 @@ func _ready() -> void:
 	elif "--groundv" in args:
 		_mode = "ground"
 		start_game("vader", "luke")
+	elif "--campaign" in args:
+		_mode = "ground"
+		_campaign_hero = "luke"
+		_start_campaign_stage(0)
 	elif "--groundmenu" in args:
 		_mode = "ground"
 		show_menu()
@@ -33,16 +40,23 @@ func _ready() -> void:
 		start_game("anakin", "vader")
 	else:
 		show_menu()
+	if "--winfast" in args:
+		# Headless testing: end the duel in victory shortly after it starts
+		get_tree().create_timer(22.0).timeout.connect(func() -> void:
+			var ga: GroundArena = get_node_or_null("GroundArena")
+			if ga != null and ga.enemy != null and ga.enemy.alive:
+				ga.enemy.take_hit(99999.0, ga.player))
 	if "--botfwd" in args:
 		# Headless testing: hold "forward" once the duel starts
 		get_tree().create_timer(5.0).timeout.connect(func() -> void:
 			Input.action_press("throttle_up"))
-	if "--shots" in args:
-		_capture_screenshots()
+	for a in args:
+		if a.begins_with("--shots"):
+			_capture_screenshots(int(a.trim_prefix("--shots")) if a.length() > 7 else 8)
 
 # Debug helper: saves periodic screenshots so the game can be checked headless.
-func _capture_screenshots() -> void:
-	for i in 8:
+func _capture_screenshots(count := 8) -> void:
+	for i in count:
 		await get_tree().create_timer(1.6).timeout
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
@@ -229,6 +243,13 @@ func _build_menu_ui() -> void:
 		bs.disabled = true
 	else:
 		bg.disabled = true
+		var bc := UiKit.button("CAMPAGNE", 16)
+		bc.custom_minimum_size = Vector2(220, 40)
+		bc.pressed.connect(func() -> void:
+			_campaign_picking = true
+			_phase = 0
+			_header.text = "CAMPAGNE : CHOISIS TON HÉROS")
+		modes.add_child(bc)
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -307,6 +328,11 @@ func _make_card(id: String) -> Button:
 	return b
 
 func _on_card_pressed(id: String) -> void:
+	if _campaign_picking:
+		_campaign_picking = false
+		_campaign_hero = id
+		_start_campaign_stage(0)
+		return
 	if _phase == 0:
 		_player_pick = id
 		_phase = 1
@@ -339,3 +365,90 @@ func start_game(player_id: String, enemy_id: String) -> void:
 	_arena.start(player_id, enemy_id)
 	_arena.request_restart.connect(func() -> void: start_game(player_id, enemy_id))
 	_arena.request_menu.connect(show_menu)
+
+# ----------------------------------------------------------------- Campagne
+# Quatre chapitres contre des adversaires de plus en plus dangereux, reliés
+# par un texte déroulant. Récits originaux (hommage, pas de texte des films).
+
+func _campaign_stages() -> Array:
+	var rival := "vader" if _campaign_hero != "vader" else "luke"
+	var rival_name: String = GroundArena.ROSTER[rival]["name"]
+	return [
+		{"id": "trooper", "mods": {},
+			"title": "CHAPITRE I — L'AVANT-POSTE",
+			"text": "La guerre civile embrase la galaxie.\nInfiltré dans une station impériale, tu es repéré\npar une sentinelle. Il faudra passer par la force."},
+		{"id": "trooper", "mods": {"name": "Stormtrooper élite", "mul": {"hp": 1.5, "dmg": 1.4, "speed": 1.1}, "set": {"ai_skill": 0.75}},
+			"title": "CHAPITRE II — LA GARDE RAPPROCHÉE",
+			"text": "L'alarme résonne dans les couloirs d'acier.\nLa garde d'élite de la station converge vers toi.\nLeur entraînement est redoutable. Le tien aussi."},
+		{"id": rival, "mods": {},
+			"title": "CHAPITRE III — LE FACE-À-FACE",
+			"text": "Au cœur de la salle du trône, une silhouette t'attend.\n%s allume son sabre.\nLe destin de cette station se joue maintenant." % rival_name},
+		{"id": rival, "mods": {"name": rival_name + " (maître)", "mul": {"hp": 1.5, "dmg": 1.3}, "set": {"ai_skill": 0.85, "ai_block_chance": 0.6}},
+			"title": "CHAPITRE IV — LE DERNIER DUEL",
+			"text": "Blessé mais debout, ton adversaire canalise toute\nsa puissance. Ce duel sera le dernier.\nQue la Force soit avec toi."},
+	]
+
+func _start_campaign_stage(stage: int) -> void:
+	_campaign_stage = stage
+	var st: Dictionary = _campaign_stages()[stage]
+	_clear()
+	# opening crawl
+	var layer := CanvasLayer.new()
+	add_child(layer)
+	var bg := ColorRect.new()
+	bg.color = Color(0.005, 0.005, 0.012)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(bg)
+	var stars := TextureRect.new()
+	stars.texture = load("res://assets/textures/milky_way.jpg")
+	stars.set_anchors_preset(Control.PRESET_FULL_RECT)
+	stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	stars.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	stars.modulate = Color(0.45, 0.45, 0.55)
+	layer.add_child(stars)
+	var crawl := VBoxContainer.new()
+	crawl.set_anchors_preset(Control.PRESET_CENTER)
+	crawl.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	crawl.grow_vertical = Control.GROW_DIRECTION_BOTH
+	crawl.alignment = BoxContainer.ALIGNMENT_CENTER
+	crawl.add_theme_constant_override("separation", 26)
+	layer.add_child(crawl)
+	var title := UiKit.label(st["title"], 44, SW_YELLOW, true)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crawl.add_child(title)
+	var body := UiKit.label(st["text"], 24, Color(1.0, 0.9, 0.35))
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crawl.add_child(body)
+	var hint := UiKit.label("Clic pour continuer", 15, Color(0.6, 0.63, 0.72))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crawl.add_child(hint)
+	# slow upward drift, Star Wars style
+	crawl.modulate.a = 0.0
+	var tw := create_tween()
+	tw.tween_property(crawl, "modulate:a", 1.0, 1.2)
+	tw.parallel().tween_property(crawl, "position:y", -60.0, 9.0).as_relative()
+	var started := [false]
+	var begin := func() -> void:
+		if started[0]:
+			return
+		started[0] = true
+		_begin_campaign_duel(st)
+	bg.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed:
+			begin.call())
+	get_tree().create_timer(9.0).timeout.connect(begin)
+
+func _begin_campaign_duel(st: Dictionary) -> void:
+	_clear()
+	var ga := GroundArena.new()
+	ga.name = "GroundArena"
+	add_child(ga)
+	ga.campaign_mode = true
+	ga.campaign_next = _campaign_stage < _campaign_stages().size() - 1
+	ga.start(_campaign_hero, st["id"], st["mods"])
+	ga.request_restart.connect(func() -> void: _start_campaign_stage(_campaign_stage))
+	ga.request_next.connect(func() -> void: _start_campaign_stage(_campaign_stage + 1))
+	ga.request_menu.connect(func() -> void:
+		_campaign_hero = ""
+		_campaign_stage = -1
+		show_menu())
