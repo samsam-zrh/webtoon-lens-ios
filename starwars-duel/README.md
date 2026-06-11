@@ -84,3 +84,20 @@ Lucasfilm/Disney. Les modèles 3D appartiennent à leurs auteurs respectifs —
 licences et liens dans [CREDITS.md](CREDITS.md). Le modèle de l'Intercepteur
 Jedi est sous licence **CC-BY-NC** : toute redistribution de ce jeu doit
 rester non commerciale.
+
+## Musique personnalisée
+
+Le jeu peut jouer **ta propre bande-son** à la place des musiques libres
+incluses. Crée un dossier `music` **à côté de `StarWarsDuel.exe`** et
+déposes-y tes fichiers (`.mp3`, `.ogg` ou `.wav`) nommés :
+
+| Fichier | Utilisé pour |
+|---|---|
+| `menu.mp3` | le menu principal |
+| `tension.mp3` | l'approche, avant le contact |
+| `battle.mp3` | le combat |
+| `finale.mp3` | la fin de duel (un des deux passe sous 35 % de vie) |
+
+Chaque fichier est optionnel : ceux qui manquent utilisent la musique
+incluse. Les fichiers restent sur ta machine — ils ne font pas partie du
+jeu distribué.

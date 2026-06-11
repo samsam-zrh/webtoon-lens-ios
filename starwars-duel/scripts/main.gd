@@ -179,11 +179,16 @@ func _build_menu_world() -> void:
 			_preview_ships.append(holder)
 
 	var amb := AudioStreamPlayer.new()
-	var stream: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
-	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	stream.loop_end = stream.data.size() / 2
-	amb.stream = stream
-	amb.volume_db = -10.0
+	var custom := MusicDirector.external_stream("menu")
+	if custom != null:
+		amb.stream = custom
+		amb.volume_db = -8.0
+	else:
+		var stream: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
+		stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		stream.loop_end = stream.data.size() / 2
+		amb.stream = stream
+		amb.volume_db = -10.0
 	_menu_root.add_child(amb)
 	amb.play()
 

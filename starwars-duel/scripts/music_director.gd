@@ -6,6 +6,33 @@ extends Node
 
 const MUTED := -50.0
 
+# Custom soundtrack: players can drop their own files (personal use) in a
+# "music" folder next to the game executable, or in user://music/.
+# Recognized names: menu / tension / battle / finale  (.mp3, .ogg or .wav)
+static func external_stream(slot: String) -> AudioStream:
+	for dir in [OS.get_executable_path().get_base_dir() + "/music", "user://music"]:
+		for ext in ["mp3", "ogg", "wav"]:
+			var path := "%s/%s.%s" % [dir, slot, ext]
+			if not FileAccess.file_exists(path):
+				continue
+			var stream: AudioStream
+			match ext:
+				"mp3":
+					var mp3 := AudioStreamMP3.new()
+					mp3.data = FileAccess.get_file_as_bytes(path)
+					mp3.loop = true
+					stream = mp3
+				"ogg":
+					stream = AudioStreamOggVorbis.load_from_file(path)
+					if stream != null:
+						stream.loop = true
+				"wav":
+					stream = AudioStreamWAV.load_from_file(path)
+			if stream != null:
+				print("Musique personnalisée : ", path)
+				return stream
+	return null
+
 var _tension: AudioStreamPlayer
 var _battle: AudioStreamPlayer
 var _finale: AudioStreamPlayer
@@ -20,8 +47,10 @@ func setup(arena: GroundArena) -> void:
 
 func _layer(path: String, db: float) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
-	var stream: AudioStream = load(path).duplicate()
-	stream.loop = true
+	var stream: AudioStream = external_stream(path.get_file().get_basename().trim_prefix("music_"))
+	if stream == null:
+		stream = load(path).duplicate()
+		stream.loop = true
 	p.stream = stream
 	p.volume_db = db
 	add_child(p)
