@@ -46,6 +46,7 @@ var model: Node3D
 var anim: AnimationPlayer
 var saber_pivot: Node3D          # (unused for model-integrated blades)
 var blade_mesh: MeshInstance3D
+var halo_mesh: MeshInstance3D
 var blade_light: OmniLight3D
 var trail_base := Vector3.ZERO   # world-space saber base/tip, updated each frame
 var trail_tip := Vector3.ZERO
@@ -105,12 +106,13 @@ func _setup_blade() -> void:
 	# it into a glowing energy blade. The attachment node and its mesh child
 	# can share the same name, so dig for the MeshInstance3D.
 	var blade_name: String = cfg.get("blade_mesh", "lightblade_Cylinder_001")
+	# White-hot core...
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = color.lerp(Color.WHITE, 0.45)
+	mat.albedo_color = color.lerp(Color.WHITE, 0.75)
 	mat.emission_enabled = true
-	mat.emission = color
-	mat.emission_energy_multiplier = 4.5
+	mat.emission = color.lerp(Color.WHITE, 0.35)
+	mat.emission_energy_multiplier = 7.0
 	var attach := model.find_child(blade_name, true, false)
 	if attach is MeshInstance3D:
 		blade_mesh = attach
@@ -119,10 +121,20 @@ func _setup_blade() -> void:
 	if blade_mesh != null:
 		for i in blade_mesh.mesh.get_surface_count():
 			blade_mesh.set_surface_override_material(i, mat)
+		# ...wrapped in an additive plasma halo (inflated duplicate of the mesh)
+		halo_mesh = blade_mesh.duplicate(0) as MeshInstance3D
+		for c in halo_mesh.get_children():
+			c.queue_free()
+		var halo := ShaderMaterial.new()
+		halo.shader = load("res://shaders/blade_halo.gdshader")
+		halo.set_shader_parameter("glow_color", color)
+		halo_mesh.material_override = halo
+		halo_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		blade_mesh.add_sibling.call_deferred(halo_mesh)
 		blade_light = OmniLight3D.new()
 		blade_light.light_color = color
-		blade_light.light_energy = 1.0
-		blade_light.omni_range = 2.6
+		blade_light.light_energy = 1.7
+		blade_light.omni_range = 3.4
 		blade_mesh.add_child(blade_light)
 	# Glowing hilt details (Vader's saber controls)
 	for extra_name in cfg.get("blade_extra", []):
@@ -227,7 +239,7 @@ func _physics_process(delta: float) -> void:
 			if cfg["melee"]:
 				arena.melee_hit(self)
 		if attack_timer <= 0.0:
-			if combo_queued and combo_index < 2 and cfg["melee"]:
+			if combo_queued and combo_index < cfg["anims"]["attack"].size() - 1 and cfg["melee"]:
 				combo_queued = false
 				_start_attack(combo_index + 1)
 			else:
@@ -336,6 +348,8 @@ func _update_saber(_delta: float) -> void:
 	if cfg["type"] == "jedi" and blade_mesh != null and not cfg.get("blade_always", false):
 		var show := attacking or blocking
 		blade_mesh.visible = show
+		if halo_mesh != null:
+			halo_mesh.visible = show
 		if blade_light != null:
 			blade_light.visible = show
 	# Track world-space blade endpoints for the trail
@@ -444,6 +458,8 @@ func _die() -> void:
 		tw.tween_property(model, "rotation:x", -PI / 2.0, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	if blade_mesh != null:
 		blade_mesh.visible = false
+	if halo_mesh != null:
+		halo_mesh.visible = false
 	if blade_light != null:
 		blade_light.visible = false
 	if _sfx_hum != null:

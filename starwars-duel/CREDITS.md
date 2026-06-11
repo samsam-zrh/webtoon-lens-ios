@@ -23,6 +23,8 @@ licence [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), basées sur
 les données NASA.
 
 
+| Plaques métalliques PBR (metal_plate, murs de la salle du trône) | Poly Haven | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [polyhaven.com](https://polyhaven.com/a/metal_plate) |
+
 Merci à ces artistes pour leur travail partagé librement.
 
 ## Audio

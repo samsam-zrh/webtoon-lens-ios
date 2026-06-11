@@ -22,7 +22,7 @@ const ROSTER := {
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",
-			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03", "13_AttackTwoHand"],
 			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
 		},
 	},
@@ -41,7 +41,7 @@ const ROSTER := {
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",
-			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "12_AttackStrong2", "13_AttackTwoHand"],
 			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
 		},
 	},
@@ -74,6 +74,10 @@ var _cam_pitch := -0.12
 
 var _started := false
 var _ended := false
+var _shake := 0.0
+var _post_mat: ShaderMaterial
+var _cine_pivot: Node3D
+var _cine_target: GroundFighter
 var _hud: Control
 var _msg: Label
 var _bolts: Array = []
@@ -101,6 +105,12 @@ func start(player_id: String, enemy_id: String) -> void:
 	camera = Camera3D.new()
 	camera.fov = 65.0
 	camera.near = 0.1
+	var attrs := CameraAttributesPractical.new()
+	attrs.dof_blur_far_enabled = true
+	attrs.dof_blur_far_distance = 24.0
+	attrs.dof_blur_far_transition = 16.0
+	attrs.dof_blur_amount = 0.055
+	camera.attributes = attrs
 	_spring.add_child(camera)
 	camera.make_current()
 
@@ -156,6 +166,8 @@ func _build_corridor() -> void:
 	_build_ceiling()
 	_build_throne()
 	_build_space_view()
+	_build_spectators()
+	_build_dust()
 	_build_boundary()
 
 	var amb := AudioStreamPlayer.new()
@@ -244,9 +256,16 @@ func _build_environment() -> void:
 
 func _mat_panel() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.115, 0.12, 0.145)
+	m.albedo_color = Color(0.34, 0.355, 0.42)
+	m.albedo_texture = load("res://assets/textures/metal_plate_diff_2k.jpg")
+	m.normal_enabled = true
+	m.normal_texture = load("res://assets/textures/metal_plate_nor_gl_2k.jpg")
+	m.normal_scale = 0.7
+	m.roughness_texture = load("res://assets/textures/metal_plate_rough_2k.jpg")
 	m.metallic = 0.55
-	m.roughness = 0.42
+	m.roughness = 0.9
+	m.uv1_triplanar = true
+	m.uv1_scale = Vector3(0.42, 0.42, 0.42)
 	return m
 
 func _mat_emissive(col: Color, energy: float) -> StandardMaterial3D:
@@ -289,6 +308,10 @@ func _build_floor() -> void:
 	mi.rotation.y = PI / 8.0
 	add_child(mi)
 	_collision_box(Vector3(0, -0.5, 0), Vector3(ROOM_R * 2.4, 1.0, ROOM_R * 2.4))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(ROOM_R * 2.4, 0.5, ROOM_R * 2.4)
+	pcol.position.y = -0.25
+	add_child(pcol)
 
 	# Inlaid light rings around the duel center
 	for spec in [[5.5, Color(1.0, 0.14, 0.08), 1.6], [10.5, Color(0.75, 0.85, 1.0), 1.2]]:
@@ -435,6 +458,92 @@ func _build_space_view() -> void:
 	planet.position = Vector3(480, 140, -1100)
 	planet.rotation.z = 0.4
 	add_child(planet)
+	# TIE fighters screaming past the viewport
+	for spec in [[36.0, 26.0, -260.0, 14.0, 0.0], [26.0, 34.0, -210.0, 11.0, 6.0]]:
+		var tie := ModelUtil.load_model("res://assets/models/tie/scene.gltf", spec[0], PI / 2.0)
+		tie.position = Vector3(320, spec[1], spec[2])
+		tie.rotation.z = 0.25
+		add_child(tie)
+		var tw := create_tween().set_loops()
+		tw.tween_interval(spec[4])
+		tw.tween_property(tie, "position:x", -320.0, spec[3])
+		tw.tween_callback(func() -> void: tie.position.x = 320.0)
+		tw.tween_interval(9.0)
+	# a few bright stars that twinkle
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 66
+	for i in 7:
+		var star := MeshInstance3D.new()
+		var smm := SphereMesh.new()
+		smm.radius = rng.randf_range(1.6, 2.8)
+		smm.height = smm.radius * 2.0
+		smm.radial_segments = 8
+		smm.rings = 4
+		var em := StandardMaterial3D.new()
+		em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		em.albedo_color = Color(0.9, 0.94, 1.0)
+		em.emission_enabled = true
+		em.emission = Color(0.85, 0.9, 1.0)
+		em.emission_energy_multiplier = 2.0
+		smm.material = em
+		star.mesh = smm
+		star.position = Vector3(rng.randf_range(-700, 700), rng.randf_range(60, 420), rng.randf_range(-1000, -700))
+		add_child(star)
+		var stw := create_tween().set_loops()
+		var period := rng.randf_range(1.4, 3.2)
+		stw.tween_property(em, "emission_energy_multiplier", 5.5, period).set_trans(Tween.TRANS_SINE)
+		stw.tween_property(em, "emission_energy_multiplier", 2.0, period).set_trans(Tween.TRANS_SINE)
+
+func _build_spectators() -> void:
+	# Stormtroopers at attention along the side walls
+	var ps: PackedScene = load("res://assets/models/characters/trooper.glb")
+	for ang_deg in [78.0, 102.0, 258.0, 282.0, 65.0, 115.0]:
+		var ang := deg_to_rad(ang_deg)
+		var pos := Vector3(sin(ang) * (ROOM_R - 1.6), 0, -cos(ang) * (ROOM_R - 1.6))
+		var t: Node3D = ps.instantiate()
+		var to_c := -pos.normalized()
+		t.rotation.y = atan2(to_c.x, to_c.z)
+		t.position = pos
+		add_child(t)
+		var ap: AnimationPlayer = t.find_child("AnimationPlayer", true, false)
+		if ap != null:
+			for n in ["01_Idle", "20_FightIdle"]:
+				if ap.has_animation(n):
+					ap.play(n)
+					ap.seek(randf() * 2.0)
+					break
+		_collision_box(pos + Vector3(0, 1.0, 0), Vector3(0.8, 2.0, 0.8))
+
+func _build_dust() -> void:
+	# Slow dust motes drifting through the light shafts
+	var p := GPUParticles3D.new()
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	mat.emission_box_extents = Vector3(ROOM_R, ROOM_H * 0.5, ROOM_R)
+	mat.gravity = Vector3(0, -0.02, 0)
+	mat.initial_velocity_min = 0.02
+	mat.initial_velocity_max = 0.12
+	mat.direction = Vector3(1, -0.2, 0)
+	mat.spread = 180.0
+	mat.scale_min = 0.4
+	mat.scale_max = 1.0
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.018, 0.018)
+	var qmat := StandardMaterial3D.new()
+	qmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	qmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	qmat.albedo_color = Color(0.7, 0.78, 1.0, 0.4)
+	qmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.material = qmat
+	p.draw_pass_1 = qm
+	p.process_material = mat
+	p.amount = 110
+	p.lifetime = 16.0
+	p.preprocess = 16.0
+	p.position.y = ROOM_H * 0.45
+	p.visibility_aabb = AABB(Vector3(-ROOM_R - 2, -ROOM_H, -ROOM_R - 2), Vector3(ROOM_R * 2 + 4, ROOM_H * 2, ROOM_R * 2 + 4))
+	add_child(p)
 
 func _build_boundary() -> void:
 	# Invisible ring keeping the duel off the walls and the dais
@@ -469,6 +578,13 @@ func _collision_box(pos: Vector3, size: Vector3) -> void:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	var post := ColorRect.new()
+	post.set_anchors_preset(Control.PRESET_FULL_RECT)
+	post.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_post_mat = ShaderMaterial.new()
+	_post_mat.shader = load("res://shaders/film_post.gdshader")
+	post.material = _post_mat
+	layer.add_child(post)
 	layer.add_child(UiKit.vignette())
 	_hud = Control.new()
 	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -590,6 +706,18 @@ func _update_camera(delta: float) -> void:
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
 	camera.fov = lerpf(camera.fov, 65.0 + hv * 0.35, 5.0 * delta)
+	# impact shake: decaying random jolt, echoed in the post shader
+	_shake = maxf(0.0, _shake - 3.2 * delta)
+	var sh := _shake * _shake
+	camera.h_offset = randf_range(-1.0, 1.0) * 0.09 * sh
+	camera.v_offset = randf_range(-1.0, 1.0) * 0.09 * sh
+	if _post_mat != null:
+		_post_mat.set_shader_parameter("shake", sh)
+	# victory cinematic: slow orbit around the winner
+	if _cine_pivot != null and is_instance_valid(_cine_target):
+		_cine_pivot.position = _cine_pivot.position.lerp(
+			_cine_target.global_position + Vector3(0, 1.3, 0), clampf(6.0 * delta, 0, 1))
+		_cine_pivot.rotation.y += 0.45 * delta
 
 # ------------------------------------------------------------ combat services
 
@@ -603,6 +731,7 @@ func melee_hit(attacker: GroundFighter) -> void:
 	if to_t.length() <= attacker.saber_reach() and facing > 0.35:
 		target.take_hit(attacker.cfg["dmg"], attacker)
 		_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
+		_shake = maxf(_shake, 0.55 if target == player else 0.35)
 
 func spawn_bolt(from: GroundFighter) -> void:
 	var origin := from.global_position + Vector3(0, 1.25, 0) - from.global_transform.basis.z * 0.5
@@ -674,10 +803,11 @@ func _seg_point_dist(a: Vector3, b: Vector3, p: Vector3) -> float:
 	return (a + ab * t).distance_to(p)
 
 func saber_clash(at: Vector3) -> void:
-	_sparks(at, Color(1.0, 0.9, 0.5), 36, 4.5)
+	_sparks(at, Color(1.0, 0.9, 0.5), 80, 6.5)
+	_shake = maxf(_shake, 0.5)
 	var flash := OmniLight3D.new()
 	flash.light_color = Color(1.0, 0.95, 0.8)
-	flash.light_energy = 3.0
+	flash.light_energy = 4.5
 	flash.omni_range = 4.0
 	flash.position = at
 	add_child(flash)
@@ -707,8 +837,11 @@ func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
 	mat.scale_min = 0.3
 	mat.scale_max = 0.7
 	mat.color = color
-	mat.damping_min = 2.0
-	mat.damping_max = 5.0
+	mat.damping_min = 1.2
+	mat.damping_max = 3.0
+	mat.collision_mode = ParticleProcessMaterial.COLLISION_RIGID
+	mat.collision_bounce = 0.5
+	mat.collision_friction = 0.3
 	var dm := SphereMesh.new()
 	dm.radius = 0.022
 	dm.height = 0.044
@@ -724,7 +857,7 @@ func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
 	p.draw_pass_1 = dm
 	p.process_material = mat
 	p.amount = count
-	p.lifetime = 0.6
+	p.lifetime = 0.9
 	p.one_shot = true
 	p.explosiveness = 0.95
 	p.emitting = true
@@ -741,7 +874,7 @@ func _update_trails() -> void:
 		var pts: Array = t["points"]
 		if f.alive and f.attacking:
 			pts.append([f.trail_base, f.trail_tip])
-		if pts.size() > 8 or (not f.attacking and pts.size() > 0):
+		if pts.size() > 16 or (not f.attacking and pts.size() > 0):
 			pts.pop_front()
 		if not f.attacking and pts.size() > 0:
 			pts.pop_front()
@@ -752,7 +885,7 @@ func _update_trails() -> void:
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
 		var col: Color = f.cfg["saber_color"]
 		for i in pts.size():
-			var alpha := float(i) / pts.size() * 0.16
+			var alpha := pow(float(i) / pts.size(), 1.4) * 0.42
 			im.surface_set_color(Color(col.r, col.g, col.b, alpha))
 			im.surface_add_vertex(pts[i][0])
 			im.surface_add_vertex(pts[i][1])
@@ -764,10 +897,26 @@ func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
 	_ended = true
-	Engine.time_scale = 0.4
-	get_tree().create_timer(0.45).timeout.connect(func() -> void: Engine.time_scale = 1.0)
+	Engine.time_scale = 0.32
+	get_tree().create_timer(0.5).timeout.connect(func() -> void:
+		Engine.time_scale = 1.0
+		_start_cinematic(player if f == enemy else enemy))
 	var won := f == enemy
-	get_tree().create_timer(1.8).timeout.connect(func() -> void: _show_end(won))
+	get_tree().create_timer(3.4).timeout.connect(func() -> void: _show_end(won))
+
+func _start_cinematic(winner: GroundFighter) -> void:
+	# slow orbit around the victor while the end panel fades in
+	_cine_target = winner
+	_cine_pivot = Node3D.new()
+	_cine_pivot.position = winner.global_position + Vector3(0, 1.3, 0)
+	_cine_pivot.rotation.y = _cam_yaw + 0.6
+	add_child(_cine_pivot)
+	var ccam := Camera3D.new()
+	ccam.position = Vector3(0, 0.35, 3.4)
+	ccam.fov = 55.0
+	_cine_pivot.add_child(ccam)
+	ccam.look_at_from_position(_cine_pivot.position + _cine_pivot.basis * ccam.position, _cine_pivot.position, Vector3.UP)
+	ccam.make_current()
 
 func _show_end(won: bool) -> void:
 	Engine.time_scale = 1.0
@@ -775,7 +924,7 @@ func _show_end(won: bool) -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.6)
+	dim.color = Color(0, 0, 0, 0.42)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	layer.add_child(dim)
 	var box := VBoxContainer.new()

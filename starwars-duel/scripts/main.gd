@@ -137,6 +137,22 @@ func _build_menu_world() -> void:
 			var ap: AnimationPlayer = m2.find_child("AnimationPlayer", true, false)
 			if ap != null and spec[3] != "" and ap.has_animation(spec[3]):
 				ap.play(spec[3])
+			# Spotlight over each pedestal so the characters read clearly
+			var spot := SpotLight3D.new()
+			spot.position = Vector3(0, 4.2, 1.6)
+			spot.rotation.x = -1.18
+			spot.spot_range = 6.5
+			spot.spot_angle = 24.0
+			spot.light_energy = 5.0
+			spot.light_color = Color(0.9, 0.93, 1.0)
+			spot.shadow_enabled = true
+			holder.add_child(spot)
+			var rim := OmniLight3D.new()
+			rim.position = Vector3(0, 1.6, -1.4)
+			rim.omni_range = 3.5
+			rim.light_energy = 1.2
+			rim.light_color = Color(0.45, 0.55, 1.0)
+			holder.add_child(rim)
 			var ped := MeshInstance3D.new()
 			var pm := CylinderMesh.new()
 			pm.top_radius = 1.0
