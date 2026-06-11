@@ -7,31 +7,86 @@ extends Node
 const MUTED := -50.0
 
 # Custom soundtrack: players can drop their own files (personal use) in a
-# "music" folder next to the game executable, or in user://music/.
-# Recognized names: menu / tension / battle / finale  (.mp3, .ogg or .wav)
-static func external_stream(slot: String) -> AudioStream:
+# "music" folder next to the game executable, or in user://music/. Files can
+# use the exact slot names (menu/tension/battle/finale .mp3/.ogg/.wav), or
+# ANY name: keywords are matched, and leftovers fill the remaining slots.
+const SLOT_KEYWORDS := {
+	"menu": ["menu", "main", "title"],
+	"battle": ["battle", "asteroid", "field", "combat", "fight", "march"],
+	"finale": ["finale", "final", "force", "duel", "throne"],
+	"tension": ["tension", "ambient", "calm", "imperial", "dark"],
+}
+static var _assignments: Dictionary = {}
+static var _scanned := false
+
+static func _scan() -> void:
+	if _scanned:
+		return
+	_scanned = true
+	var files: Array = []
 	for dir in [OS.get_executable_path().get_base_dir() + "/music", "user://music"]:
-		for ext in ["mp3", "ogg", "wav"]:
-			var path := "%s/%s.%s" % [dir, slot, ext]
-			if not FileAccess.file_exists(path):
+		var da := DirAccess.open(dir)
+		if da == null:
+			continue
+		for f in da.get_files():
+			if f.get_extension().to_lower() in ["mp3", "ogg", "wav"]:
+				files.append(dir + "/" + f)
+	if files.is_empty():
+		return
+	var taken: Array = []
+	# pass 1: exact slot names, pass 2: keywords, pass 3: leftovers in order
+	for slot in ["menu", "battle", "finale", "tension"]:
+		for path: String in files:
+			if path in taken:
 				continue
-			var stream: AudioStream
-			match ext:
-				"mp3":
-					var mp3 := AudioStreamMP3.new()
-					mp3.data = FileAccess.get_file_as_bytes(path)
-					mp3.loop = true
-					stream = mp3
-				"ogg":
-					stream = AudioStreamOggVorbis.load_from_file(path)
-					if stream != null:
-						stream.loop = true
-				"wav":
-					stream = AudioStreamWAV.load_from_file(path)
+			if path.get_file().get_basename().to_lower() == slot:
+				_assignments[slot] = path
+				taken.append(path)
+				break
+	for slot in ["menu", "battle", "finale", "tension"]:
+		if _assignments.has(slot):
+			continue
+		for path: String in files:
+			if path in taken:
+				continue
+			var lower: String = path.get_file().to_lower()
+			for kw: String in SLOT_KEYWORDS[slot]:
+				if kw in lower:
+					_assignments[slot] = path
+					taken.append(path)
+					break
+			if _assignments.has(slot):
+				break
+	for slot in ["menu", "battle", "finale", "tension"]:
+		if _assignments.has(slot):
+			continue
+		for path: String in files:
+			if path not in taken:
+				_assignments[slot] = path
+				taken.append(path)
+				break
+	for slot in _assignments:
+		print("Musique personnalisée [", slot, "] : ", _assignments[slot].get_file())
+
+static func external_stream(slot: String) -> AudioStream:
+	_scan()
+	if not _assignments.has(slot):
+		return null
+	var path: String = _assignments[slot]
+	var stream: AudioStream
+	match path.get_extension().to_lower():
+		"mp3":
+			var mp3 := AudioStreamMP3.new()
+			mp3.data = FileAccess.get_file_as_bytes(path)
+			mp3.loop = true
+			stream = mp3
+		"ogg":
+			stream = AudioStreamOggVorbis.load_from_file(path)
 			if stream != null:
-				print("Musique personnalisée : ", path)
-				return stream
-	return null
+				stream.loop = true
+		"wav":
+			stream = AudioStreamWAV.load_from_file(path)
+	return stream
 
 var _tension: AudioStreamPlayer
 var _battle: AudioStreamPlayer

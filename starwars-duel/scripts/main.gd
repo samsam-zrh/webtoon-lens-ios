@@ -46,6 +46,23 @@ func _ready() -> void:
 			var ga: GroundArena = get_node_or_null("GroundArena")
 			if ga != null and ga.enemy != null and ga.enemy.alive:
 				ga.enemy.take_hit(99999.0, ga.player))
+	if "--botatk" in args:
+		# Headless testing: attack regularly and push once in a while
+		var atk := func() -> void:
+			Input.action_press("fire")
+			get_tree().create_timer(0.1).timeout.connect(func() -> void: Input.action_release("fire"))
+		var t := Timer.new()
+		t.wait_time = 1.4
+		t.autostart = true
+		add_child(t)
+		t.timeout.connect(atk)
+		var t2 := Timer.new()
+		t2.wait_time = 7.0
+		t2.autostart = true
+		add_child(t2)
+		t2.timeout.connect(func() -> void:
+			Input.action_press("force_push")
+			get_tree().create_timer(0.1).timeout.connect(func() -> void: Input.action_release("force_push")))
 	if "--botfwd" in args:
 		# Headless testing: hold "forward" once the duel starts
 		get_tree().create_timer(5.0).timeout.connect(func() -> void:

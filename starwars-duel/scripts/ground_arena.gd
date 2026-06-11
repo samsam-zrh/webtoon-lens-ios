@@ -23,7 +23,7 @@ const ROSTER := {
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",
-			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03", "13_AttackTwoHand"],
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
 			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
 		},
 	},
@@ -42,7 +42,7 @@ const ROSTER := {
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",
-			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "12_AttackStrong2", "13_AttackTwoHand"],
+			"attack": ["06_OneHandCombo01", "06_OneHandCombo02", "06_OneHandCombo03"],
 			"block": "17_Block", "hit": "20_Hit", "death": "07_Death",
 		},
 	},
@@ -65,7 +65,8 @@ const ROSTER := {
 }
 
 var player: GroundFighter
-var enemy: GroundFighter
+var enemy: GroundFighter          # primary opponent (nearest alive)
+var enemies: Array[GroundFighter] = []
 var camera: Camera3D
 var _spring: SpringArm3D
 var _cam_pivot: Node3D
@@ -88,14 +89,20 @@ var _msg: Label
 var _bolts: Array = []
 var _trails: Dictionary = {}  # fighter -> {points: Array, mesh: MeshInstance3D}
 
-func start(player_id: String, enemy_id: String, enemy_mods: Dictionary = {}) -> void:
+func start(player_id: String, enemy_id: String, enemy_mods: Dictionary = {}, opts: Dictionary = {}) -> void:
+	theme = opts.get("theme", "throne")
 	_build_corridor()
 	player = _spawn(player_id, true, Vector3(0, 0.1, 12), 0.0)
-	enemy = _spawn(enemy_id, false, Vector3(0, 0.1, -12), PI, enemy_mods)
-	player.enemy = enemy
-	enemy.enemy = player
 	player.died.connect(_on_died)
-	enemy.died.connect(_on_died)
+	var count: int = opts.get("count", 1)
+	for i in count:
+		var x := (i - (count - 1) / 2.0) * 3.2
+		var e := _spawn(enemy_id, false, Vector3(x, 0.1, -12), PI, enemy_mods)
+		e.enemy = player
+		e.died.connect(_on_died)
+		enemies.append(e)
+	enemy = enemies[0]
+	player.enemy = enemy
 
 	_cam_pivot = Node3D.new()
 	add_child(_cam_pivot)
@@ -108,7 +115,7 @@ func start(player_id: String, enemy_id: String, enemy_mods: Dictionary = {}) -> 
 	_spring.collision_mask = 1
 	_cam_pitch_node.add_child(_spring)
 	camera = Camera3D.new()
-	camera.fov = 65.0
+	camera.fov = GameSettings.fov
 	camera.near = 0.1
 	var attrs := CameraAttributesPractical.new()
 	attrs.dof_blur_far_enabled = true
@@ -197,7 +204,8 @@ func _end_intro() -> void:
 	_show_msg("EN GARDE !")
 	_started = true
 	player.controls_enabled = true
-	enemy.controls_enabled = true
+	for e in enemies:
+		e.controls_enabled = true
 
 func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Dictionary = {}) -> GroundFighter:
 	var f := GroundFighter.new()
@@ -232,6 +240,8 @@ func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Diction
 # --------------------------------------------- Imperial throne room arena
 # Death Star II inspired duel chamber: mirror-black floor, panoramic viewport
 # onto deep space (Star Destroyer on patrol), light columns and the throne.
+
+var theme := "throne"       # "throne" or "hangar"
 
 const ARENA_R := 14.0       # gameplay boundary (inside the walls)
 const ROOM_R := 17.0        # octagon wall radius
@@ -276,14 +286,15 @@ func _build_environment() -> void:
 	env.glow_intensity = 0.42
 	env.glow_bloom = 0.06
 	env.glow_hdr_threshold = 1.1
-	env.ssao_enabled = true
+	var q: int = GameSettings.quality
+	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.4
-	env.ssr_enabled = true
+	env.ssr_enabled = q >= 1
 	env.ssr_max_steps = 48
 	env.ssr_fade_in = 0.12
 	env.ssr_fade_out = 1.5
-	env.sdfgi_enabled = true
-	env.volumetric_fog_enabled = true
+	env.sdfgi_enabled = q >= 2
+	env.volumetric_fog_enabled = q >= 1
 	env.volumetric_fog_density = 0.005
 	env.volumetric_fog_albedo = Color(0.55, 0.62, 0.8)
 	env.volumetric_fog_emission = Color(0.02, 0.025, 0.045)
@@ -682,7 +693,8 @@ func _build_hud() -> void:
 	var n1 := UiKit.label(player.cfg["name"], 17, Color(0.85, 0.88, 1.0))
 	n1.position = Vector2(36, 24)
 	_hud.add_child(n1)
-	var n2 := UiKit.label(enemy.cfg["name"], 17, Color(1, 0.5, 0.45))
+	var ename: String = enemy.cfg["name"] + (" ×%d" % enemies.size() if enemies.size() > 1 else "")
+	var n2 := UiKit.label(ename, 17, Color(1, 0.5, 0.45))
 	n2.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	n2.position = Vector2(-300, 24)
 	_hud.add_child(n2)
@@ -710,9 +722,13 @@ func _draw_hud() -> void:
 		return
 	var vp := _hud.get_viewport_rect().size
 	_bar(Vector2(36, 52), 300, player.hp / player.cfg["hp"], Color(0.3, 0.9, 0.45))
-	_bar(Vector2(vp.x - 36 - 300, 52), 300, enemy.hp / enemy.cfg["hp"], Color(1, 0.32, 0.27))
-	# Dash cooldown pip
+	for i in enemies.size():
+		var e := enemies[i]
+		_bar(Vector2(vp.x - 36 - 300, 52 + i * 22), 300, e.hp / e.cfg["hp"], Color(1, 0.32, 0.27))
+	# Dash + Force push cooldown pips
 	_bar(Vector2(36, 74), 120, 1.0 - player.dash_cooldown / 1.1, Color(0.4, 0.7, 1.0))
+	if player.has_force():
+		_bar(Vector2(36, 90), 120, 1.0 - player.push_cooldown / 6.0, Color(0.65, 0.55, 1.0))
 	# Crosshair for the shooter
 	if not player.cfg["melee"]:
 		var c := vp / 2.0
@@ -736,8 +752,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_end_intro()
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_cam_yaw -= event.relative.x * 0.0032
-		_cam_pitch = clampf(_cam_pitch - event.relative.y * 0.0026, -0.95, 0.55)
+		var sens: float = GameSettings.sensitivity
+		var inv := -1.0 if GameSettings.invert_y else 1.0
+		_cam_yaw -= event.relative.x * 0.0032 * sens
+		_cam_pitch = clampf(_cam_pitch - event.relative.y * 0.0026 * sens * inv, -0.95, 0.55)
 	if event.is_action_pressed("pause") and not _ended:
 		request_menu.emit()
 
@@ -779,6 +797,22 @@ func _physics_process(delta: float) -> void:
 		player.set_blocking(Input.is_action_pressed("block"))
 		if Input.is_action_just_pressed("boost"):
 			player.try_dash()
+		if Input.is_action_just_pressed("force_push"):
+			player.try_force_push()
+
+	# the player always squares up against the nearest living opponent
+	var best: GroundFighter = null
+	var best_d := INF
+	for e in enemies:
+		if not e.alive:
+			continue
+		var d := e.global_position.distance_squared_to(player.global_position)
+		if d < best_d:
+			best_d = d
+			best = e
+	if best != null:
+		enemy = best
+		player.enemy = best
 
 	_update_bolts(delta)
 	_update_trails()
@@ -793,7 +827,7 @@ func _update_camera(delta: float) -> void:
 	_cam_pivot.rotation.y = _cam_yaw
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
-	camera.fov = lerpf(camera.fov, 65.0 + hv * 0.35, 5.0 * delta)
+	camera.fov = lerpf(camera.fov, GameSettings.fov + hv * 0.35, 5.0 * delta)
 	# impact shake: decaying random jolt, echoed in the post shader
 	_shake = maxf(0.0, _shake - 3.2 * delta)
 	var sh := _shake * _shake
@@ -820,27 +854,77 @@ func hit_stop(duration := 0.09, scale := 0.07) -> void:
 			Engine.time_scale = 1.0)
 
 func _rumble(weak: float, strong: float, dur: float) -> void:
-	Input.start_joy_vibration(0, weak, strong, dur)
+	if GameSettings.rumble:
+		Input.start_joy_vibration(0, weak, strong, dur)
 
 func melee_hit(attacker: GroundFighter) -> void:
-	var target := enemy if attacker == player else player
-	if target == null or not target.alive:
-		return
-	var to_t := target.global_position - attacker.global_position
-	to_t.y = 0
-	var facing := (-attacker.global_transform.basis.z).dot(to_t.normalized())
-	if to_t.length() <= attacker.saber_reach() and facing > 0.35:
-		target.take_hit(attacker.cfg["dmg"], attacker)
-		_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
-		_shake = maxf(_shake, 0.55 if target == player else 0.35)
-		hit_stop(0.09, 0.07)
-		_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
-		if music != null:
-			music.combat_event()
+	var targets: Array = [player] if attacker != player else enemies.duplicate()
+	for target: GroundFighter in targets:
+		if target == null or not target.alive:
+			continue
+		var to_t: Vector3 = target.global_position - attacker.global_position
+		to_t.y = 0
+		var facing := (-attacker.global_transform.basis.z).dot(to_t.normalized())
+		if to_t.length() <= attacker.saber_reach() and facing > 0.35:
+			target.take_hit(attacker.cfg["dmg"], attacker)
+			_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
+			_shake = maxf(_shake, 0.55 if target == player else 0.35)
+			hit_stop(0.09, 0.07)
+			_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
+			if music != null:
+				music.combat_event()
+
+# Telekinetic shove: knocks back every opponent caught in the front cone.
+func force_push(caster: GroundFighter) -> void:
+	var targets: Array = [player] if caster != player else enemies.duplicate()
+	var origin := caster.global_position
+	var fwd := -caster.global_transform.basis.z
+	for target: GroundFighter in targets:
+		if target == null or not target.alive:
+			continue
+		var to_t: Vector3 = target.global_position - origin
+		to_t.y = 0
+		if to_t.length() > 6.5 or fwd.dot(to_t.normalized()) < 0.3:
+			continue
+		target.take_push(to_t.normalized())
+		_hit_flash(target.global_position + Vector3(0, 1.1, 0), Color(0.55, 0.75, 1.0))
+		_shake = maxf(_shake, 0.45 if target == player else 0.3)
+	_shockwave(origin + Vector3(0, 1.1, 0) + fwd * 0.6)
+	_rumble(0.4, 0.6, 0.2)
+	if music != null:
+		music.combat_event()
+
+func _shockwave(at: Vector3) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.42
+	tm.outer_radius = 0.5
+	tm.rings = 32
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.albedo_color = Color(0.6, 0.8, 1.0, 0.8)
+	tm.material = mat
+	ring.mesh = tm
+	ring.position = at
+	ring.rotation.x = PI / 2.0
+	ring.scale = Vector3.ONE * 0.4
+	add_child(ring)
+	var light := OmniLight3D.new()
+	light.light_color = Color(0.6, 0.8, 1.0)
+	light.light_energy = 3.0
+	light.omni_range = 5.0
+	ring.add_child(light)
+	var tw := create_tween().set_parallel()
+	tw.tween_property(ring, "scale", Vector3(11, 4, 11), 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.45)
+	tw.tween_property(light, "light_energy", 0.0, 0.4)
+	tw.chain().tween_callback(ring.queue_free)
 
 func spawn_bolt(from: GroundFighter) -> void:
 	var origin := from.global_position + Vector3(0, 1.25, 0) - from.global_transform.basis.z * 0.5
-	var target := enemy if from == player else player
+	var target := from.enemy if from == player else player
 	var dir := -from.global_transform.basis.z
 	if from.is_player:
 		# Shoot where the camera looks
@@ -880,7 +964,7 @@ func _update_bolts(delta: float) -> void:
 		node.position += b["dir"] * 32.0 * delta
 		var dead: bool = b["life"] <= 0.0
 		# Hit fighters
-		for f: GroundFighter in [player, enemy]:
+		for f: GroundFighter in [player] + enemies:
 			if f == b["from"] or not f.alive or dead:
 				continue
 			var center: Vector3 = f.global_position + Vector3(0, 1.0, 0)
@@ -1005,14 +1089,22 @@ func _update_trails() -> void:
 func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
+	var foes_left := false
+	for e in enemies:
+		if e.alive:
+			foes_left = true
+	if f != player and foes_left:
+		_show_msg("ENCORE UN !")
+		hit_stop(0.12, 0.1)
+		return
 	if not _intro_done:
 		_end_intro()
 	_ended = true
 	Engine.time_scale = 0.32
+	var won := f != player
 	get_tree().create_timer(0.5).timeout.connect(func() -> void:
 		Engine.time_scale = 1.0
-		_start_cinematic(player if f == enemy else enemy))
-	var won := f == enemy
+		_start_cinematic(player if won else f))
 	get_tree().create_timer(3.4).timeout.connect(func() -> void: _show_end(won))
 
 func _start_cinematic(winner: GroundFighter) -> void:

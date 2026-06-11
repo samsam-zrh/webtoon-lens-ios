@@ -218,4 +218,16 @@ gap2 = np.zeros(int(0.55 * SR))
 cycle = np.concatenate([inhale, gap1, click, exhale, gap2])
 save("vader_breath.wav", loopable(cycle), -7.0)
 
+# --------------------------------------------------------------- force push
+# deep telekinetic whoomp: sub swell into an airy burst
+dur = 0.9
+t = t_axis(dur)
+n = len(t)
+swell = np.sin(np.pi * np.clip(t / 0.32, 0, 1)) ** 2 * (t < 0.32)
+sub = np.sin(2 * np.pi * np.exp(np.linspace(np.log(34), np.log(58), n)) * t) * swell * 1.6
+burst_env = np.exp(-np.maximum(t - 0.3, 0) * 9) * (t >= 0.3)
+burst = bandpass_noise(n, 120, 2400, rng) * burst_env * 1.3
+airr2 = bandpass_noise(n, 600, 5200, rng) * np.exp(-np.maximum(t - 0.3, 0) * 16) * (t >= 0.3) * 0.6
+save("force_push.wav", (sub + burst + airr2) * env_ar(n, 0.01, 0.25), -1.2)
+
 print("done.")

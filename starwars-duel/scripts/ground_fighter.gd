@@ -29,6 +29,7 @@ var blocking := false
 var hit_stun := 0.0
 var dash_timer := 0.0
 var dash_cooldown := 0.0
+var push_cooldown := 0.0
 var dash_dir := Vector3.ZERO
 var fire_cooldown := 0.0
 var burst_left := 0
@@ -226,6 +227,7 @@ func _physics_process(delta: float) -> void:
 
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	dash_cooldown = maxf(0.0, dash_cooldown - delta)
+	push_cooldown = maxf(0.0, push_cooldown - delta)
 	hit_stun = maxf(0.0, hit_stun - delta)
 
 	if controls_enabled and not is_player:
@@ -234,7 +236,7 @@ func _physics_process(delta: float) -> void:
 	# Attack progression
 	if attacking:
 		attack_timer -= delta
-		if not hit_window_done and attack_timer < cfg["attack_time"] * 0.55:
+		if not hit_window_done and attack_timer < cfg["attack_time"] * 0.40:
 			hit_window_done = true
 			if cfg["melee"]:
 				arena.melee_hit(self)
@@ -405,6 +407,40 @@ func set_blocking(want: bool) -> void:
 		return
 	blocking = want
 
+func has_force() -> bool:
+	return cfg["melee"] and cfg["type"] == "jedi"
+
+func try_force_push() -> void:
+	if push_cooldown > 0.0 or not alive or not has_force() or hit_stun > 0.2:
+		return
+	if attacking:
+		attacking = false
+		combo_queued = false
+		combo_index = 0
+	push_cooldown = 6.0
+	blocking = false
+	_play_oneshot("19_Block3", 0.1, 1.5)
+	play_sound("res://assets/audio/force_push.wav", -2.0, randf_range(0.95, 1.05))
+	arena.force_push(self)
+
+func take_push(dir: Vector3) -> void:
+	if not alive:
+		return
+	velocity += dir * 11.0 + Vector3.UP * 4.0
+	hit_stun = 1.0
+	blocking = false
+	if attacking:
+		attacking = false
+		combo_queued = false
+		combo_index = 0
+	hp -= 4.0
+	if anim != null:
+		_play_oneshot(cfg["anims"]["hit"], 0.1, 0.9)
+	damaged.emit(self)
+	if hp <= 0.0:
+		hp = 0.0
+		_die()
+
 func try_dash() -> void:
 	if dash_cooldown > 0.0 or not alive:
 		return
@@ -498,8 +534,20 @@ func _ai_think(delta: float) -> void:
 		set_blocking(_ai_want_block and enemy.attacking and dist < 4.0)
 		if dist < saber_reach() + 0.4 and not blocking and randf() < skill * 2.2 * delta * 60.0 * 0.02:
 			try_attack()
+		elif has_force() and push_cooldown <= 0.0 and dist < 4.5 and randf() < skill * delta * 60.0 * 0.012:
+			try_force_push()
 	else:
-		var want2 := clampf((dist - 10.0) * 0.5, -1.0, 1.0)
+		var want2: float
+		if dist < 5.0:
+			want2 = -0.6          # give a little ground at point blank
+		elif dist > 11.0:
+			want2 = 1.0           # close back in
+		else:
+			want2 = 0.15          # hold position, keep light pressure
+		# never back into the arena edge
+		var flat := Vector2(global_position.x, global_position.z)
+		if want2 < 0.0 and flat.length() > 11.0:
+			want2 = 0.4
 		move_input = Vector2(_ai_strafe, want2)
-		if dist < 18.0 and randf() < skill * delta * 60.0 * 0.014:
+		if dist < 20.0 and randf() < skill * delta * 60.0 * 0.022:
 			try_attack()
