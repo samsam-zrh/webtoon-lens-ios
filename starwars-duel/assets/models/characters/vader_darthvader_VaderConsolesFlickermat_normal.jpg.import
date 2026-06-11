@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://chyahon6xlrbs"
-path="res://.godot/imported/tatooine_8.png-eeb4bc4fa43c7cd093faeadd3e084467.ctex"
+uid="uid://2j8j6xvfufaq"
+path="res://.godot/imported/vader_darthvader_VaderConsolesFlickermat_normal.jpg-b8e0ba42b1b000d736a10f2be4bcfe02.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "e91c55e8d042420e3d4ba0b364db2161"
+"md5": "9a01d9ae6b5242dc82ee7254abab4816"
 }
 
 [deps]
 
-source_file="res://assets/models/tatooine/tatooine_8.png"
-dest_files=["res://.godot/imported/tatooine_8.png-eeb4bc4fa43c7cd093faeadd3e084467.ctex"]
+source_file="res://assets/models/characters/vader_darthvader_VaderConsolesFlickermat_normal.jpg"
+dest_files=["res://.godot/imported/vader_darthvader_VaderConsolesFlickermat_normal.jpg-b8e0ba42b1b000d736a10f2be4bcfe02.ctex"]
 
 [params]
 

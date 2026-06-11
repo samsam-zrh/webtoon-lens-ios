@@ -84,8 +84,8 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 	_setup_blade()
 	_setup_audio()
 
-# Builds the visual model for a roster entry; the "vader" variant dresses the
-# animated Kyle rig as Dark Vader (real helmet model, blackened suit).
+# Builds the visual model for a roster entry. Vader is a real Battlefront-style
+# model re-rigged onto the shared animated skeleton (see CREDITS.md).
 static func build_character_model(cfg: Dictionary) -> Node3D:
 	var m: Node3D
 	if cfg.has("normalize_len"):
@@ -95,97 +95,42 @@ static func build_character_model(cfg: Dictionary) -> Node3D:
 		if cfg.has("model_scale"):
 			m.scale = Vector3.ONE * cfg["model_scale"]
 		m.rotation.y = cfg.get("model_yaw", 0.0)
-	if cfg.get("variant", "") == "vader":
-		_apply_vader_look(m)
 	return m
-
-static func _apply_vader_look(m: Node3D) -> void:
-	# Hide Kyle's head/hair so the helmet replaces them
-	for n in ["Kyle_Katarn_FaceMesh_LOD2", "Kyle_Katarn_FaceMesh_LOD2_Eyes",
-			"Hair_S_Casual_CardsMesh_Group0_LOD1", "Beard_L_Full_CardsMesh_Group0_LOD1",
-			"Mustache_L_Full_CardsMesh_Group0_LOD2"]:
-		var found := m.find_child(n, true, false)
-		if found is MeshInstance3D:
-			(found as MeshInstance3D).visible = false
-	# Blacken the outfit into the dark armor
-	ModelUtil.tint(m, Color(0.10, 0.10, 0.13))
-	# Menu/preview coherence: tint the rig's blade red for Vader
-	var bl := m.find_child("lightblade_Cylinder_001", true, false)
-	var blm: MeshInstance3D = bl if bl is MeshInstance3D else (bl.find_child("*", true, false) as MeshInstance3D if bl != null else null)
-	if blm != null:
-		var bmat := StandardMaterial3D.new()
-		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		bmat.albedo_color = Color(1.0, 0.35, 0.3)
-		bmat.emission_enabled = true
-		bmat.emission = Color(1.0, 0.12, 0.08)
-		bmat.emission_energy_multiplier = 4.5
-		for i in blm.mesh.get_surface_count():
-			blm.set_surface_override_material(i, bmat)
-	# Real Darth Vader helmet (Lae11, CC-BY) attached to the head bone
-	var sk: Skeleton3D = m.find_child("Skeleton3D", true, false)
-	if sk != null:
-		var att := BoneAttachment3D.new()
-		sk.add_child(att)
-		att.bone_name = "mixamorig_Head"
-		var helmet := ModelUtil.load_model("res://assets/models/vader_helmet.glb", 44.0, 0.0)
-		helmet.position = Vector3(0, 8.0, 1.0)
-		att.add_child(helmet)
 
 func _setup_blade() -> void:
 	if not cfg["melee"]:
 		return
 	var color: Color = cfg["saber_color"]
-	if cfg["type"] == "jedi":
-		# The Kyle model ships with a real blade mesh bone-attached to the hand:
-		# recolor it into a glowing energy blade. The attachment node and its
-		# mesh child share the same name, so dig for the MeshInstance3D.
-		var attach := model.find_child("lightblade_Cylinder_001", true, false)
-		if attach is MeshInstance3D:
-			blade_mesh = attach
-		elif attach != null:
-			blade_mesh = attach.find_child("*", true, false) as MeshInstance3D
-		if blade_mesh != null:
-			var mat := StandardMaterial3D.new()
-			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mat.albedo_color = color.lerp(Color.WHITE, 0.45)
-			mat.emission_enabled = true
-			mat.emission = color
-			mat.emission_energy_multiplier = 4.5
-			for i in blade_mesh.mesh.get_surface_count():
-				blade_mesh.set_surface_override_material(i, mat)
-			blade_light = OmniLight3D.new()
-			blade_light.light_color = color
-			blade_light.light_energy = 1.0
-			blade_light.omni_range = 2.6
-			blade_mesh.add_child(blade_light)
-	else:
-		# Vader: the Sketchfab model ships with its own saber (blade mesh
-		# "Sabel svart" + glow core "Laser"): tint them into a red energy
-		# blade instead of bolting on a second saber.
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = color.lerp(Color.WHITE, 0.35)
-		mat.emission_enabled = true
-		mat.emission = color
-		mat.emission_energy_multiplier = 4.5
-		for mesh_name in ["DARTH_Sabel svart_0", "DARTH_Laser_0", "DARTH_Sabel vit_0"]:
-			var found := model.find_child(mesh_name, true, false)
-			if found is MeshInstance3D:
-				var fmi := found as MeshInstance3D
-				if mesh_name == "DARTH_Sabel vit_0":
-					# Stray white glow mesh from the source model: hide it
-					fmi.visible = false
-					continue
-				for i in fmi.mesh.get_surface_count():
-					fmi.set_surface_override_material(i, mat)
-				if blade_mesh == null or "svart" in mesh_name:
-					blade_mesh = fmi
-		if blade_mesh != null:
-			blade_light = OmniLight3D.new()
-			blade_light.light_color = color
-			blade_light.light_energy = 1.0
-			blade_light.omni_range = 2.6
-			blade_mesh.add_child(blade_light)
+	# Each model ships with a blade mesh skinned to the weapon hand: recolor
+	# it into a glowing energy blade. The attachment node and its mesh child
+	# can share the same name, so dig for the MeshInstance3D.
+	var blade_name: String = cfg.get("blade_mesh", "lightblade_Cylinder_001")
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = color.lerp(Color.WHITE, 0.45)
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 4.5
+	var attach := model.find_child(blade_name, true, false)
+	if attach is MeshInstance3D:
+		blade_mesh = attach
+	elif attach != null:
+		blade_mesh = attach.find_child("*", true, false) as MeshInstance3D
+	if blade_mesh != null:
+		for i in blade_mesh.mesh.get_surface_count():
+			blade_mesh.set_surface_override_material(i, mat)
+		blade_light = OmniLight3D.new()
+		blade_light.light_color = color
+		blade_light.light_energy = 1.0
+		blade_light.omni_range = 2.6
+		blade_mesh.add_child(blade_light)
+	# Glowing hilt details (Vader's saber controls)
+	for extra_name in cfg.get("blade_extra", []):
+		var found := model.find_child(extra_name, true, false)
+		if found is MeshInstance3D:
+			var fmi := found as MeshInstance3D
+			for i in fmi.mesh.get_surface_count():
+				fmi.set_surface_override_material(i, mat)
 
 	# Blade endpoints (local space) along the mesh's longest axis, for the
 	# swing trail and to position the light.
@@ -387,7 +332,8 @@ func _update_saber(_delta: float) -> void:
 		return
 	# Kyle's blade bone is only posed in combat animations; elsewhere it sits
 	# in bind pose inside the torso, so only show it while it is being swung.
-	if cfg["type"] == "jedi" and blade_mesh != null:
+	# Vader's blade is skinned to his hand and stays drawn ("blade_always").
+	if cfg["type"] == "jedi" and blade_mesh != null and not cfg.get("blade_always", false):
 		var show := attacking or blocking
 		blade_mesh.visible = show
 		if blade_light != null:

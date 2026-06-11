@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://iugo7af0vtfm"
-path="res://.godot/imported/vader_helmet.glb-52b42c523e6512e31e77a1f6d5b10034.scn"
+uid="uid://cpg66nq4ykj7m"
+path="res://.godot/imported/vader.glb-1461e217a8150744d9296bbf5291840c.scn"
 
 [deps]
 
-source_file="res://assets/models/vader_helmet.glb"
-dest_files=["res://.godot/imported/vader_helmet.glb-52b42c523e6512e31e77a1f6d5b10034.scn"]
+source_file="res://assets/models/characters/vader.glb"
+dest_files=["res://.godot/imported/vader.glb-1461e217a8150744d9296bbf5291840c.scn"]
 
 [params]
 

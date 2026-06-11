@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bj4i6nlnh5v3f"
-path="res://.godot/imported/tatooine_7.png-7e04b777d7a12f6100f166015bafb732.ctex"
+uid="uid://d08rxuldulqy6"
+path="res://.godot/imported/vader_Sabel_vit_baseColor.jpg-ed8aaf6b5cbc5b7718d87c4bb7aba968.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "cdc9bb94ad819b0eb9bd2e30f7d81924"
+"md5": "e0c481b0ea5fa2fdcd56980daf4bd093"
 }
 
 [deps]
 
-source_file="res://assets/models/tatooine/tatooine_7.png"
-dest_files=["res://.godot/imported/tatooine_7.png-7e04b777d7a12f6100f166015bafb732.ctex"]
+source_file="res://assets/models/characters/vader_Sabel_vit_baseColor.jpg"
+dest_files=["res://.godot/imported/vader_Sabel_vit_baseColor.jpg-ed8aaf6b5cbc5b7718d87c4bb7aba968.ctex"]
 
 [params]
 

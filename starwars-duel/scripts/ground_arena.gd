@@ -1,7 +1,8 @@
 class_name GroundArena
 extends Node3D
 
-# Battlefront-style 1v1 character duel inside an Imperial corridor.
+# Battlefront-style 1v1 character duel inside an Imperial throne room
+# (Death Star II inspired).
 # Real animated character models (see CREDITS.md), over-shoulder camera,
 # saber combos, blocking, clashes and blaster fire.
 
@@ -27,9 +28,12 @@ const ROSTER := {
 	},
 	"vader": {
 		"name": "Dark Vador", "type": "jedi", "variant": "vader", "melee": true,
-		"model": "res://assets/models/characters/jedi.glb",
-		"model_yaw": 0.0, "model_scale": 1.0,
+		"model": "res://assets/models/characters/vader.glb",
+		"model_yaw": 0.0, "model_scale": 1.06,
 		"saber_color": Color(1.0, 0.12, 0.08),
+		"blade_mesh": "DARTH_Sabel svart_0",
+		"blade_extra": ["DARTH_Laser_0"],
+		"blade_always": true,
 		"hp": 160.0, "speed": 4.6, "dmg": 22.0, "reach": 2.5, "lunge": 4.5, "turn_speed": 9.0,
 		"attack_time": 0.7, "attack_anim_speed": 1.1, "attack_move_factor": 0.35,
 		"ai_skill": 0.5, "ai_block_chance": 0.35,
@@ -137,22 +141,29 @@ func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float) -> GroundFigh
 		_trails[f] = {"points": [], "mesh": trail}
 	return f
 
-# ------------------------------------------------------------ Tatooine arena
+# --------------------------------------------- Imperial throne room arena
+# Death Star II inspired duel chamber: mirror-black floor, panoramic viewport
+# onto deep space (Star Destroyer on patrol), light columns and the throne.
 
-const ARENA_R := 24.0
+const ARENA_R := 14.0       # gameplay boundary (inside the walls)
+const ROOM_R := 17.0        # octagon wall radius
+const ROOM_H := 10.0
 
 func _build_corridor() -> void:
 	_build_environment()
-	_build_terrain()
-	_build_scenery()
+	_build_floor()
+	_build_walls()
+	_build_ceiling()
+	_build_throne()
+	_build_space_view()
 	_build_boundary()
 
 	var amb := AudioStreamPlayer.new()
-	var wind: AudioStreamWAV = load("res://assets/audio/wind.wav").duplicate()
-	wind.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	wind.loop_end = wind.data.size() / 2
-	amb.stream = wind
-	amb.volume_db = -14.0
+	var hum: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
+	hum.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	hum.loop_end = hum.data.size() / 2
+	amb.stream = hum
+	amb.volume_db = -18.0
 	add_child(amb)
 	amb.play()
 
@@ -160,247 +171,274 @@ func _build_environment() -> void:
 	var env := Environment.new()
 	var sky := Sky.new()
 	var sm := PanoramaSkyMaterial.new()
-	sm.panorama = load("res://assets/textures/desert_sky.hdr")
-	sm.energy_multiplier = 1.6
+	sm.panorama = load("res://assets/textures/milky_way.jpg")
+	sm.energy_multiplier = 2.2
 	sky.sky_material = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.0
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.19, 0.21, 0.28)
+	env.ambient_light_energy = 1.7
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.08
+	env.tonemap_exposure = 1.22
 	env.glow_enabled = true
-	env.glow_intensity = 0.3
-	env.glow_hdr_threshold = 1.25
+	env.glow_intensity = 0.42
+	env.glow_bloom = 0.06
+	env.glow_hdr_threshold = 1.1
 	env.ssao_enabled = true
-	env.ssao_intensity = 1.0
+	env.ssao_intensity = 1.4
+	env.ssr_enabled = true
+	env.ssr_max_steps = 48
+	env.ssr_fade_in = 0.12
+	env.ssr_fade_out = 1.5
 	env.sdfgi_enabled = true
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.78, 0.70, 0.58)
-	env.fog_density = 0.0012
-	env.fog_sky_affect = 0.0
+	env.volumetric_fog_enabled = true
+	env.volumetric_fog_density = 0.005
+	env.volumetric_fog_albedo = Color(0.55, 0.62, 0.8)
+	env.volumetric_fog_emission = Color(0.02, 0.025, 0.045)
+	env.volumetric_fog_length = 80.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	# Key light roughly aligned with the HDRI sun
-	var sun1 := DirectionalLight3D.new()
-	sun1.light_energy = 1.3
-	sun1.light_color = Color(1.0, 0.93, 0.80)
-	sun1.rotation = Vector3(-0.55, 0.9, 0.0)
-	sun1.shadow_enabled = true
-	sun1.directional_shadow_max_distance = 90.0
-	sun1.shadow_blur = 1.2
-	add_child(sun1)
-	# Tatooine touch: a faint second sun disc in the sky + its fill light
-	var disc := MeshInstance3D.new()
-	var dm := SphereMesh.new()
-	dm.radius = 28.0
-	dm.height = 56.0
-	var dmm := StandardMaterial3D.new()
-	dmm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dmm.albedo_color = Color(1.0, 0.85, 0.6)
-	dmm.emission_enabled = true
-	dmm.emission = Color(1.0, 0.82, 0.55)
-	dmm.emission_energy_multiplier = 4.0
-	dm.material = dmm
-	disc.mesh = dm
-	disc.position = Vector3(-900, 520, -1300)
-	add_child(disc)
-	var sun2 := DirectionalLight3D.new()
-	sun2.light_energy = 0.25
-	sun2.light_color = Color(1.0, 0.8, 0.58)
-	sun2.rotation = Vector3(-0.32, 2.53, 0.0)
-	sun2.shadow_enabled = false
-	add_child(sun2)
+	# Cold starlight pouring through the viewport (north side)
+	var star := DirectionalLight3D.new()
+	star.light_energy = 1.5
+	star.light_color = Color(0.78, 0.84, 1.0)
+	star.rotation = Vector3(-0.38, PI, 0.0)
+	star.shadow_enabled = true
+	star.directional_shadow_max_distance = 60.0
+	star.shadow_blur = 1.0
+	star.light_volumetric_fog_energy = 0.45
+	add_child(star)
 
-# Dune height: flat in the duel zone, rolling dunes beyond it.
-var _tnoise: FastNoiseLite
+	# Ceiling well: soft white spot over the duel ground
+	var well := SpotLight3D.new()
+	well.position = Vector3(0, ROOM_H + 2.0, 0)
+	well.rotation.x = -PI / 2.0
+	well.spot_range = ROOM_H + 4.0
+	well.spot_angle = 46.0
+	well.light_energy = 7.5
+	well.light_color = Color(0.85, 0.9, 1.0)
+	well.shadow_enabled = true
+	well.light_volumetric_fog_energy = 1.2
+	add_child(well)
 
-func _terrain_height(x: float, z: float) -> float:
-	if _tnoise == null:
-		_tnoise = FastNoiseLite.new()
-		_tnoise.seed = 1977
-		_tnoise.frequency = 0.013
-		_tnoise.fractal_octaves = 3
-	var d := Vector2(x, z).length()
-	var flat := smoothstep(ARENA_R - 4.0, ARENA_R + 22.0, d)
-	# Keep the ground level around the village too
-	var dv := Vector2(x - 0.0, z + 42.0).length()
-	flat *= smoothstep(16.0, 30.0, dv)
-	return _tnoise.get_noise_2d(x, z) * 6.0 * flat
+	# Imperial red rim from the throne side
+	var red := OmniLight3D.new()
+	red.position = Vector3(0, 4.5, ROOM_R + 1.5)
+	red.omni_range = 9.0
+	red.light_energy = 0.7
+	red.light_color = Color(1.0, 0.16, 0.1)
+	red.light_volumetric_fog_energy = 1.4
+	add_child(red)
 
-func _build_terrain() -> void:
-	var size := 320.0
-	var n := 80
-	var step := size / n
-	var half := size / 2.0
-	var sand := Color(0.97, 0.93, 0.88)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for iz in range(n + 1):
-		for ix in range(n + 1):
-			var x := -half + ix * step
-			var z := -half + iz * step
-			var h := _terrain_height(x, z)
-			var tone := 0.9 + 0.1 * _tnoise.get_noise_2d(x * 7.0 + 100.0, z * 7.0)
-			st.set_color(Color(sand.r * tone, sand.g * tone, sand.b * tone))
-			st.set_uv(Vector2(x / 5.0, z / 5.0))
-			st.add_vertex(Vector3(x, h, z))
-	for iz in range(n):
-		for ix in range(n):
-			var a := iz * (n + 1) + ix
-			st.add_index(a)
-			st.add_index(a + n + 1)
-			st.add_index(a + 1)
-			st.add_index(a + 1)
-			st.add_index(a + n + 1)
-			st.add_index(a + n + 2)
-	st.generate_normals()
-	st.generate_tangents()
-	var mesh := st.commit()
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.albedo_color = Color(1.06, 0.98, 0.86)
-	mat.albedo_texture = load("res://assets/textures/sand_diff.jpg")
-	mat.normal_enabled = true
-	mat.normal_texture = load("res://assets/textures/sand_nor.jpg")
-	mat.normal_scale = 0.8
-	mat.roughness = 1.0
-	mesh.surface_set_material(0, mat)
+	# Crisp local reflections for the mirror floor
+	var probe := ReflectionProbe.new()
+	probe.size = Vector3(ROOM_R * 2.2, ROOM_H + 6.0, ROOM_R * 2.2)
+	probe.position = Vector3(0, ROOM_H * 0.5, 0)
+	probe.intensity = 0.9
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(probe)
+
+func _mat_panel() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.115, 0.12, 0.145)
+	m.metallic = 0.55
+	m.roughness = 0.42
+	return m
+
+func _mat_emissive(col: Color, energy: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.02, 0.02, 0.02)
+	m.emission_enabled = true
+	m.emission = col
+	m.emission_energy_multiplier = energy
+	return m
+
+func _box(size: Vector3, pos: Vector3, mat: Material, parent: Node = self) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
+	var bm := BoxMesh.new()
+	bm.size = size
+	bm.material = mat
+	mi.mesh = bm
+	mi.position = pos
+	parent.add_child(mi)
+	return mi
+
+func _build_floor() -> void:
+	# Mirror-black deck
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = ROOM_R + 0.6
+	cm.bottom_radius = ROOM_R + 0.6
+	cm.height = 0.2
+	cm.radial_segments = 8
+	var fm := StandardMaterial3D.new()
+	fm.albedo_color = Color(0.035, 0.037, 0.045)
+	fm.metallic = 0.85
+	fm.roughness = 0.13
+	fm.normal_enabled = true
+	fm.normal_texture = load("res://assets/models/imperial_base_floor-normal.png")
+	fm.normal_scale = 0.35
+	fm.uv1_scale = Vector3(6, 6, 6)
+	cm.material = fm
+	mi.mesh = cm
+	mi.position.y = -0.1
+	mi.rotation.y = PI / 8.0
 	add_child(mi)
-	# Flat physical ground for the duel zone
-	_collision_box(Vector3(0, -0.5, 0), Vector3(120, 1.0, 120))
+	_collision_box(Vector3(0, -0.5, 0), Vector3(ROOM_R * 2.4, 1.0, ROOM_R * 2.4))
 
-func _build_scenery() -> void:
-	# Sandstone rocks ringing the arena (real community rock models, tinted)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 4
-	for i in 11:
-		var ang := TAU * i / 11.0 + rng.randf_range(-0.15, 0.15)
-		var r := rng.randf_range(ARENA_R + 1.0, ARENA_R + 7.0)
-		var s := rng.randf_range(2.0, 5.5)
-		var rock := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", s, rng.randf() * TAU)
-		var pos := Vector3(cos(ang) * r, 0, sin(ang) * r)
-		rock.position = Vector3(pos.x, _terrain_height(pos.x, pos.z) + s * 0.22, pos.z)
-		rock.rotation.z = rng.randf_range(-0.15, 0.15)
-		add_child(rock)
-		_collision_box(rock.position, Vector3(s * 0.8, s, s * 0.8))
-	# Larger rock formations on the far dunes
-	for i in 6:
-		var ang2 := TAU * i / 6.0 + 0.35
-		var r2 := rng.randf_range(65.0, 125.0)
-		var s2 := rng.randf_range(16.0, 30.0)
-		var mesa := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", s2, rng.randf() * TAU)
-		var p2 := Vector3(cos(ang2) * r2, 0, sin(ang2) * r2)
-		mesa.position = Vector3(p2.x, _terrain_height(p2.x, p2.z) + s2 * 0.12, p2.z)
-		add_child(mesa)
-	_scatter_pebbles()
-	# Tatooine settlement (real Sketchfab scene, CC-BY) on the north side
-	for spec in [[Vector3(0, 0, -42), 0.2, 29.0], [Vector3(-24, 0, -34), 1.1, 22.0]]:
-		var village := ModelUtil.load_model("res://assets/models/tatooine/tatooine.glb", spec[2], spec[1])
-		var vb := ModelUtil.compute_aabb(village, Transform3D.IDENTITY)
-		village.position = spec[0] - Vector3(0, vb.position.y, 0)
-		add_child(village)
-		var vstack: Array = [village]
-		while not vstack.is_empty():
-			var vn: Node = vstack.pop_back()
-			if vn is MeshInstance3D:
-				(vn as MeshInstance3D).create_trimesh_collision()
-			for c in vn.get_children():
-				vstack.push_back(c)
+	# Inlaid light rings around the duel center
+	for spec in [[5.5, Color(1.0, 0.14, 0.08), 1.6], [10.5, Color(0.75, 0.85, 1.0), 1.2]]:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = spec[0] - 0.06
+		tm.outer_radius = spec[0] + 0.06
+		tm.rings = 64
+		tm.material = _mat_emissive(spec[1], spec[2])
+		ring.mesh = tm
+		ring.position.y = 0.012
+		ring.scale.y = 0.08
+		add_child(ring)
 
-	# Small camp: a moisture vaporator and a couple of camp rocks
-	_build_vaporator(Vector3(-9.5, 0, 6.5))
-	for spot in [Vector3(8.5, 0, -7.0), Vector3(-10.8, 0, 4.6)]:
-		var camp_rock := ModelUtil.load_model("res://assets/models/boulder/boulder_01_2k.gltf", 1.2, randf() * TAU)
-		camp_rock.position = spot + Vector3(0, 0.25, 0)
-		add_child(camp_rock)
-		_collision_box(spot + Vector3(0, 0.5, 0), Vector3(1.1, 1.0, 1.1))
+func _build_walls() -> void:
+	# Octagonal room; the three north segments are one giant viewport
+	var panel := _mat_panel()
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.08, 0.083, 0.10)
+	dark.metallic = 0.4
+	dark.roughness = 0.5
+	var strip_w := _mat_emissive(Color(0.8, 0.88, 1.0), 2.6)
+	var strip_r := _mat_emissive(Color(1.0, 0.15, 0.08), 1.3)
+	var seg_w := 2.0 * ROOM_R * tan(PI / 8.0)
+	for i in 8:
+		var ang := TAU * i / 8.0
+		var holder := Node3D.new()
+		holder.position = Vector3(sin(ang) * ROOM_R, 0, -cos(ang) * ROOM_R)
+		holder.rotation.y = -ang
+		add_child(holder)
+		var is_window := i in [7, 0, 1]  # north-facing segments
+		if is_window:
+			# sill, lintel and angled mullions (Death Star II viewport)
+			_box(Vector3(seg_w, 1.1, 0.5), Vector3(0, 0.55, 0), panel, holder)
+			_box(Vector3(seg_w, 1.6, 0.5), Vector3(0, ROOM_H - 0.8, 0), panel, holder)
+			_box(Vector3(seg_w, 0.07, 0.46), Vector3(0, 1.14, 0), strip_w, holder)
+			var n_mul := 4
+			for k in n_mul + 1:
+				var x := -seg_w / 2.0 + seg_w * k / float(n_mul)
+				_box(Vector3(0.34, ROOM_H - 2.7, 0.5), Vector3(x, (ROOM_H - 0.0) / 2.0 - 0.6, 0), panel, holder)
+		else:
+			_box(Vector3(seg_w, ROOM_H, 0.5), Vector3(0, ROOM_H / 2.0, 0), panel, holder)
+			# recessed dark band + light strips
+			_box(Vector3(seg_w - 1.6, ROOM_H - 3.4, 0.2), Vector3(0, ROOM_H / 2.0 + 0.4, -0.22), dark, holder)
+			_box(Vector3(0.12, ROOM_H - 3.8, 0.2), Vector3(-seg_w / 2.0 + 1.1, ROOM_H / 2.0 + 0.4, -0.26), strip_w, holder)
+			_box(Vector3(0.12, ROOM_H - 3.8, 0.2), Vector3(seg_w / 2.0 - 1.1, ROOM_H / 2.0 + 0.4, -0.26), strip_w, holder)
+			_box(Vector3(seg_w - 1.6, 0.1, 0.2), Vector3(0, 1.0, -0.26), strip_r, holder)
+		# wall collision (glass barrier on the window segments)
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(seg_w + 1.0, ROOM_H * 2.0, 0.5)
+		cs.shape = shape
+		sb.add_child(cs)
+		holder.add_child(sb)
 
-func _scatter_pebbles() -> void:
-	var ps: PackedScene = load("res://assets/models/boulder/boulder_01_2k.gltf")
-	if ps == null:
-		return
-	var inst: Node = ps.instantiate()
-	var src: MeshInstance3D = inst.find_child("*", true, false) as MeshInstance3D
-	if src == null:
-		var stack: Array = [inst]
-		while not stack.is_empty():
-			var nd: Node = stack.pop_back()
-			if nd is MeshInstance3D:
-				src = nd
-				break
-			for c in nd.get_children():
-				stack.push_back(c)
-	if src == null:
-		inst.free()
-		return
-	var mesh: Mesh = src.mesh
-	var native := mesh.get_aabb().get_longest_axis_size()
-	inst.free()
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = mesh
-	mm.instance_count = 160
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 9
-	for i in mm.instance_count:
-		var ang := rng.randf() * TAU
-		var r := sqrt(rng.randf()) * 70.0
-		var x := cos(ang) * r
-		var z := sin(ang) * r
-		var sc := rng.randf_range(0.12, 0.5) / maxf(native, 0.01)
-		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * sc)
-		var y := _terrain_height(x, z) + native * sc * 0.1
-		mm.set_instance_transform(i, Transform3D(basis, Vector3(x, y, z)))
-	var mmi := MultiMeshInstance3D.new()
-	mmi.multimesh = mm
-	add_child(mmi)
+func _build_ceiling() -> void:
+	var panel := _mat_panel()
+	# Main slab with a circular light well in the middle
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = ROOM_R + 0.6
+	cm.bottom_radius = ROOM_R + 0.6
+	cm.height = 0.4
+	cm.radial_segments = 8
+	cm.material = panel
+	mi.mesh = cm
+	mi.position.y = ROOM_H + 0.2
+	mi.rotation.y = PI / 8.0
+	add_child(mi)
+	# Light well ring
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 3.4
+	tm.outer_radius = 4.0
+	tm.rings = 48
+	tm.material = _mat_emissive(Color(0.85, 0.9, 1.0), 3.2)
+	ring.mesh = tm
+	ring.position.y = ROOM_H - 0.05
+	add_child(ring)
+	# Radial beams
+	for i in 8:
+		var ang := TAU * i / 8.0 + PI / 8.0
+		var beam := _box(Vector3(0.6, 0.7, ROOM_R - 4.0), Vector3.ZERO, panel)
+		beam.position = Vector3(sin(ang) * (ROOM_R + 8.0) / 2.0, ROOM_H - 0.3, -cos(ang) * (ROOM_R + 8.0) / 2.0)
+		beam.rotation.y = -ang
 
-func _build_vaporator(at: Vector3) -> void:
-	var metal := StandardMaterial3D.new()
-	metal.albedo_color = Color(0.52, 0.48, 0.43)
-	metal.metallic = 0.55
-	metal.roughness = 0.55
+func _build_throne() -> void:
+	# Raised dais with the throne, facing the viewport (south side)
+	var panel := _mat_panel()
 	var holder := Node3D.new()
-	holder.position = at
+	holder.position = Vector3(0, 0, ROOM_R - 1.2)
 	add_child(holder)
-	var pole := MeshInstance3D.new()
-	var pm := CylinderMesh.new()
-	pm.top_radius = 0.14
-	pm.bottom_radius = 0.22
-	pm.height = 4.6
-	pm.material = metal
-	pole.mesh = pm
-	pole.position.y = 2.3
-	holder.add_child(pole)
 	for i in 3:
-		var fin := MeshInstance3D.new()
-		var fm := BoxMesh.new()
-		fm.size = Vector3(0.55, 0.55, 0.1)
-		fm.material = metal
-		fin.mesh = fm
-		fin.position = Vector3(0, 1.6 + i * 1.1, 0)
-		fin.rotation.y = i * 0.6
-		holder.add_child(fin)
-	var top := MeshInstance3D.new()
-	var tm := CylinderMesh.new()
-	tm.top_radius = 0.3
-	tm.bottom_radius = 0.18
-	tm.height = 0.5
-	tm.material = metal
-	top.mesh = tm
-	top.position.y = 4.85
-	holder.add_child(top)
-	_collision_box(at + Vector3(0, 2.3, 0), Vector3(0.5, 4.6, 0.5))
+		var r := 4.2 - i * 0.9
+		var step := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = r
+		cm.bottom_radius = r
+		cm.height = 0.28
+		cm.radial_segments = 8
+		cm.material = panel
+		step.mesh = cm
+		step.position.y = 0.14 + i * 0.28
+		holder.add_child(step)
+		var lip := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = r - 0.05
+		tm.outer_radius = r + 0.05
+		tm.rings = 40
+		tm.material = _mat_emissive(Color(1.0, 0.16, 0.1), 1.5)
+		lip.mesh = tm
+		lip.position.y = 0.28 * (i + 1)
+		lip.scale.y = 0.1
+		holder.add_child(lip)
+	# The throne itself: tall back, armrests, seat
+	var seat_y := 3 * 0.28
+	_box(Vector3(1.5, 0.5, 1.3), Vector3(0, seat_y + 0.25, 0.4), panel, holder)
+	_box(Vector3(1.6, 3.0, 0.4), Vector3(0, seat_y + 1.5, 1.05), panel, holder)
+	_box(Vector3(0.32, 0.85, 1.1), Vector3(-0.92, seat_y + 0.7, 0.45), panel, holder)
+	_box(Vector3(0.32, 0.85, 1.1), Vector3(0.92, seat_y + 0.7, 0.45), panel, holder)
+	_box(Vector3(1.2, 0.08, 0.1), Vector3(0, seat_y + 2.6, 0.84), _mat_emissive(Color(1.0, 0.2, 0.12), 2.0), holder)
+	_collision_box(holder.position + Vector3(0, 1.0, 0.3), Vector3(4.5, 2.0, 3.0))
+
+func _build_space_view() -> void:
+	# Star Destroyer on patrol, far beyond the viewport
+	var sd := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 260.0, 0.35)
+	sd.position = Vector3(-110, 30, -420)
+	add_child(sd)
+	var drift := create_tween().set_loops()
+	drift.tween_property(sd, "position:x", 60.0, 160.0)
+	drift.tween_property(sd, "position:x", -110.0, 160.0)
+	# A gas giant looming on the horizon
+	var planet := MeshInstance3D.new()
+	var pm := SphereMesh.new()
+	pm.radius = 220.0
+	pm.height = 440.0
+	var pmm := StandardMaterial3D.new()
+	pmm.albedo_texture = load("res://assets/textures/jupiter.jpg")
+	pmm.roughness = 1.0
+	pm.material = pmm
+	planet.mesh = pm
+	planet.position = Vector3(480, 140, -1100)
+	planet.rotation.z = 0.4
+	add_child(planet)
 
 func _build_boundary() -> void:
-	# Invisible ring keeping the duel inside the rock circle
-	var segs := 14
+	# Invisible ring keeping the duel off the walls and the dais
+	var segs := 16
 	for i in segs:
 		var ang := TAU * i / segs
 		var pos := Vector3(cos(ang) * ARENA_R, 2.0, sin(ang) * ARENA_R)
