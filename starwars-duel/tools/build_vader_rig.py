@@ -308,6 +308,24 @@ for name, bone in manual.items():
     print('MANUAL BIND', name, '->', bone)
 
 bpy.data.objects.remove(proxy, do_unlink=True)
+
+# Retarget for Vader's bulk: the source animations hug Kyle's slim chest, so
+# the arms clip through Vader's armor. Widening the arm chains in the rest
+# skeleton (after binding) pushes every animated arm path outward/forward.
+bpy.context.view_layer.objects.active = arm
+bpy.ops.object.mode_set(mode='EDIT')
+eb2 = arm.data.edit_bones
+for side, lat in (('Left', 6.0), ('Right', -6.0)):
+    off = mathutils.Vector((lat, -3.0, 0.0))   # armature units = cm; -Y = forward
+    for b2 in eb2:
+        n = b2.name
+        if not n.startswith('mixamorig:' + side):
+            continue
+        if any(k in n for k in ('Arm', 'ForeArm', 'Hand', 'Thumb', 'Index', 'Middle', 'Ring', 'Pinky')):
+            b2.head += off
+            b2.tail += off
+bpy.ops.object.mode_set(mode='OBJECT')
+print('ARM CHAINS WIDENED')
 for o in list(bpy.data.objects):
     if o.type == 'EMPTY':
         bpy.data.objects.remove(o, do_unlink=True)

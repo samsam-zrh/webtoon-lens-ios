@@ -65,6 +65,9 @@ var _blade_in_hand := false
 var _flash_meshes: Array = []
 var _flash_energy := 0.0
 var _sfx_hum: AudioStreamPlayer3D
+var _tip_prev := Vector3.ZERO
+var _tip_speed := 0.0
+var _swing_played := false
 var _sfx_step_t := 0.0
 var _walk_phase := 0.0
 
@@ -101,6 +104,10 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 	while not stack.is_empty():
 		var nd: Node = stack.pop_back()
 		if nd is MeshInstance3D:
+			if nd == blade_mesh or nd == halo_mesh:
+				for c2 in nd.get_children():
+					stack.push_back(c2)
+				continue
 			var fm := StandardMaterial3D.new()
 			fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -496,6 +503,24 @@ func _update_saber(_delta: float) -> void:
 		var xf := blade_mesh.global_transform
 		trail_base = xf * _blade_local_base
 		trail_tip = xf * _blade_local_tip
+		var dt := get_physics_process_delta_time()
+		if dt > 0.0:
+			var raw := (trail_tip - _tip_prev).length() / dt
+			_tip_speed = lerpf(_tip_speed, raw, 0.5)
+		_tip_prev = trail_tip
+		# the whoosh triggers on real blade motion, scaled by how hard it moves
+		if attacking and not _swing_played and _tip_speed > 7.0:
+			_swing_played = true
+			var idx := 1 + randi() % 3
+			play_sound("res://assets/audio/saber_swing%d.wav" % idx,
+				clampf(-12.0 + _tip_speed * 0.35, -12.0, -3.0),
+				randf_range(0.92, 1.12))
+		# hum doppler: pitch and volume ride the blade speed
+		if _sfx_hum != null and _sfx_hum.playing:
+			var base_pitch := 0.82 if cfg.get("variant", "") == "vader" else 1.0
+			var k := clampf(_tip_speed / 22.0, 0.0, 1.0)
+			_sfx_hum.pitch_scale = lerpf(_sfx_hum.pitch_scale, base_pitch * (1.0 + k * 0.35), 0.3)
+			_sfx_hum.volume_db = lerpf(_sfx_hum.volume_db, -10.0 + k * 7.0, 0.25)
 
 func _footsteps(delta: float) -> void:
 	var hv := Vector2(velocity.x, velocity.z).length()
@@ -530,11 +555,8 @@ func _start_attack(index: int) -> void:
 		var n: String = names[mini(index, names.size() - 1)]
 		cfg["attack_time"] = _play_oneshot(n, 0.12, cfg.get("attack_anim_speed", 1.3))
 	attack_timer = cfg["attack_time"]
-	if cfg["melee"]:
-		get_tree().create_timer(cfg["attack_time"] * 0.22).timeout.connect(func() -> void:
-			if is_instance_valid(self) and attacking:
-				play_sound("res://assets/audio/saber_swing.wav", -6.0, randf_range(0.94, 1.1)))
-	else:
+	_swing_played = false
+	if not cfg["melee"]:
 		play_sound("res://assets/audio/laser_red.wav", -4.0, randf_range(0.92, 1.12))
 
 

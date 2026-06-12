@@ -239,4 +239,32 @@ thump2 = np.sin(2 * np.pi * np.exp(np.linspace(np.log(130), np.log(48), n)) * t)
 arc = np.sin(2 * np.pi * 1170 * t) * np.exp(-t * 22) * 0.3
 save("saber_hit.wav", (zap + burn + thump2 + arc) * env_ar(n, 0.001, 0.12), -0.8)
 
+# ----------------------------------------------------------- saber ignition
+# snap-hiss: sharp transient, rising hum bloom
+dur = 0.7
+t = t_axis(dur)
+n = len(t)
+snapn = bandpass_noise(n, 900, 7000, rng) * np.exp(-t * 30) * 1.5
+bloomf = np.exp(np.linspace(np.log(0.4), np.log(1.0), n))
+ph_a = np.cumsum(2 * np.pi * f1 * bloomf) / SR
+ph_b = np.cumsum(2 * np.pi * f2 * bloomf) / SR
+bloom = np.tanh((np.sin(ph_a) + 0.6 * np.sin(ph_b)) * 1.6) * np.clip(t / 0.25, 0, 1)
+save("saber_on.wav", (snapn + bloom * 0.9) * env_ar(n, 0.002, 0.18), -3.0)
+
+# ------------------------------------------------- swing whoosh variations
+# airy doppler sweeps, three flavours (short/medium/heavy)
+def whoosh(dur, f_mul, body_amt, seed_shift):
+    t = t_axis(dur)
+    n = len(t)
+    glide = np.exp(np.linspace(np.log(1.7 * f_mul), np.log(0.8 * f_mul), n))
+    ph1 = np.cumsum(2 * np.pi * f1 * 2.0 * glide) / SR
+    body = np.tanh(np.sin(ph1) * 1.2) * body_amt
+    air = bandpass_noise(n, 240, 1900, rng)
+    swell = np.sin(np.pi * np.clip(t / dur, 0, 1)) ** 1.8
+    return (body + air * 0.7) * swell * env_ar(n, 0.03, 0.12)
+
+save("saber_swing1.wav", whoosh(0.38, 1.15, 0.55, 1), -9.0)
+save("saber_swing2.wav", whoosh(0.46, 0.95, 0.7, 2), -9.0)
+save("saber_swing3.wav", whoosh(0.55, 0.8, 0.85, 3), -8.5)
+
 print("done.")

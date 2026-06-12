@@ -12,14 +12,14 @@ signal request_next
 
 const ROSTER := {
 	"luke": {
-		"name": "Luke Skywalker", "type": "jedi", "melee": true,
+		"name": "Kyle Katarn", "type": "jedi", "melee": true,
 		"model": "res://assets/models/characters/jedi.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 1.0, 0.4),
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
 		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.12,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
-		"quote": "Je suis un Jedi, comme mon père avant moi.",
+		"quote": "Un blaster, un sabre, et un vieux compte avec l'Empire.",
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",
@@ -240,6 +240,9 @@ func _end_intro() -> void:
 	player.controls_enabled = true
 	for e in enemies:
 		e.controls_enabled = true
+	for f: GroundFighter in [player] + enemies:
+		if f.cfg["melee"]:
+			f.play_sound("res://assets/audio/saber_on.wav", -4.0, randf_range(0.95, 1.05))
 
 func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Dictionary = {}) -> GroundFighter:
 	var f := GroundFighter.new()
