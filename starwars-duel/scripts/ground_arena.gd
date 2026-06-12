@@ -288,12 +288,16 @@ func _build_corridor() -> void:
 	_build_environment()
 	if theme == "hangar":
 		_build_hangar()
+		_build_holotable(Vector3(16.0, 0, -5.5))
+		_build_mse_droid()
 	else:
 		_build_floor()
 		_build_walls()
 		_build_ceiling()
 		_build_throne()
+		_build_banners()
 		_build_spectators()
+		_build_holotable(Vector3(-11.5, 0, 11.5))
 	_build_space_view()
 	_build_dust()
 	_build_boundary()
@@ -709,6 +713,126 @@ func _build_hangar() -> void:
 			ap.seek(randf() * 2.0)
 		_collision_box(t.position + Vector3(0, 1.0, 0), Vector3(0.8, 2.0, 0.8))
 
+# ---------------------------------------------------- Star Wars set pieces
+
+func _build_holotable(at: Vector3) -> void:
+	# console base with a flickering hologram of a Star Destroyer above it
+	var base := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.85
+	cm.bottom_radius = 1.05
+	cm.height = 0.95
+	cm.material = _mat_panel()
+	base.mesh = cm
+	base.position = at + Vector3(0, 0.475, 0)
+	add_child(base)
+	var lip := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.78
+	tm.outer_radius = 0.88
+	tm.rings = 32
+	tm.material = _mat_emissive(Color(0.4, 0.75, 1.0), 2.2)
+	lip.mesh = tm
+	lip.position = at + Vector3(0, 0.96, 0)
+	lip.scale.y = 0.18
+	add_child(lip)
+	_collision_box(at + Vector3(0, 0.5, 0), Vector3(1.9, 1.0, 1.9))
+	var holo := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 2.6, 0.0)
+	var hmat := ShaderMaterial.new()
+	hmat.shader = load("res://shaders/hologram.gdshader")
+	var stack: Array = [holo]
+	while not stack.is_empty():
+		var nd: Node = stack.pop_back()
+		if nd is MeshInstance3D:
+			(nd as MeshInstance3D).material_override = hmat
+			(nd as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		for c in nd.get_children():
+			stack.push_back(c)
+	var spin := Node3D.new()
+	spin.position = at + Vector3(0, 1.75, 0)
+	spin.add_child(holo)
+	add_child(spin)
+	var tw := create_tween().set_loops()
+	tw.tween_property(spin, "rotation:y", TAU, 24.0).as_relative()
+	var hl := OmniLight3D.new()
+	hl.light_color = Color(0.4, 0.75, 1.0)
+	hl.light_energy = 1.0
+	hl.omni_range = 4.5
+	hl.position = at + Vector3(0, 1.6, 0)
+	add_child(hl)
+
+func _build_banners() -> void:
+	# ceremonial banners flanking the throne
+	var bmat := ShaderMaterial.new()
+	bmat.shader = load("res://shaders/banner.gdshader")
+	for x in [-6.5, 6.5]:
+		var b := MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(2.2, 6.5)
+		pm.subdivide_depth = 16
+		pm.subdivide_width = 4
+		pm.orientation = PlaneMesh.FACE_Z
+		b.mesh = pm
+		b.material_override = bmat
+		b.position = Vector3(x, ROOM_H - 3.6, ROOM_R - 1.1)
+		add_child(b)
+
+var _mse: Node3D
+
+func _build_mse_droid() -> void:
+	# little MSE mouse droid scuttling along the south wall
+	_mse = Node3D.new()
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.08, 0.08, 0.09)
+	dark.metallic = 0.4
+	dark.roughness = 0.35
+	var body := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.32, 0.2, 0.5)
+	bm.material = dark
+	body.mesh = bm
+	body.position.y = 0.16
+	_mse.add_child(body)
+	var top := MeshInstance3D.new()
+	var tm2 := BoxMesh.new()
+	tm2.size = Vector3(0.26, 0.1, 0.34)
+	tm2.material = dark
+	top.mesh = tm2
+	top.position = Vector3(0, 0.3, -0.03)
+	_mse.add_child(top)
+	var eye := MeshInstance3D.new()
+	var em := BoxMesh.new()
+	em.size = Vector3(0.2, 0.03, 0.03)
+	em.material = _mat_emissive(Color(1.0, 0.3, 0.1), 2.0)
+	eye.mesh = em
+	eye.position = Vector3(0, 0.22, -0.26)
+	_mse.add_child(eye)
+	add_child(_mse)
+	# patrol loop along the south wall, with little turns and beeps
+	var pts := [Vector3(-16, 0, 13.5), Vector3(10, 0, 13.5), Vector3(10, 0, 11.0), Vector3(-16, 0, 11.0)]
+	_mse.position = pts[0]
+	var tw := create_tween().set_loops()
+	for i in pts.size():
+		var nxt: Vector3 = pts[(i + 1) % pts.size()]
+		var cur: Vector3 = pts[i]
+		tw.tween_callback(func() -> void:
+			if is_instance_valid(_mse):
+				_mse.look_at_from_position(_mse.position, nxt, Vector3.UP))
+		tw.tween_property(_mse, "position", nxt, cur.distance_to(nxt) / 3.2)
+	var beep := AudioStreamPlayer3D.new()
+	beep.stream = load("res://assets/audio/mse_beep.wav")
+	beep.unit_size = 5.0
+	beep.volume_db = -8.0
+	beep.bus = "SFX"
+	_mse.add_child(beep)
+	var bt := Timer.new()
+	bt.wait_time = 6.5
+	bt.autostart = true
+	_mse.add_child(bt)
+	bt.timeout.connect(func() -> void:
+		beep.pitch_scale = randf_range(0.9, 1.15)
+		beep.play())
+
 func _build_space_view() -> void:
 	# Star Destroyer on patrol, far beyond the viewport
 	var sd := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 260.0, 0.35)
@@ -730,6 +854,13 @@ func _build_space_view() -> void:
 	planet.position = Vector3(480, 140, -1100)
 	planet.rotation.z = 0.4
 	add_child(planet)
+	# a Star Destroyer drops out of hyperspace now and then
+	var jump_timer := Timer.new()
+	jump_timer.wait_time = 26.0
+	jump_timer.autostart = true
+	add_child(jump_timer)
+	jump_timer.timeout.connect(_hyperspace_arrival)
+	get_tree().create_timer(7.0).timeout.connect(_hyperspace_arrival)
 	# TIE fighters screaming past the viewport
 	for spec in [[36.0, 26.0, -260.0, 14.0, 0.0], [26.0, 34.0, -210.0, 11.0, 6.0]]:
 		var tie := ModelUtil.load_model("res://assets/models/tie/scene.gltf", spec[0], PI / 2.0)
@@ -816,6 +947,41 @@ func _build_dust() -> void:
 	p.position.y = ROOM_H * 0.45
 	p.visibility_aabb = AABB(Vector3(-ROOM_R - 2, -ROOM_H, -ROOM_R - 2), Vector3(ROOM_R * 2 + 4, ROOM_H * 2, ROOM_R * 2 + 4))
 	add_child(p)
+
+func _hyperspace_arrival() -> void:
+	if _ended:
+		return
+	var spot := Vector3(randf_range(-260, 120), randf_range(50, 150), randf_range(-700, -550))
+	# light streak stretching toward the arrival point
+	var streak := MeshInstance3D.new()
+	var sm2 := CylinderMesh.new()
+	sm2.top_radius = 1.2
+	sm2.bottom_radius = 1.2
+	sm2.height = 1.0
+	sm2.radial_segments = 8
+	var smat := StandardMaterial3D.new()
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	smat.albedo_color = Color(0.75, 0.85, 1.0, 0.9)
+	sm2.material = smat
+	streak.mesh = sm2
+	streak.position = spot + Vector3(0, 0, -350)
+	streak.rotation.x = PI / 2.0
+	streak.scale = Vector3(1, 700, 1)
+	add_child(streak)
+	var sd2 := ModelUtil.load_model("res://assets/models/star_destroyer.glb", 200.0, 0.1)
+	sd2.position = spot
+	sd2.scale = Vector3.ONE * 0.02
+	add_child(sd2)
+	var tw := create_tween()
+	tw.tween_property(streak, "scale:y", 2.0, 0.3).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(smat, "albedo_color:a", 0.0, 0.34)
+	tw.parallel().tween_property(sd2, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(streak.queue_free)
+	tw.tween_property(sd2, "position:z", spot.z - 60.0, 16.0)
+	tw.tween_property(sd2, "scale", Vector3.ONE * 0.01, 0.2).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	tw.tween_callback(sd2.queue_free)
 
 func _build_boundary() -> void:
 	# Invisible ring keeping the duel off the walls and the dais

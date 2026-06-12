@@ -54,6 +54,13 @@ func _ready() -> void:
 		show_menu()
 	if "--options" in args:
 		get_tree().create_timer(2.0).timeout.connect(_show_options)
+	if "--photoholo" in args:
+		get_tree().create_timer(7.0).timeout.connect(func() -> void:
+			var ga: GroundArena = get_node_or_null("GroundArena")
+			if ga != null:
+				ga.player.global_position = Vector3(11.5, 0.1, -1.0)
+				ga._cam_yaw = -0.85
+				ga._cam_pitch = -0.05)
 	if "--winfast" in args:
 		# Headless testing: end the duel in victory shortly after it starts
 		get_tree().create_timer(22.0).timeout.connect(func() -> void:

@@ -267,4 +267,20 @@ save("saber_swing1.wav", whoosh(0.38, 1.15, 0.55, 1), -9.0)
 save("saber_swing2.wav", whoosh(0.46, 0.95, 0.7, 2), -9.0)
 save("saber_swing3.wav", whoosh(0.55, 0.8, 0.85, 3), -8.5)
 
+# ----------------------------------------------------------------- mse beep
+# little mouse-droid chirp: two quick rising tones
+dur = 0.5
+t = t_axis(dur)
+n = len(t)
+def chirp(t0, f_a, f_b, length):
+    seg = np.zeros(n)
+    i0, i1 = int(t0 * SR), min(int((t0 + length) * SR), n)
+    tt = np.arange(i1 - i0) / SR
+    fr = np.exp(np.linspace(np.log(f_a), np.log(f_b), i1 - i0))
+    seg[i0:i1] = np.sin(np.cumsum(2 * np.pi * fr) / SR * SR * (tt[1] - tt[0] if len(tt) > 1 else 1) ) if False else np.sin(2 * np.pi * np.cumsum(fr) / SR)
+    seg[i0:i1] *= np.sin(np.pi * np.clip(tt / length, 0, 1)) ** 0.7
+    return seg
+beep = chirp(0.02, 900, 1500, 0.16) + chirp(0.24, 1300, 800, 0.18) * 0.9
+save("mse_beep.wav", beep * env_ar(n, 0.005, 0.05), -10.0)
+
 print("done.")
