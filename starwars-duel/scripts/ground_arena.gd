@@ -12,14 +12,16 @@ signal request_next
 
 const ROSTER := {
 	"luke": {
-		"name": "Kyle Katarn", "type": "jedi", "melee": true,
-		"model": "res://assets/models/characters/jedi.glb",
+		"name": "Luke Skywalker", "type": "jedi", "melee": true,
+		"model": "res://assets/models/characters/luke.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 1.0, 0.4),
+		"blade_mesh": "luke_blade",
+		"blade_always": true,
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
 		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.12,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
-		"quote": "Un blaster, un sabre, et un vieux compte avec l'Empire.",
+		"quote": "Je suis un Jedi, comme mon père avant moi.",
 		"anims": {
 			"idle": "01_IdleArmed", "run_f": "03_RunningArmed", "run_b": "08_RunBack",
 			"run_l": "10_RunLeft", "run_r": "09_RunRight",

@@ -1,15 +1,22 @@
-# Pack d'assets fourni par le joueur (en attente)
+# Pack d'assets joueur : « Star Wars Virtual Museum » (5,8 Go)
 
-Lien Google Drive (~5 Go, modèles 3D de personnages Star Wars + sons) :
+Lien Drive (partage public actif) :
 https://drive.google.com/file/d/1YwKqKR0gW_qEbSxL7-xltTL8EkYx7WLw/view
 
-État : le partage doit être passé en « Tous les utilisateurs disposant du
-lien » pour que le téléchargement fonctionne (actuellement : accès restreint,
-Google renvoie une page de connexion).
+C'est un build Unity : extraire avec `tools/unity_inventory.py` (inventaire),
+`tools/unity_tree_export.py "<GameObject>" <outdir>` (personnage complet),
+`tools/unity_export.py <filtre>` (par nom). Télécharger via `gdown <id>`,
+dézipper dans /tmp/pack_x.
 
-Plan d'intégration une fois le pack accessible :
-1. Inventaire complet (modèles par format, sons, textures).
-2. Personnages humanoïdes → pipeline de re-rigging (tools/build_vader_rig.py)
-   vers le squelette animé commun ; priorité : Han Solo, Palpatine, Chewbacca.
-3. Sons de sabre/blaster courts → remplacement des WAV synthétiques.
-4. Décors/props → habillage des arènes (salle du trône, hangar).
+## Fait
+- ✅ Luke Skywalker (ROTJ) → `assets/models/characters/luke.glb`
+  (tools/build_luke_rig.py, sabre procédural « luke_blade » lié à la main)
+
+## File d'attente (GameObjects identifiés dans level3/sharedassets)
+- « Chewbacca », « EmperorPalpatine », « Han Solo HD@Idle », « Kylo Ren »,
+  « Mace Windu », « General Grievous », « Boba Fett », « Leia Full Body@Idle »
+  → même pipeline que Luke (tree_export + build_luke_rig adapté).
+- Décor : « Han Solo carbonite » (prop iconique), « death_star_2_inside ».
+- Sons : « Lightsaber sound effect - medium », « Footstep01/02 », « QVADRBRT »
+  (respiration Vador), bips R2 (QR2_D2S*) — via tools/unity_export.py.
+  (Les pistes musicales John Williams du pack ne sont pas intégrées au repo.)
