@@ -116,6 +116,23 @@ func _build_scenery() -> void:
 	ModelUtil.tint(destroyer, Color(0.52, 0.55, 0.62))
 	add_child(destroyer)
 
+	# The Death Star hanging on the far horizon
+	_build_death_star(Vector3(2600, 800, -3400), 760.0)
+
+	# A patrol of real Rebel X-wings drifting across the far field
+	var xwing_ps: PackedScene = load("res://assets/models/props/xwing.glb")
+	for i in 4:
+		var xw: Node3D = xwing_ps.instantiate()
+		xw.scale = Vector3.ONE * 6.0
+		var base := Vector3(900 + i * 40, -120 + i * 25, -500 - i * 60)
+		xw.position = base
+		xw.rotation = Vector3(0.1, -0.9, 0.05)
+		add_child(xw)
+		var fl := create_tween().set_loops()
+		fl.tween_property(xw, "position", base + Vector3(-1900, 80, 200), 22.0).set_trans(Tween.TRANS_SINE)
+		fl.tween_callback(func() -> void: xw.position = base)
+		fl.tween_interval(6.0)
+
 	# Asteroid field: real community 3D rock models (see CREDITS.md), plus
 	# noise-displaced procedural variants for variety
 	var rng := RandomNumberGenerator.new()
@@ -174,6 +191,72 @@ func _build_scenery() -> void:
 	bgm.bus = "Music"
 	add_child(bgm)
 	bgm.play()
+
+func _build_death_star(pos: Vector3, radius: float) -> void:
+	# grey battle-station sphere with an equatorial trench and superlaser dish
+	var ds := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	sm.radial_segments = 80
+	sm.rings = 40
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.42, 0.44, 0.47)
+	mat.roughness = 0.85
+	mat.metallic = 0.2
+	sm.material = mat
+	ds.mesh = sm
+	ds.scale = Vector3.ONE * radius
+	ds.position = pos
+	add_child(ds)
+	# equatorial trench: a thin dark band girdling the sphere
+	var trench := MeshInstance3D.new()
+	var tm := SphereMesh.new()
+	tm.radius = 1.0
+	tm.height = 0.05
+	tm.radial_segments = 80
+	tm.rings = 4
+	var tmat := StandardMaterial3D.new()
+	tmat.albedo_color = Color(0.14, 0.15, 0.17)
+	tmat.roughness = 1.0
+	tm.material = tmat
+	trench.mesh = tm
+	trench.scale = Vector3(radius * 1.004, radius * 1.004, radius * 1.004)
+	trench.position = pos
+	add_child(trench)
+	# superlaser dish: a recessed dark disc on the upper hemisphere with a
+	# faint green focal glow
+	var dish := MeshInstance3D.new()
+	var dm := SphereMesh.new()
+	dm.radius = 1.0
+	dm.height = 2.0
+	dm.radial_segments = 32
+	dm.rings = 16
+	var dmat := StandardMaterial3D.new()
+	dmat.albedo_color = Color(0.22, 0.24, 0.26)
+	dmat.roughness = 0.9
+	dm.material = dmat
+	dish.mesh = dm
+	var dish_r := radius * 0.3
+	dish.scale = Vector3.ONE * dish_r
+	var dir := Vector3(0.4, 0.55, 0.2).normalized()
+	dish.position = pos + dir * radius * 0.82
+	add_child(dish)
+	var focus := MeshInstance3D.new()
+	var fm := SphereMesh.new()
+	fm.radius = 1.0
+	fm.height = 2.0
+	var fmat := StandardMaterial3D.new()
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fmat.albedo_color = Color(0.4, 1.0, 0.4)
+	fmat.emission_enabled = true
+	fmat.emission = Color(0.3, 1.0, 0.35)
+	fmat.emission_energy_multiplier = 3.0
+	fm.material = fmat
+	focus.mesh = fm
+	focus.scale = Vector3.ONE * dish_r * 0.18
+	focus.position = pos + dir * radius * 0.78
+	add_child(focus)
 
 func _make_textured_planet(tex_path: String, radius: float, pos: Vector3) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
