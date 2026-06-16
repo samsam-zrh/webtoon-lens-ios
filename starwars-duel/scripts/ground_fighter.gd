@@ -245,8 +245,8 @@ func _setup_blade() -> void:
 		blade_mesh.add_sibling.call_deferred(halo_mesh)
 		blade_light = OmniLight3D.new()
 		blade_light.light_color = color
-		blade_light.light_energy = 1.7
-		blade_light.omni_range = 3.4
+		blade_light.light_energy = 2.6
+		blade_light.omni_range = 3.8
 		blade_mesh.add_child(blade_light)
 	# Glowing hilt details (Vader's saber controls)
 	for extra_name in cfg.get("blade_extra", []):

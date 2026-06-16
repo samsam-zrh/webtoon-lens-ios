@@ -49,7 +49,7 @@ const ROSTER := {
 		},
 	},
 	"kenobi": {
-		"name": "Ben Kenobi", "type": "jedi", "variant": "kenobi", "melee": true,
+		"name": "Cullen", "type": "jedi", "variant": "kenobi", "melee": true,
 		"model": "res://assets/models/characters/jedi.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 0.6, 1.0),

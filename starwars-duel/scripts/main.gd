@@ -105,6 +105,8 @@ func _ready() -> void:
 	for a in args:
 		if a.begins_with("--shots"):
 			_capture_screenshots(int(a.trim_prefix("--shots")) if a.length() > 7 else 8)
+		if a.begins_with("--film"):
+			_capture_film(int(a.trim_prefix("--film")) if a.length() > 6 else 90)
 
 # Debug helper: saves periodic screenshots so the game can be checked headless.
 func _capture_screenshots(count := 8) -> void:
@@ -113,6 +115,16 @@ func _capture_screenshots(count := 8) -> void:
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("/tmp/shots/shot_%02d.png" % i)
+	get_tree().quit()
+
+# Rapid frame grab for assembling a short gameplay clip (every 2nd frame).
+func _capture_film(count := 90) -> void:
+	await get_tree().create_timer(0.3).timeout
+	for i in count:
+		await RenderingServer.frame_post_draw
+		await RenderingServer.frame_post_draw
+		var img := get_viewport().get_texture().get_image()
+		img.save_png("/tmp/film/f_%03d.png" % i)
 	get_tree().quit()
 
 func _clear() -> void:
