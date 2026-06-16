@@ -14,6 +14,7 @@
 | Darth Vader (personnage, re-riggé sur le squelette animé du jeu via `tools/build_vader_rig.py`) | AFTONBLADET / Makeamo | CC-BY 4.0 | [Sketchfab](https://sketchfab.com/3d-models/darth-vader-by-makeamo-5b3371f4789c41eeaa691c9a3dfe1a96) |
 | Luke Skywalker ROTJ (extrait du pack « Star Wars Virtual Museum » fourni par le propriétaire du repo, re-riggé via `tools/build_luke_rig.py`) | projet fan (rips communautaires) | usage fan non commercial | pack joueur |
 | Jedi animé (Kyle Katarn — son squelette et ses animations animent aussi Vador), Stormtrooper animé | projet fan « Jedi Outcast remake » (pxmaschine) | usage fan non commercial | [GitHub](https://github.com/pxmaschine/prj010-jedi-outcast-remake) |
+| X-wing (vaisseau garé du hangar, extrait du pack « Star Wars Virtual Museum » fourni par le propriétaire du repo) | rips communautaires | usage fan non commercial | pack joueur |
 | Sabre laser (menu) | Martin Calviello | CC-BY | [Poly Pizza](https://poly.pizza/m/bsFV-B_VG17) |
 
 ## Textures planétaires et ciel

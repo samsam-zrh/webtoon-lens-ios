@@ -700,6 +700,32 @@ func _build_hangar() -> void:
 	tring.scale.y = 0.06
 	add_child(tring)
 
+	# real Rebel X-wing parked on the east landing pad (high-detail model)
+	var xw: Node3D = load("res://assets/models/props/xwing.glb").instantiate()
+	xw.position = Vector3(14.0, 1.37, 8.0)
+	xw.rotation.y = -0.6
+	add_child(xw)
+	_collision_box(Vector3(14.0, 1.5, 8.0), Vector3(9.0, 3.0, 10.0))
+	var xring := MeshInstance3D.new()
+	var xrm := TorusMesh.new()
+	xrm.inner_radius = 6.0
+	xrm.outer_radius = 6.15
+	xrm.rings = 48
+	xrm.material = _mat_emissive(Color(0.95, 0.6, 0.2), 1.0)
+	xring.mesh = xrm
+	xring.position = Vector3(14.0, 0.012, 8.0)
+	xring.scale.y = 0.06
+	add_child(xring)
+	# warm pad floods on the starfighter
+	var xl := SpotLight3D.new()
+	xl.position = Vector3(14.0, 9.0, 8.0)
+	xl.rotation.x = -PI / 2.0
+	xl.spot_range = 12.0
+	xl.spot_angle = 38.0
+	xl.light_energy = 5.5
+	xl.light_color = Color(1.0, 0.92, 0.8)
+	add_child(xl)
+
 	# crate stacks along the east wall
 	var crate := StandardMaterial3D.new()
 	crate.albedo_color = Color(0.24, 0.26, 0.3)
