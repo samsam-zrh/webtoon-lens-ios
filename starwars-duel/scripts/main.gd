@@ -37,6 +37,9 @@ func _ready() -> void:
 	elif "--groundk" in args:
 		_mode = "ground"
 		start_game("kenobi", "sith", {"theme": "hangar"})
+	elif "--groundb" in args:
+		_mode = "ground"
+		start_game("luke", "vader", {"theme": "bespin"})
 	elif "--campaign2" in args:
 		_mode = "ground"
 		_campaign_hero = "luke"
@@ -337,9 +340,9 @@ func _build_menu_ui() -> void:
 	_arena_row.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_arena_row.visible = false
 	root.add_child(_arena_row)
-	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"]]:
-		var ab := UiKit.button(spec[0], 24)
-		ab.custom_minimum_size = Vector2(380, 120)
+	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CITÉ DES NUAGES", "bespin"]]:
+		var ab := UiKit.button(spec[0], 22)
+		ab.custom_minimum_size = Vector2(300, 120)
 		ab.pressed.connect(func() -> void:
 			start_game(_player_pick, _enemy_pick, {"theme": spec[1]}))
 		_arena_row.add_child(ab)
@@ -473,14 +476,17 @@ func _campaign_stages() -> Array:
 		{"id": "trooper", "mods": {}, "count": 2, "theme": "hangar",
 			"title": "CHAPITRE II — LA PATROUILLE",
 			"text": "L'alarme résonne sous les voûtes du hangar.\nUne patrouille de deux soldats converge vers toi.\nReste mobile — et renvoie-leur leurs tirs."},
-		{"id": "sith", "mods": {}, "theme": "hangar",
+		{"id": "sith", "mods": {}, "theme": "throne",
 			"title": "CHAPITRE III — L'ÉCARLATE",
-			"text": "Un soldat à l'armure rouge sang barre la passerelle.\nL'élite de l'Ordre Final ne recule jamais.\nToi non plus."},
-		{"id": rival, "mods": {}, "theme": "throne",
-			"title": "CHAPITRE IV — LE FACE-À-FACE",
-			"text": "Au cœur de la salle du trône, une silhouette t'attend.\n%s allume son sabre.\nLe destin de cette station se joue maintenant." % rival_name},
-		{"id": rival, "mods": {"name": rival_name + " (maître)", "mul": {"hp": 1.5, "dmg": 1.3}, "set": {"ai_skill": 0.85, "ai_block_chance": 0.6}}, "theme": "throne",
-			"title": "CHAPITRE V — LE DERNIER DUEL",
+			"text": "Dans la salle du trône, un soldat à l'armure rouge\nsang barre le passage. L'élite de l'Ordre Final ne\nrecule jamais. Toi non plus."},
+		{"id": rival, "mods": {}, "theme": "bespin",
+			"title": "CHAPITRE IV — LA CITÉ DES NUAGES",
+			"text": "Loin au-dessus de la planète gazeuse, la vapeur monte\nde la chambre de congélation. %s t'attend\nau bord du gouffre. Le premier duel commence." % rival_name},
+		{"id": "sith", "mods": {"name": "Garde prétorien", "mul": {"hp": 1.4, "dmg": 1.2, "speed": 1.2}, "set": {"ai_skill": 0.8}}, "count": 2, "theme": "throne",
+			"title": "CHAPITRE V — LES GARDES PRÉTORIENS",
+			"text": "Deux gardes d'élite surgissent pour protéger leur\nmaître. Encerclé dans la salle du trône, tu devras\nrester en mouvement pour survivre."},
+		{"id": rival, "mods": {"name": rival_name + " (maître)", "mul": {"hp": 1.5, "dmg": 1.3}, "set": {"ai_skill": 0.85, "ai_block_chance": 0.6}}, "theme": "bespin",
+			"title": "CHAPITRE VI — LE DERNIER DUEL",
 			"text": "Blessé mais debout, ton adversaire canalise toute\nsa puissance. Ce duel sera le dernier.\nQue la Force soit avec toi."},
 	]
 

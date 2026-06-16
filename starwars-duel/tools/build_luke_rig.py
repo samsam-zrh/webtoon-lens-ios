@@ -185,6 +185,45 @@ for o in luke_parts:
         vg = o.vertex_groups.new(name='mixamorig:Head')
         vg.add(list(range(len(o.data.vertices))), 1.0, 'REPLACE')
 
+# Gloves: the proxy transfer mapped them onto Kyle's curled fingertips, so the
+# whole glove flew off when those tip bones rotated. Re-weight each glove vertex
+# by proximity to its own hand chain (palm + finger bones), heavily biased to
+# the Hand bone so the glove always stays welded to the wrist.
+def _seg_dist(p, a, b):
+    ab = b - a
+    t = 0.0 if ab.length_squared < 1e-9 else max(0.0, min(1.0, (p - a).dot(ab) / ab.length_squared))
+    return (a + ab * t - p).length
+
+def reweight_glove(o, side):
+    chain = [('mixamorig:%sHand' % side, 3.0)]   # (bone, weight bias)
+    for finger in ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky'):
+        for j in (1, 2, 3):
+            bn = 'mixamorig:%sHand%s%d' % (side, finger, j)
+            if bn in arm.data.bones:
+                chain.append((bn, 1.0))
+    segs = [(bn, Mw @ arm.data.bones[bn].head_local, Mw @ arm.data.bones[bn].tail_local, bias)
+            for bn, bias in chain if bn in arm.data.bones]
+    for g in list(o.vertex_groups):
+        o.vertex_groups.remove(g)
+    groups = {}
+    for v in o.data.vertices:
+        p = o.matrix_world @ v.co
+        scored = sorted(((_seg_dist(p, h, t) / bias, bn) for bn, h, t, bias in segs))[:2]
+        ws = [(1.0 / (d + 0.01) ** 2, bn) for d, bn in scored]
+        tot = sum(wv for wv, _ in ws)
+        for wv, bn in ws:
+            vg = groups.get(bn) or o.vertex_groups.new(name=bn)
+            groups[bn] = vg
+            vg.add([v.index], wv / tot, 'REPLACE')
+
+for o in luke_parts:
+    if 'mat_hand1' in o.name:
+        reweight_glove(o, 'Left')
+        print('GLOVE REWEIGHT', o.name, '-> Left')
+    elif 'mat_hand' in o.name:
+        reweight_glove(o, 'Right')
+        print('GLOVE REWEIGHT', o.name, '-> Right')
+
 bpy.data.objects.remove(proxy, do_unlink=True)
 
 # ---- procedural saber in the right hand: hilt + blade ("luke_blade")

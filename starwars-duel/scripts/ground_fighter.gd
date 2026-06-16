@@ -24,6 +24,7 @@ var attacking := false
 var attack_timer := 0.0
 var combo_index := 0
 var combo_queued := false
+var attack_buffer_t := 0.0   # remembers a recent attack press (input buffering)
 var hit_window_done := false
 var blocking := false
 var hit_stun := 0.0
@@ -344,9 +345,14 @@ func _physics_process(delta: float) -> void:
 	push_cooldown = maxf(0.0, push_cooldown - delta)
 	attack_recoil_t = maxf(0.0, attack_recoil_t - delta)
 	hit_stun = maxf(0.0, hit_stun - delta)
+	attack_buffer_t = maxf(0.0, attack_buffer_t - delta)
 
 	if controls_enabled and not is_player:
 		_ai_think(delta)
+
+	# input buffering: launch/chain the swing the moment the fighter is free
+	if controls_enabled:
+		_consume_attack_buffer()
 
 	# Attack progression: the blade is "live" over a window of the swing
 	# (0.5 -> 0.82 of the animation), checked every tick until it connects.
@@ -533,17 +539,32 @@ func _footsteps(delta: float) -> void:
 # ------------------------------------------------------------------ actions
 
 func try_attack() -> void:
-	if not alive or hit_stun > 0.2:
-		return
-	if attacking:
-		if cfg["melee"] and attack_timer < cfg["attack_time"] * 0.55:
-			combo_queued = true
+	if not alive:
 		return
 	if cfg["melee"]:
-		_start_attack(0)
+		# Buffer the press: it is consumed as soon as the character can act,
+		# so attacks never feel dropped even if pressed a touch early/late.
+		attack_buffer_t = 0.30
 	else:
 		if burst_left <= 0 and fire_cooldown <= 0.0:
 			burst_left = 3
+
+# Spend a buffered attack the instant the fighter is free to swing or chain.
+func _consume_attack_buffer() -> void:
+	if attack_buffer_t <= 0.0 or not cfg["melee"]:
+		return
+	if hit_stun > 0.2:
+		return
+	if attacking:
+		var elapsed: float = 1.0 - attack_timer / float(cfg["attack_time"])
+		if elapsed >= 0.42 and combo_index < cfg["anims"]["attack"].size() - 1:
+			combo_queued = true
+			attack_buffer_t = 0.0
+		return
+	if attack_recoil_t > 0.0:
+		return
+	_start_attack(0)
+	attack_buffer_t = 0.0
 
 func _start_attack(index: int) -> void:
 	combo_index = index

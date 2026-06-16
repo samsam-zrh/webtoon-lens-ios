@@ -19,7 +19,7 @@ const ROSTER := {
 		"blade_mesh": "luke_blade",
 		"blade_always": true,
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.12,
+		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.24,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
 		"quote": "Je suis un Jedi, comme mon père avant moi.",
 		"anims": {
@@ -38,7 +38,7 @@ const ROSTER := {
 		"blade_extra": ["DARTH_Laser_0"],
 		"blade_always": true,
 		"hp": 160.0, "speed": 4.6, "dmg": 22.0, "reach": 2.5, "lunge": 4.5, "turn_speed": 9.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.15, "attack_move_factor": 0.15,
+		"attack_time": 0.7, "attack_anim_speed": 1.15, "attack_move_factor": 0.24,
 		"ai_skill": 0.5, "ai_block_chance": 0.35,
 		"quote": "Je trouve votre manque de foi déplorable.",
 		"anims": {
@@ -54,7 +54,7 @@ const ROSTER := {
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 0.6, 1.0),
 		"hp": 130.0, "speed": 5.2, "dmg": 17.0, "reach": 2.4, "turn_speed": 12.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.35, "attack_move_factor": 0.12,
+		"attack_time": 0.7, "attack_anim_speed": 1.35, "attack_move_factor": 0.24,
 		"ai_skill": 0.6, "ai_block_chance": 0.65,
 		"quote": "La Force sera avec toi. Toujours.",
 		"anims": {
@@ -107,6 +107,8 @@ var _cam_pivot: Node3D
 var _cam_pitch_node: Node3D
 var _cam_yaw := 0.0
 var _cam_pitch := -0.12
+var _mouse_idle := 0.0       # seconds since the last look input
+var _lock_active := false    # soft lock-on engaged this frame
 
 var _started := false
 var _ended := false
@@ -287,6 +289,21 @@ const ROOM_R := 17.0        # octagon wall radius
 const ROOM_H := 10.0
 
 func _build_corridor() -> void:
+	if theme == "bespin":
+		_build_bespin_environment()
+		_build_bespin()
+		_build_dust()
+		_build_boundary()
+		var amb_b := AudioStreamPlayer.new()
+		var wind: AudioStreamWAV = load("res://assets/audio/wind.wav").duplicate()
+		wind.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		wind.loop_end = wind.data.size() / 2
+		amb_b.stream = wind
+		amb_b.volume_db = -16.0
+		amb_b.bus = "SFX"
+		add_child(amb_b)
+		amb_b.play()
+		return
 	_build_environment()
 	if theme == "hangar":
 		_build_hangar()
@@ -985,6 +1002,260 @@ func _hyperspace_arrival() -> void:
 	tw.tween_property(sd2, "scale", Vector3.ONE * 0.01, 0.2).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 	tw.tween_callback(sd2.queue_free)
 
+# ------------------------------------------- Bespin carbon-freeze chamber
+# The iconic Cloud City duel hall: dark industrial ring around a glowing
+# carbon-freezing pit, steam, amber light, open onto the orange cloudscape.
+
+func _build_bespin_environment() -> void:
+	var env := Environment.new()
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(0.55, 0.42, 0.30)
+	sm.sky_horizon_color = Color(0.95, 0.62, 0.32)
+	sm.ground_bottom_color = Color(0.62, 0.40, 0.26)
+	sm.ground_horizon_color = Color(0.95, 0.62, 0.32)
+	sm.sun_angle_max = 30.0
+	sm.energy_multiplier = 1.3
+	sky.sky_material = sm
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.9
+	env.ambient_light_color = Color(0.6, 0.45, 0.32)
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.1
+	env.glow_enabled = true
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.1
+	env.glow_hdr_threshold = 1.0
+	var q: int = GameSettings.quality
+	env.ssao_enabled = q >= 1
+	env.ssao_intensity = 1.6
+	env.ssr_enabled = q >= 1
+	env.ssr_max_steps = 40
+	env.ssr_fade_out = 1.5
+	env.sdfgi_enabled = q >= 2
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.95, 0.62, 0.32)
+	env.fog_density = 0.006
+	env.fog_sky_affect = 0.3
+	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_density = 0.007
+	env.volumetric_fog_albedo = Color(0.95, 0.7, 0.45)
+	env.volumetric_fog_emission = Color(0.05, 0.025, 0.01)
+	env.volumetric_fog_length = 60.0
+	var we := WorldEnvironment.new()
+	we.environment = env
+	add_child(we)
+
+	# warm key light raking through the chamber from the cloudscape window
+	var key := DirectionalLight3D.new()
+	key.light_energy = 1.4
+	key.light_color = Color(1.0, 0.78, 0.5)
+	key.rotation = Vector3(-0.5, 2.2, 0.0)
+	key.shadow_enabled = true
+	key.directional_shadow_max_distance = 70.0
+	key.shadow_blur = 1.2
+	key.light_volumetric_fog_energy = 1.4
+	add_child(key)
+	# cold blue fill from the opposite side for contrast
+	var fill := DirectionalLight3D.new()
+	fill.light_energy = 0.35
+	fill.light_color = Color(0.55, 0.65, 1.0)
+	fill.rotation = Vector3(-0.35, -0.7, 0.0)
+	add_child(fill)
+
+func _build_bespin() -> void:
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.085, 0.082, 0.09)
+	dark.metallic = 0.6
+	dark.roughness = 0.4
+	var grime := StandardMaterial3D.new()
+	grime.albedo_color = Color(0.14, 0.12, 0.12)
+	grime.metallic = 0.5
+	grime.roughness = 0.55
+	var amber := _mat_emissive(Color(1.0, 0.55, 0.15), 2.4)
+	var cold := _mat_emissive(Color(0.5, 0.7, 1.0), 1.6)
+
+	# reflective deck
+	var floor_mi := MeshInstance3D.new()
+	var fcm := CylinderMesh.new()
+	fcm.top_radius = ROOM_R + 1.0
+	fcm.bottom_radius = ROOM_R + 1.0
+	fcm.height = 0.3
+	fcm.radial_segments = 24
+	var fmat := StandardMaterial3D.new()
+	fmat.albedo_color = Color(0.05, 0.05, 0.06)
+	fmat.metallic = 0.8
+	fmat.roughness = 0.22
+	fmat.normal_enabled = true
+	fmat.normal_texture = load("res://assets/models/imperial_base_floor-normal.png")
+	fmat.normal_scale = 0.4
+	fmat.uv1_scale = Vector3(7, 7, 7)
+	fcm.material = fmat
+	floor_mi.mesh = fcm
+	floor_mi.position.y = -0.15
+	add_child(floor_mi)
+	_collision_box(Vector3(0, -0.5, 0), Vector3(ROOM_R * 2.6, 1.0, ROOM_R * 2.6))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(ROOM_R * 2.6, 0.5, ROOM_R * 2.6)
+	pcol.position.y = -0.25
+	add_child(pcol)
+
+	# the carbon-freezing pit: a recessed glowing grate dead centre
+	var pit := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = 3.4
+	pm.bottom_radius = 3.4
+	pm.height = 0.14
+	pm.radial_segments = 32
+	pm.material = _mat_emissive(Color(1.0, 0.5, 0.12), 1.3)
+	pit.mesh = pm
+	pit.position.y = 0.02
+	add_child(pit)
+	# concentric grate rings + radial bars over the pit
+	for r in [1.1, 2.0, 2.9]:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = r - 0.12
+		tm.outer_radius = r + 0.12
+		tm.rings = 40
+		tm.material = dark
+		ring.mesh = tm
+		ring.position.y = 0.08
+		ring.scale.y = 0.5
+		add_child(ring)
+	for i in 12:
+		var ang := TAU * i / 12.0
+		var bar := _box(Vector3(0.16, 0.12, 3.4), Vector3(0, 0.08, 0), dark)
+		bar.rotation.y = ang
+	# orange glow + heat-haze light from the pit
+	var glow := OmniLight3D.new()
+	glow.position = Vector3(0, 0.6, 0)
+	glow.light_color = Color(1.0, 0.5, 0.15)
+	glow.light_energy = 1.8
+	glow.omni_range = 10.0
+	glow.light_volumetric_fog_energy = 1.2
+	add_child(glow)
+	# steam billowing up from the pit
+	_bespin_steam(Vector3(0, 0.1, 0), 4.0, 22)
+
+	# octagonal industrial wall ring; one segment is the cloudscape window
+	var seg_w := 2.0 * ROOM_R * tan(PI / 8.0)
+	for i in 8:
+		var ang := TAU * i / 8.0
+		var holder := Node3D.new()
+		holder.position = Vector3(sin(ang) * ROOM_R, 0, -cos(ang) * ROOM_R)
+		holder.rotation.y = -ang
+		add_child(holder)
+		var is_window := i == 0
+		if is_window:
+			# open frame onto the orange clouds (sky shows through)
+			_box(Vector3(seg_w, 1.4, 0.5), Vector3(0, 0.7, 0), dark, holder)
+			_box(Vector3(seg_w, 2.4, 0.5), Vector3(0, ROOM_H - 1.2, 0), dark, holder)
+			_box(Vector3(0.5, ROOM_H, 0.5), Vector3(-seg_w / 2.0 + 0.4, ROOM_H / 2.0, 0), dark, holder)
+			_box(Vector3(0.5, ROOM_H, 0.5), Vector3(seg_w / 2.0 - 0.4, ROOM_H / 2.0, 0), dark, holder)
+			_box(Vector3(seg_w, 0.1, 0.4), Vector3(0, 1.42, -0.05), amber, holder)
+		else:
+			_box(Vector3(seg_w, ROOM_H, 0.6), Vector3(0, ROOM_H / 2.0, 0), grime, holder)
+			# vertical pipes and machinery on the wall
+			for k in 3:
+				var px := -seg_w / 2.0 + 1.4 + k * (seg_w - 2.8) / 2.0
+				var pipe := MeshInstance3D.new()
+				var pcm := CylinderMesh.new()
+				pcm.top_radius = 0.26
+				pcm.bottom_radius = 0.26
+				pcm.height = ROOM_H - 1.0
+				pcm.material = dark
+				pipe.mesh = pcm
+				pipe.position = Vector3(px, ROOM_H / 2.0, -0.45)
+				holder.add_child(pipe)
+			_box(Vector3(seg_w - 1.0, 0.16, 0.2), Vector3(0, 1.2, -0.55), amber if i % 2 == 0 else cold, holder)
+			_box(Vector3(seg_w - 1.0, 0.16, 0.2), Vector3(0, ROOM_H - 1.6, -0.55), cold if i % 2 == 0 else amber, holder)
+			# a couple of pressure tanks at the base
+			if i % 2 == 1:
+				var tank := MeshInstance3D.new()
+				var tkm := CapsuleMesh.new()
+				tkm.radius = 0.55
+				tkm.height = 2.2
+				tkm.material = dark
+				tank.mesh = tkm
+				tank.position = Vector3(seg_w / 2.0 - 1.2, 1.1, -1.2)
+				holder.add_child(tank)
+				_bespin_steam(holder.position + holder.transform.basis * Vector3(seg_w / 2.0 - 1.2, 2.2, -1.2), 1.6, 14)
+		# wall collision
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		var cs := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(seg_w + 1.0, ROOM_H * 2.0, 0.6)
+		cs.shape = shape
+		sb.add_child(cs)
+		holder.add_child(sb)
+
+	# ceiling ring with hanging hooks/pipes and a central light gantry
+	_box(Vector3(ROOM_R * 2.2, 0.5, ROOM_R * 2.2), Vector3(0, ROOM_H + 0.25, 0), grime)
+	for i in 6:
+		var ang2 := TAU * i / 6.0 + 0.3
+		var hook := MeshInstance3D.new()
+		var hcm := CylinderMesh.new()
+		hcm.top_radius = 0.08
+		hcm.bottom_radius = 0.08
+		hcm.height = 2.4
+		hcm.material = dark
+		hook.mesh = hcm
+		hook.position = Vector3(cos(ang2) * 7.0, ROOM_H - 1.4, sin(ang2) * 7.0)
+		add_child(hook)
+	# overhead amber spot onto the pit
+	var well := SpotLight3D.new()
+	well.position = Vector3(0, ROOM_H, 0)
+	well.rotation.x = -PI / 2.0
+	well.spot_range = ROOM_H + 3.0
+	well.spot_angle = 50.0
+	well.light_energy = 4.0
+	well.light_color = Color(1.0, 0.85, 0.6)
+	well.shadow_enabled = true
+	well.light_volumetric_fog_energy = 2.0
+	add_child(well)
+
+	var probe := ReflectionProbe.new()
+	probe.size = Vector3(ROOM_R * 2.4, ROOM_H + 4.0, ROOM_R * 2.4)
+	probe.position = Vector3(0, ROOM_H * 0.5, 0)
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(probe)
+
+func _bespin_steam(at: Vector3, height: float, amount: int) -> void:
+	var p := GPUParticles3D.new()
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	mat.emission_sphere_radius = 0.9
+	mat.direction = Vector3(0, 1, 0)
+	mat.spread = 12.0
+	mat.initial_velocity_min = height * 0.25
+	mat.initial_velocity_max = height * 0.5
+	mat.gravity = Vector3(0, 0.4, 0)
+	mat.scale_min = 1.0
+	mat.scale_max = 2.2
+	mat.color = Color(1.0, 0.85, 0.7, 0.06)
+	var qm := QuadMesh.new()
+	qm.size = Vector2(2.0, 2.0)
+	var qmat := StandardMaterial3D.new()
+	qmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	qmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	qmat.albedo_color = Color(1.0, 0.7, 0.45, 0.035)
+	qmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.material = qmat
+	p.draw_pass_1 = qm
+	p.process_material = mat
+	p.amount = amount
+	p.lifetime = 3.5
+	p.preprocess = 3.0
+	p.position = at
+	p.visibility_aabb = AABB(Vector3(-6, -1, -6), Vector3(12, height + 4, 12))
+	add_child(p)
+
 func _build_boundary() -> void:
 	# Invisible ring keeping the duel off the walls and the dais
 	var segs := 16
@@ -1115,6 +1386,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var inv := -1.0 if GameSettings.invert_y else 1.0
 		_cam_yaw -= event.relative.x * 0.0032 * sens
 		_cam_pitch = clampf(_cam_pitch - event.relative.y * 0.0026 * sens * inv, -0.95, 0.55)
+		if absf(event.relative.x) + absf(event.relative.y) > 0.5:
+			_mouse_idle = 0.0
 	if event.is_action_pressed("pause") and not _ended:
 		request_menu.emit()
 
@@ -1131,27 +1404,25 @@ func _physics_process(delta: float) -> void:
 			mv.x += 1.0
 		if Input.is_action_pressed("roll_left"):
 			mv.x -= 1.0
-		# Free movement: the character faces where it runs; it squares up to
-		# the enemy while attacking or blocking (soft lock).
+		# Duel lock-on: whenever the foe is within reach the hero squares up to
+		# it and moves target-relative (W toward, S away, A/D orbit). Out of
+		# range, free camera-relative running.
 		var fwd := Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw))
 		var right := Vector3(-fwd.z, 0, fwd.x)
 		var wdir := fwd * mv.y + right * mv.x
-		var lock := player.attacking or player.blocking
-		if lock and enemy.alive:
-			var to_e := enemy.global_position - player.global_position
+		var to_e := enemy.global_position - player.global_position
+		to_e.y = 0
+		var dist := to_e.length()
+		_lock_active = enemy.alive and (dist < 7.5 or player.attacking or player.blocking)
+		if _lock_active:
 			player.face_yaw = atan2(-to_e.x, -to_e.z)
-			var pfwd := Vector3(-sin(player.face_yaw), 0, -cos(player.face_yaw))
-			var pright := Vector3(-pfwd.z, 0, pfwd.x)
-			player.move_input = Vector2(wdir.dot(pright), wdir.dot(pfwd)).limit_length(1.0)
+			player.move_input = mv.limit_length(1.0)
 		elif wdir.length() > 0.1:
 			player.face_yaw = atan2(-wdir.x, -wdir.z)
 			player.move_input = Vector2(0, wdir.length())
 		else:
 			player.move_input = Vector2.ZERO
 		if Input.is_action_just_pressed("fire"):
-			if enemy.alive:
-				var to_e2 := enemy.global_position - player.global_position
-				player.face_yaw = atan2(-to_e2.x, -to_e2.z)
 			player.try_attack()
 		player.set_blocking(Input.is_action_pressed("block"))
 		if Input.is_action_just_pressed("boost"):
@@ -1182,7 +1453,15 @@ func _update_camera(delta: float) -> void:
 	var target := player
 	if not target.alive and enemy.alive:
 		target = enemy
-	_cam_pivot.position = _cam_pivot.position.lerp(target.global_position + Vector3(0, 1.55, 0), clampf(14.0 * delta, 0, 1))
+	_cam_pivot.position = _cam_pivot.position.lerp(target.global_position + Vector3(0, 1.55, 0), clampf(16.0 * delta, 0, 1))
+	# Camera assist: when locked on and the player isn't steering the camera,
+	# gently swing behind the hero so the foe stays framed over the shoulder.
+	_mouse_idle += delta
+	if _lock_active and _mouse_idle > 0.55 and target.alive and enemy != null and enemy.alive:
+		var to_e := enemy.global_position - target.global_position
+		var want_yaw := atan2(-to_e.x, -to_e.z)
+		_cam_yaw = lerp_angle(_cam_yaw, want_yaw, clampf(3.0 * delta, 0, 1))
+		_cam_pitch = lerpf(_cam_pitch, -0.12, clampf(1.5 * delta, 0, 1))
 	_cam_pivot.rotation.y = _cam_yaw
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
