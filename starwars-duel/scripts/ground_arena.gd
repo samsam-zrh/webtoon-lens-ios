@@ -886,6 +886,20 @@ func _build_space_view() -> void:
 	var drift := create_tween().set_loops()
 	drift.tween_property(sd, "position:x", 60.0, 160.0)
 	drift.tween_property(sd, "position:x", -110.0, 160.0)
+	# the real Millennium Falcon sweeping past the viewport on patrol
+	var falcon: Node3D = load("res://assets/models/props/falcon_real.glb").instantiate()
+	falcon.scale = Vector3.ONE * 2.2
+	falcon.position = Vector3(160, 24, -150)
+	falcon.rotation = Vector3(0.2, 0.4, 0.15)
+	add_child(falcon)
+	var ftw := create_tween().set_loops()
+	ftw.tween_interval(4.0)
+	ftw.tween_property(falcon, "position", Vector3(-170, 30, -130), 13.0).set_trans(Tween.TRANS_SINE)
+	ftw.parallel().tween_property(falcon, "rotation:y", 0.9, 13.0)
+	ftw.tween_callback(func() -> void:
+		falcon.position = Vector3(160, 24, -150)
+		falcon.rotation.y = 0.4)
+	ftw.tween_interval(11.0)
 	# A gas giant looming on the horizon
 	var planet := MeshInstance3D.new()
 	var pm := SphereMesh.new()
@@ -1250,6 +1264,21 @@ func _build_bespin() -> void:
 	probe.position = Vector3(0, ROOM_H * 0.5, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
+
+	# the Millennium Falcon banking through the Cloud City sky beyond the bay
+	var falcon: Node3D = load("res://assets/models/props/falcon_real.glb").instantiate()
+	falcon.scale = Vector3.ONE * 1.4
+	falcon.position = Vector3(70, 14, -60)
+	falcon.rotation = Vector3(0.15, 0.3, 0.1)
+	add_child(falcon)
+	var ftw := create_tween().set_loops()
+	ftw.tween_interval(3.0)
+	ftw.tween_property(falcon, "position", Vector3(-75, 20, -55), 11.0).set_trans(Tween.TRANS_SINE)
+	ftw.parallel().tween_property(falcon, "rotation:y", 0.8, 11.0)
+	ftw.tween_callback(func() -> void:
+		falcon.position = Vector3(70, 14, -60)
+		falcon.rotation.y = 0.3)
+	ftw.tween_interval(9.0)
 
 func _bespin_steam(at: Vector3, height: float, amount: int) -> void:
 	var p := GPUParticles3D.new()
