@@ -341,11 +341,11 @@ func _build_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.19, 0.21, 0.28)
-	env.ambient_light_energy = 1.7
+	env.ambient_light_color = Color(0.22, 0.24, 0.31)
+	env.ambient_light_energy = 2.0
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.22
+	env.tonemap_exposure = 1.32
 	env.glow_enabled = true
 	env.glow_intensity = 0.42
 	env.glow_bloom = 0.06
@@ -438,6 +438,18 @@ func _box(size: Vector3, pos: Vector3, mat: Material, parent: Node = self) -> Me
 	mi.position = pos
 	parent.add_child(mi)
 	return mi
+
+# Loads a downloaded prop, scales it to target_len and rests it on the floor
+# at pos (pos.y is the ground height the prop's base should sit on).
+func _floor_prop(path: String, target_len: float, pos: Vector3, yaw: float, darken := Color(1, 1, 1)) -> Node3D:
+	var m := ModelUtil.load_model(path, target_len, yaw)
+	m.position = pos
+	add_child(m)
+	if darken != Color(1, 1, 1):
+		ModelUtil.tint(m, darken)
+	var ab := ModelUtil.compute_aabb(m, Transform3D.IDENTITY)
+	m.position.y += pos.y - ab.position.y
+	return m
 
 func _build_floor() -> void:
 	# Mirror-black deck
@@ -758,6 +770,14 @@ func _build_hangar() -> void:
 			ap.seek(randf() * 2.0)
 		_collision_box(t.position + Vector3(0, 1.0, 0), Vector3(0.8, 2.0, 0.8))
 
+	# real downloaded machinery along the hangar side walls (CC0 props)
+	for spec in [["console", 2.0, Vector3(-HG_W + 1.6, 0, -6.0), 1.57],
+			["generator", 2.6, Vector3(-HG_W + 1.8, 0, 2.0), 1.57],
+			["console", 2.0, Vector3(HG_W - 1.6, 0, -10.0), -1.57],
+			["turbine", 2.0, Vector3(-HG_W + 1.7, 0, 11.0), 1.57]]:
+		_floor_prop("res://assets/models/scifi/%s.glb" % spec[0], spec[1],
+			spec[2], spec[3], Color(0.8, 0.78, 0.74))
+
 # ---------------------------------------------------- Star Wars set pieces
 
 func _build_holotable(at: Vector3) -> void:
@@ -1060,13 +1080,13 @@ func _build_bespin_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.9
-	env.ambient_light_color = Color(0.6, 0.45, 0.32)
+	env.ambient_light_energy = 1.25
+	env.ambient_light_color = Color(0.68, 0.55, 0.45)
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.1
+	env.tonemap_exposure = 1.18
 	env.glow_enabled = true
-	env.glow_intensity = 0.5
+	env.glow_intensity = 0.45
 	env.glow_bloom = 0.1
 	env.glow_hdr_threshold = 1.0
 	var q: int = GameSettings.quality
@@ -1078,11 +1098,11 @@ func _build_bespin_environment() -> void:
 	env.sdfgi_enabled = q >= 2
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.95, 0.62, 0.32)
-	env.fog_density = 0.006
-	env.fog_sky_affect = 0.3
+	env.fog_density = 0.0035
+	env.fog_sky_affect = 0.25
 	env.volumetric_fog_enabled = q >= 1
-	env.volumetric_fog_density = 0.007
-	env.volumetric_fog_albedo = Color(0.95, 0.7, 0.45)
+	env.volumetric_fog_density = 0.0035
+	env.volumetric_fog_albedo = Color(0.9, 0.72, 0.55)
 	env.volumetric_fog_emission = Color(0.05, 0.025, 0.01)
 	env.volumetric_fog_length = 60.0
 	var we := WorldEnvironment.new()
@@ -1091,8 +1111,8 @@ func _build_bespin_environment() -> void:
 
 	# warm key light raking through the chamber from the cloudscape window
 	var key := DirectionalLight3D.new()
-	key.light_energy = 1.4
-	key.light_color = Color(1.0, 0.78, 0.5)
+	key.light_energy = 1.9
+	key.light_color = Color(1.0, 0.82, 0.58)
 	key.rotation = Vector3(-0.5, 2.2, 0.0)
 	key.shadow_enabled = true
 	key.directional_shadow_max_distance = 70.0
@@ -1101,8 +1121,8 @@ func _build_bespin_environment() -> void:
 	add_child(key)
 	# cold blue fill from the opposite side for contrast
 	var fill := DirectionalLight3D.new()
-	fill.light_energy = 0.35
-	fill.light_color = Color(0.55, 0.65, 1.0)
+	fill.light_energy = 0.6
+	fill.light_color = Color(0.6, 0.72, 1.0)
 	fill.rotation = Vector3(-0.35, -0.7, 0.0)
 	add_child(fill)
 
@@ -1179,7 +1199,97 @@ func _build_bespin() -> void:
 	glow.light_volumetric_fog_energy = 1.2
 	add_child(glow)
 	# steam billowing up from the pit
-	_bespin_steam(Vector3(0, 0.1, 0), 4.0, 22)
+	_bespin_steam(Vector3(0, 0.1, 0), 2.6, 16)
+
+	# carbon-freezing apparatus: angled hydraulic pistons ringing the pit, the
+	# machinery that drives the clamps into the chamber
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.28, 0.29, 0.33)
+	steel.metallic = 0.7
+	steel.roughness = 0.35
+	var piston_mat := StandardMaterial3D.new()
+	piston_mat.albedo_color = Color(0.55, 0.56, 0.6)
+	piston_mat.metallic = 0.9
+	piston_mat.roughness = 0.18
+	for i in 6:
+		var ang := TAU * i / 6.0 + 0.25
+		var px := cos(ang) * 4.6
+		var pz := sin(ang) * 4.6
+		var house := MeshInstance3D.new()
+		var hm := CylinderMesh.new()
+		hm.top_radius = 0.42
+		hm.bottom_radius = 0.5
+		hm.height = 2.4
+		hm.material = steel
+		house.mesh = hm
+		house.position = Vector3(px, 1.2, pz)
+		add_child(house)
+		var rod := MeshInstance3D.new()
+		var rm := CylinderMesh.new()
+		rm.top_radius = 0.13
+		rm.bottom_radius = 0.13
+		rm.height = 2.6
+		rm.material = piston_mat
+		rod.mesh = rm
+		rod.position = Vector3(px * 0.62, 2.0, pz * 0.62)
+		rod.look_at_from_position(rod.position, Vector3(0, 2.6, 0), Vector3.UP)
+		rod.rotate_object_local(Vector3.RIGHT, PI / 2.0)
+		add_child(rod)
+		_box(Vector3(0.34, 0.1, 0.06), Vector3(px, 2.1, pz) + Vector3(cos(ang), 0, sin(ang)) * -0.5, amber)
+		_collision_box(Vector3(px, 1.2, pz), Vector3(1.0, 2.4, 1.0))
+
+	# two control consoles at the chamber edge with glowing readouts
+	for cs in [[Vector3(8.5, 0, 8.5), 2.4], [Vector3(-8.5, 0, -8.5), -0.7]]:
+		var con := Node3D.new()
+		con.position = cs[0]
+		con.rotation.y = cs[1]
+		add_child(con)
+		_box(Vector3(2.4, 1.1, 0.9), Vector3(0, 0.55, 0), steel, con)
+		var panel := _box(Vector3(2.2, 0.5, 0.1), Vector3(0, 1.0, -0.42), _mat_emissive(Color(0.4, 0.8, 1.0), 1.4), con)
+		panel.rotation.x = -0.5
+		_box(Vector3(0.5, 0.08, 0.5), Vector3(0.7, 1.16, 0.0), amber, con)
+		_collision_box(cs[0] + Vector3(0, 0.6, 0), Vector3(2.4, 1.2, 1.0))
+
+	# cyan rim accent on the floor for cold contrast against the amber
+	var rim_ring := MeshInstance3D.new()
+	var rrm := TorusMesh.new()
+	rrm.inner_radius = ROOM_R - 2.2
+	rrm.outer_radius = ROOM_R - 2.0
+	rrm.rings = 64
+	rrm.material = _mat_emissive(Color(0.45, 0.7, 1.0), 1.2)
+	rim_ring.mesh = rrm
+	rim_ring.position.y = 0.02
+	rim_ring.scale.y = 0.1
+	add_child(rim_ring)
+
+	# overhead cable conduits draping toward the pit
+	for i in 5:
+		var ang2 := TAU * i / 5.0 + 0.4
+		var cable := MeshInstance3D.new()
+		var ccm := CylinderMesh.new()
+		ccm.top_radius = 0.1
+		ccm.bottom_radius = 0.1
+		ccm.height = 5.5
+		ccm.material = dark
+		cable.mesh = ccm
+		cable.position = Vector3(cos(ang2) * 5.5, ROOM_H - 3.0, sin(ang2) * 5.5)
+		cable.rotation = Vector3(0.4, ang2, 0.2)
+		add_child(cable)
+
+	# real downloaded sci-fi machinery (CC0/CC-BY props, see CREDITS.md) set
+	# around the chamber: control consoles, generators, turbines, pipe banks
+	var R := ROOM_R - 1.6
+	for spec in [
+			["console", 2.0, 7.0, 1.4], ["console", 2.0, -2.6, 1.0],
+			["generator", 2.6, 4.4, 0.0], ["generator", 2.6, -1.1, 0.0],
+			["turbine", 1.8, 5.6, 0.7], ["turbine", 1.8, 0.4, 0.7],
+			["pipes_panel", 3.2, 3.5, 0.0], ["pipes_panel", 3.2, -3.6, 0.0]]:
+		var nm: String = spec[0]
+		var ang3: float = spec[2]
+		var px := sin(ang3) * R
+		var pz := -cos(ang3) * R
+		_floor_prop("res://assets/models/scifi/%s.glb" % nm, spec[1],
+			Vector3(px, 0.0, pz), ang3 + PI, Color(0.7, 0.65, 0.6))
 
 	# octagonal industrial wall ring; one segment is the cloudscape window
 	var seg_w := 2.0 * ROOM_R * tan(PI / 8.0)

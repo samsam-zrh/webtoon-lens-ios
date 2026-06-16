@@ -15,6 +15,8 @@
 | Luke Skywalker ROTJ (extrait du pack « Star Wars Virtual Museum » fourni par le propriétaire du repo, re-riggé via `tools/build_luke_rig.py`) | projet fan (rips communautaires) | usage fan non commercial | pack joueur |
 | Jedi animé (Kyle Katarn — son squelette et ses animations animent aussi Vador), Stormtrooper animé | projet fan « Jedi Outcast remake » (pxmaschine) | usage fan non commercial | [GitHub](https://github.com/pxmaschine/prj010-jedi-outcast-remake) |
 | X-wing (vaisseau garé du hangar, extrait du pack « Star Wars Virtual Museum » fourni par le propriétaire du repo) | rips communautaires | usage fan non commercial | pack joueur |
+| Props sci-fi de l'arène Bespin/hangar (console, tuyaux, panneau) | Quaternius / Kenney | CC0 | [poly.pizza](https://poly.pizza) |
+| Générateur, turbine (machinerie d'arène) | divers auteurs poly.pizza | CC-BY | [poly.pizza](https://poly.pizza) |
 | Sabre laser (menu) | Martin Calviello | CC-BY | [Poly Pizza](https://poly.pizza/m/bsFV-B_VG17) |
 
 ## Textures planétaires et ciel
