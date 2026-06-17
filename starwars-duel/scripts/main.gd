@@ -17,6 +17,7 @@ var _header: Label
 var _campaign_hero := ""    # "" = not in campaign
 var _campaign_stage := -1
 var _campaign_picking := false
+var _survival_picking := false
 var _arena_row: HBoxContainer
 var _fps_label: Label
 
@@ -46,6 +47,9 @@ func _ready() -> void:
 	elif "--groundi" in args:
 		_mode = "ground"
 		start_game("luke", "vader", {"theme": "imperial"})
+	elif "--survival" in args:
+		_mode = "ground"
+		start_survival("luke")
 	elif "--campaign2" in args:
 		_mode = "ground"
 		_campaign_hero = "luke"
@@ -160,6 +164,8 @@ func show_menu() -> void:
 	_phase = 0
 	_player_pick = ""
 	_enemy_pick = ""
+	_campaign_picking = false
+	_survival_picking = false
 	_menu_root = Node.new()
 	_menu_root.name = "Menu"
 	add_child(_menu_root)
@@ -330,12 +336,21 @@ func _build_menu_ui() -> void:
 	else:
 		bg.disabled = true
 		var bc := UiKit.button("CAMPAGNE", 16)
-		bc.custom_minimum_size = Vector2(220, 40)
+		bc.custom_minimum_size = Vector2(200, 40)
 		bc.pressed.connect(func() -> void:
 			_campaign_picking = true
+			_survival_picking = false
 			_phase = 0
 			_header.text = "CAMPAGNE : CHOISIS TON HÉROS")
 		modes.add_child(bc)
+		var bv := UiKit.button("SURVIE", 16)
+		bv.custom_minimum_size = Vector2(200, 40)
+		bv.pressed.connect(func() -> void:
+			_survival_picking = true
+			_campaign_picking = false
+			_phase = 0
+			_header.text = "SURVIE : CHOISIS TON HÉROS")
+		modes.add_child(bv)
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -438,6 +453,10 @@ func _make_card(id: String) -> Button:
 	return b
 
 func _on_card_pressed(id: String) -> void:
+	if _survival_picking:
+		_survival_picking = false
+		start_survival(id)
+		return
 	if _campaign_picking:
 		_campaign_picking = false
 		_campaign_hero = id
@@ -462,6 +481,10 @@ func _on_card_pressed(id: String) -> void:
 		_arena_row.visible = true
 
 # ----------------------------------------------------------------- Game
+
+func start_survival(hero: String) -> void:
+	_mode = "ground"
+	start_game(hero, "trooper", {"theme": "imperial", "survival": true})
 
 func start_game(player_id: String, enemy_id: String, opts: Dictionary = {}) -> void:
 	_clear()

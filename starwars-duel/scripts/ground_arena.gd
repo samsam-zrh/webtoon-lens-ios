@@ -118,6 +118,9 @@ var _shake_t := 0.0
 var music: MusicDirector
 var campaign_next := false   # set by main: a "next chapter" exists after victory
 var campaign_mode := false
+var survival_mode := false
+var wave := 0
+var _survival_id := "trooper"
 var _intro_done := false
 var _post_mat: ShaderMaterial
 var _cine_pivot: Node3D
@@ -129,18 +132,23 @@ var _trails: Dictionary = {}  # fighter -> {points: Array, mesh: MeshInstance3D}
 
 func start(player_id: String, enemy_id: String, enemy_mods: Dictionary = {}, opts: Dictionary = {}) -> void:
 	theme = opts.get("theme", "throne")
+	survival_mode = opts.get("survival", false)
+	_survival_id = enemy_id
 	_build_corridor()
 	player = _spawn(player_id, true, Vector3(0, 0.1, 12), 0.0)
 	player.died.connect(_on_died)
-	var count: int = opts.get("count", 1)
-	for i in count:
-		var x := (i - (count - 1) / 2.0) * 3.2
-		var e := _spawn(enemy_id, false, Vector3(x, 0.1, -12), PI, enemy_mods)
-		e.enemy = player
-		e.died.connect(_on_died)
-		enemies.append(e)
-	enemy = enemies[0]
-	player.enemy = enemy
+	if survival_mode:
+		_spawn_wave()
+	else:
+		var count: int = opts.get("count", 1)
+		for i in count:
+			var x := (i - (count - 1) / 2.0) * 3.2
+			var e := _spawn(enemy_id, false, Vector3(x, 0.1, -12), PI, enemy_mods)
+			e.enemy = player
+			e.died.connect(_on_died)
+			enemies.append(e)
+		enemy = enemies[0]
+		player.enemy = enemy
 
 	_cam_pivot = Node3D.new()
 	add_child(_cam_pivot)
@@ -1493,29 +1501,29 @@ func _build_control_environment() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.02, 0.025, 0.035)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.54, 0.6, 0.7)
-	env.ambient_light_energy = 2.1
+	env.ambient_light_color = Color(0.4, 0.46, 0.58)
+	env.ambient_light_energy = 1.35
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.34
+	env.tonemap_exposure = 1.22
 	env.glow_enabled = true
-	env.glow_intensity = 0.35
-	env.glow_bloom = 0.08
-	env.glow_hdr_threshold = 1.0
+	env.glow_intensity = 0.45
+	env.glow_bloom = 0.06
+	env.glow_hdr_threshold = 1.2
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
-	env.ssao_intensity = 1.4
+	env.ssao_intensity = 1.8
 	env.ssr_enabled = q >= 1
-	env.ssr_max_steps = 32
+	env.ssr_max_steps = 40
 	env.sdfgi_enabled = q >= 2
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.45, 0.55, 0.75)
-	env.fog_light_energy = 1.4
-	env.fog_density = 0.006
+	env.fog_light_color = Color(0.4, 0.5, 0.7)
+	env.fog_light_energy = 1.0
+	env.fog_density = 0.0022
 	env.fog_sky_affect = 0.0
 	env.volumetric_fog_enabled = q >= 1
-	env.volumetric_fog_density = 0.006
-	env.volumetric_fog_albedo = Color(0.55, 0.66, 0.88)
-	env.volumetric_fog_emission = Color(0.04, 0.05, 0.08)
+	env.volumetric_fog_density = 0.0022
+	env.volumetric_fog_albedo = Color(0.5, 0.58, 0.74)
+	env.volumetric_fog_emission = Color(0.02, 0.025, 0.04)
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -1575,7 +1583,7 @@ func _build_control() -> void:
 	corem.bottom_radius = 1.7
 	corem.height = 5.2
 	corem.radial_segments = 28
-	corem.material = _mat_emissive(Color(0.4, 0.78, 1.0), 2.6)
+	corem.material = _mat_emissive(Color(0.4, 0.78, 1.0), 1.5)
 	core.mesh = corem
 	core.position = Vector3(0, 2.6, 21.0)
 	add_child(core)
@@ -1593,9 +1601,9 @@ func _build_control() -> void:
 	var corelight := OmniLight3D.new()
 	corelight.position = Vector3(0, 2.6, 19.5)
 	corelight.light_color = Color(0.4, 0.75, 1.0)
-	corelight.light_energy = 4.5
-	corelight.omni_range = 16.0
-	corelight.light_volumetric_fog_energy = 1.2
+	corelight.light_energy = 2.6
+	corelight.omni_range = 13.0
+	corelight.light_volumetric_fog_energy = 0.6
 	add_child(corelight)
 	# console banks along the walls
 	for spec in [[Vector3(-13.0, 0, -6), PI / 2.0], [Vector3(13.0, 0, 6), -PI / 2.0],
@@ -1676,7 +1684,7 @@ func _starfield_panel(pos: Vector3, face_dir: Vector3) -> void:
 	sm.albedo_texture = load("res://assets/textures/milky_way.jpg")
 	sm.emission_enabled = true
 	sm.emission_texture = load("res://assets/textures/milky_way.jpg")
-	sm.emission_energy_multiplier = 0.9
+	sm.emission_energy_multiplier = 0.5
 	qm.material = sm
 	q.mesh = qm
 	q.position = pos
@@ -1897,7 +1905,7 @@ func _imp_starfield(side: float, z: float) -> void:
 	sm.albedo_texture = load("res://assets/textures/milky_way.jpg")
 	sm.emission_enabled = true
 	sm.emission_texture = load("res://assets/textures/milky_way.jpg")
-	sm.emission_energy_multiplier = 0.9
+	sm.emission_energy_multiplier = 0.5
 	qm.material = sm
 	q.mesh = qm
 	q.position = Vector3(side * 6.45, 1.9, z)
@@ -1985,6 +1993,8 @@ func _build_hud() -> void:
 	_hud.add_child(help)
 
 func _show_msg(t: String) -> void:
+	if _msg == null:
+		return
 	_msg.text = t
 	_msg.visible = true
 	_msg.reset_size()
@@ -2503,6 +2513,36 @@ func _update_trails() -> void:
 
 # ------------------------------------------------------------ match flow
 
+# Survival: each cleared wave brings a bigger, tougher one. Boss waves (every
+# 5th) send a Sith master. The player heals a little between waves.
+func _spawn_wave() -> void:
+	wave += 1
+	for old in enemies:
+		if is_instance_valid(old):
+			old.queue_free()
+	enemies.clear()
+	var boss := wave % 5 == 0
+	var n := 1 if boss else clampi(1 + (wave - 1) / 2, 1, 3)
+	var mul := 1.0 + (wave - 1) * 0.07
+	for i in n:
+		var x := (i - (n - 1) / 2.0) * 3.4
+		var id: String = "vader" if boss else ["trooper", "sith"][(wave + i) % 2]
+		var mods: Dictionary
+		if boss:
+			mods = {"name": "MAÎTRE SITH", "mul": {"hp": 1.6 * mul, "dmg": 1.3},
+				"set": {"ai_skill": 0.82, "ai_block_chance": 0.55}}
+		else:
+			mods = {"mul": {"hp": mul, "dmg": minf(1.0 + (wave - 1) * 0.04, 1.6)}}
+		var e := _spawn(id, false, Vector3(x, 0.1, -13), PI, mods)
+		e.enemy = player
+		e.died.connect(_on_died)
+		enemies.append(e)
+	enemy = enemies[0]
+	player.enemy = enemy
+	_show_msg(("VAGUE %d — MAÎTRE SITH !" % wave) if boss else ("VAGUE %d" % wave))
+	if music != null:
+		music.combat_event()
+
 func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
@@ -2513,6 +2553,13 @@ func _on_died(f: GroundFighter) -> void:
 	if f != player and foes_left:
 		_show_msg("ENCORE UN !")
 		hit_stop(0.12, 0.1)
+		return
+	if f != player and survival_mode and player.alive:
+		# wave cleared — patch up a little and send the next one
+		hit_stop(0.18, 0.12)
+		player.hp = minf(player.cfg["hp"], player.hp + player.cfg["hp"] * 0.22)
+		_show_msg("VAGUE %d SURVÉCUE !" % wave)
+		get_tree().create_timer(2.0).timeout.connect(_spawn_wave)
 		return
 	if not _intro_done:
 		_end_intro()
@@ -2554,11 +2601,16 @@ func _show_end(won: bool) -> void:
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 12)
 	layer.add_child(box)
-	var title := UiKit.label("VICTOIRE !" if won else "DÉFAITE…", 76, UiKit.SW_YELLOW if won else Color(0.95, 0.3, 0.22), true)
+	var title_txt := "VICTOIRE !" if won else "DÉFAITE…"
+	if survival_mode:
+		title_txt = "SURVIE TERMINÉE"
+	var title := UiKit.label(title_txt, 76, UiKit.SW_YELLOW if (won or survival_mode) else Color(0.95, 0.3, 0.22), true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	var sub_txt := "La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"]
-	if won and campaign_mode and not campaign_next:
+	if survival_mode:
+		sub_txt = "Tu as résisté jusqu'à la VAGUE %d." % wave
+	elif won and campaign_mode and not campaign_next:
 		sub_txt = "La campagne est terminée. La galaxie se souviendra de toi."
 	var sub := UiKit.label(sub_txt, 22, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
