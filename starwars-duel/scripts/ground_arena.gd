@@ -19,7 +19,7 @@ const ROSTER := {
 		"blade_mesh": "luke_blade",
 		"blade_always": true,
 		"hp": 120.0, "speed": 5.6, "dmg": 16.0, "reach": 2.4, "lunge": 5.5, "turn_speed": 13.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.45, "attack_move_factor": 0.24,
+		"attack_time": 0.7, "attack_anim_speed": 1.3, "attack_move_factor": 0.24,
 		"ai_skill": 0.55, "ai_block_chance": 0.4,
 		"quote": "Je suis un Jedi, comme mon père avant moi.",
 		"anims": {
@@ -53,8 +53,10 @@ const ROSTER := {
 		"model": "res://assets/models/characters/jedi.glb",
 		"model_yaw": PI, "model_scale": 1.0,
 		"saber_color": Color(0.3, 0.6, 1.0),
+		"blade_mesh": "lightblade_Cylinder_001",
+		"blade_always": true,
 		"hp": 130.0, "speed": 5.2, "dmg": 17.0, "reach": 2.4, "turn_speed": 12.0,
-		"attack_time": 0.7, "attack_anim_speed": 1.35, "attack_move_factor": 0.24,
+		"attack_time": 0.7, "attack_anim_speed": 1.22, "attack_move_factor": 0.24,
 		"ai_skill": 0.6, "ai_block_chance": 0.65,
 		"quote": "La Force sera avec toi. Toujours.",
 		"anims": {
@@ -94,6 +96,22 @@ const ROSTER := {
 			"run_l": "17_RunLeft", "run_r": "18_RunRight",
 			"attack": ["21_ShootStanding"],
 			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
+		},
+	},
+	"critter": {
+		"name": "Bestiole", "type": "beast", "melee": true,
+		"model": "res://assets/models/megakit/Alien_Cyclop.gltf",
+		"model_yaw": 0.0, "model_scale": 1.25, "model_offset_y": 1.35,
+		"saber_color": Color(0.6, 0.95, 0.6),
+		"hp": 26.0, "speed": 5.0, "dmg": 5.0, "reach": 2.0, "lunge": 4.0, "turn_speed": 15.0,
+		"attack_time": 0.6, "attack_anim_speed": 1.0, "attack_move_factor": 0.65,
+		"ai_skill": 0.35, "ai_block_chance": 0.0,
+		"quote": "Grrrrk !",
+		"anims": {
+			"idle": "Alien_Idle", "run_f": "Alien_Idle", "run_b": "Alien_Idle",
+			"run_l": "Alien_Idle", "run_r": "Alien_Idle",
+			"attack": ["Alien_Idle"], "block": "Alien_Idle",
+			"hit": "Alien_Idle", "death": "Alien_Idle",
 		},
 	},
 }
@@ -2530,18 +2548,34 @@ func _spawn_wave() -> void:
 			old.queue_free()
 	enemies.clear()
 	var boss := wave % 5 == 0
-	var n := 1 if boss else clampi(1 + (wave - 1) / 2, 1, 3)
-	var mul := 1.0 + (wave - 1) * 0.07
-	for i in n:
-		var x := (i - (n - 1) / 2.0) * 3.4
-		var id: String = "vader" if boss else ["trooper", "sith"][(wave + i) % 2]
-		var mods: Dictionary
-		if boss:
-			mods = {"name": "MAÎTRE SITH", "mul": {"hp": 1.6 * mul, "dmg": 1.3},
-				"set": {"ai_skill": 0.82, "ai_block_chance": 0.55}}
-		else:
-			mods = {"mul": {"hp": mul, "dmg": minf(1.0 + (wave - 1) * 0.04, 1.6)}}
-		var e := _spawn(id, false, Vector3(x, 0.1, -13), PI, mods)
+	var hpmul := 1.0 + (wave - 1) * 0.1
+	var dmgmul := minf(1.0 + (wave - 1) * 0.05, 1.8)
+	# build the wave roster: weak critters as fodder, troopers/Sith as the
+	# threat, and a Sith master (with an escort) on every 5th wave
+	var roster: Array = []
+	if boss:
+		roster.append(["vader", {"name": "MAÎTRE SITH", "mul": {"hp": 1.7 * hpmul, "dmg": 1.3},
+			"set": {"ai_skill": 0.84, "ai_block_chance": 0.6}}])
+		for k in mini(2 + wave / 5, 4):
+			roster.append(["critter", {"mul": {"hp": 1.0 + wave * 0.04}}])
+	else:
+		var n := clampi(2 + wave / 2, 2, 6)
+		for i in n:
+			var pick: String
+			if wave <= 2:
+				pick = "trooper" if i == 0 else "critter"
+			elif wave <= 4:
+				pick = ["sith", "critter", "trooper", "critter"][i % 4]
+			else:
+				pick = ["sith", "trooper", "critter", "sith", "critter"][i % 5]
+			if pick == "critter":
+				roster.append(["critter", {"mul": {"hp": 1.0 + wave * 0.04, "dmg": dmgmul}}])
+			else:
+				roster.append([pick, {"mul": {"hp": hpmul, "dmg": dmgmul}}])
+	var cnt := roster.size()
+	for i in cnt:
+		var x: float = clampf((i - (cnt - 1) / 2.0) * 2.6, -5.0, 5.0)
+		var e := _spawn(roster[i][0], false, Vector3(x, 0.1, -13.0 - (i % 2) * 2.0), PI, roster[i][1])
 		e.enemy = player
 		e.died.connect(_on_died)
 		enemies.append(e)

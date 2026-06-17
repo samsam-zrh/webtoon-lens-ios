@@ -590,7 +590,10 @@ func _start_attack(index: int) -> void:
 	if anim != null:
 		var names: Array = cfg["anims"]["attack"]
 		var n: String = names[mini(index, names.size() - 1)]
-		cfg["attack_time"] = _play_oneshot(n, 0.12, cfg.get("attack_anim_speed", 1.3))
+		# a longer cross-blend when chaining combos reads much smoother than a
+		# hard cut between swing clips
+		var bl := 0.22 if index > 0 else 0.16
+		cfg["attack_time"] = _play_oneshot(n, bl, cfg.get("attack_anim_speed", 1.3))
 	attack_timer = cfg["attack_time"]
 	_swing_played = false
 	if not cfg["melee"]:
