@@ -1649,93 +1649,163 @@ func _build_imperial_environment() -> void:
 
 func _build_imperial() -> void:
 	var hx := 4.0                                   # wall origin x; inner faces at ±6
-	var zs := [-16, -12, -8, -4, 0, 4, 8, 12, 16]   # 4 m floor/wall grid
+	var zs := [-20, -16, -12, -8, -4, 0, 4, 8, 12, 16, 20]
 	var floor_cols := [-4.0, 0.0, 4.0]
+	var windows := [-12, -4, 4, 12]                 # bays that open onto space
+	var ribs := [-20, -12, -4, 4, 12, 20]           # column + overhead-rib stations
 	# deck
 	for z in zs:
 		for cx in floor_cols:
 			_mk("Platform_Metal", Vector3(cx, 0, z), 0)
-	# long side walls + top trim, facing inward
+	# long side walls + top trim; window bays where they open onto space
 	for z in zs:
-		_mk("WallBand_Straight", Vector3(-hx, 0, z), 0)
-		_mk("WallBand_Straight", Vector3(hx, 0, z), PI)
-		_mk("TopSimple_Straight", Vector3(-hx, 0, z), 0)
-		_mk("TopSimple_Straight", Vector3(hx, 0, z), PI)
+		for side in [-1.0, 1.0]:
+			var yaw := 0.0 if side < 0 else PI
+			if z in windows:
+				_mk("WallWindow_Straight", Vector3(side * hx, 0, z), yaw)
+				_imp_starfield(side, float(z))
+			else:
+				_mk("WallBand_Straight", Vector3(side * hx, 0, z), yaw)
+			_mk("TopSimple_Straight", Vector3(side * hx, 0, z), yaw)
 	# end caps: far end (-z) with a blast-door, near end (+z) sealed
 	for cx in floor_cols:
 		if cx == 0.0:
-			_mk("Door_Frame_Square", Vector3(0, 0, -18), 0)
+			_mk("Door_Frame_Square", Vector3(0, 0, -22), 0)
 		else:
-			_mk("WallBand_Straight", Vector3(cx, 0, -18), -PI / 2.0)
-		_mk("WallBand_Straight", Vector3(cx, 0, 18), PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(cx, 0, -18), -PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(cx, 0, 18), PI / 2.0)
+			_mk("WallBand_Straight", Vector3(cx, 0, -22), -PI / 2.0)
+		_mk("WallBand_Straight", Vector3(cx, 0, 22), PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(cx, 0, -22), -PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(cx, 0, 22), PI / 2.0)
 
-	# dark metal ceiling so the corridor is enclosed
+	# pilaster columns + overhead ribs giving the hall rhythm and depth
+	var rib_mat := StandardMaterial3D.new()
+	rib_mat.albedo_color = Color(0.09, 0.095, 0.11)
+	rib_mat.metallic = 0.75
+	rib_mat.roughness = 0.38
+	for z in ribs:
+		_mk("Column_Simple", Vector3(-5.7, 0, z), 0)
+		_mk("Column_Simple", Vector3(5.7, 0, z), PI)
+		var rib := MeshInstance3D.new()
+		var rbm := BoxMesh.new()
+		rbm.size = Vector3(12.4, 0.7, 0.8)
+		rbm.material = rib_mat
+		rib.mesh = rbm
+		rib.position = Vector3(0, 4.55, z)
+		add_child(rib)
+		# a thin emissive strip under each rib for an accent line
+		var strip := _box(Vector3(11.0, 0.08, 0.12), Vector3(0, 4.18, z), _mat_emissive(Color(0.5, 0.7, 1.0), 1.3))
+		strip.name = "ribstrip"
+
+	# dark metal ceiling + conduits running the length
 	var ceil := MeshInstance3D.new()
 	var cm := BoxMesh.new()
-	cm.size = Vector3(13.5, 0.4, 40)
+	cm.size = Vector3(13.5, 0.4, 48)
 	var cmat := StandardMaterial3D.new()
-	cmat.albedo_color = Color(0.07, 0.075, 0.09)
+	cmat.albedo_color = Color(0.06, 0.065, 0.08)
 	cmat.metallic = 0.7
 	cmat.roughness = 0.4
 	cm.material = cmat
 	ceil.mesh = cm
 	ceil.position = Vector3(0, 5.0, 0)
 	add_child(ceil)
+	for cx2 in [-3.2, 0.0, 3.2]:
+		var pipe := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(0.34, 0.34, 46)
+		pm.material = rib_mat
+		pipe.mesh = pm
+		pipe.position = Vector3(cx2, 4.55, 0)
+		add_child(pipe)
 
-	# wall lights down both sides, each casting a real glow
-	for z in [-14, -7, 0, 7, 14]:
+	# floor light-lines down both edges → strong leading lines into the depth
+	for z in zs:
+		_mk("Prop_Light_Floor", Vector3(-5.4, 0, z), PI / 2.0)
+		_mk("Prop_Light_Floor", Vector3(5.4, 0, z), -PI / 2.0)
+
+	# wall lights between the bays, each casting a real glow
+	for z in [-16, -8, 0, 8, 16]:
 		for side in [-1.0, 1.0]:
 			_mk("Prop_Light_Wide", Vector3(side * 5.9, 3.1, z), 0 if side < 0 else PI)
 			var ol := OmniLight3D.new()
-			ol.position = Vector3(side * 5.3, 3.0, z)
+			ol.position = Vector3(side * 5.2, 3.0, z)
 			ol.light_color = Color(0.85, 0.9, 1.0)
-			ol.light_energy = 2.2
-			ol.omni_range = 9.0
-			ol.light_volumetric_fog_energy = 0.7
+			ol.light_energy = 2.0
+			ol.omni_range = 8.5
+			ol.light_volumetric_fog_energy = 0.6
 			add_child(ol)
 	# warm red glow washing the accent bands at floor level
-	for z in [-12, -4, 4, 12]:
+	for z in [-16, -8, 0, 8, 16]:
 		var rl := OmniLight3D.new()
-		rl.position = Vector3(0, 1.0, z)
+		rl.position = Vector3(0, 0.9, z)
 		rl.light_color = Color(1.0, 0.3, 0.2)
-		rl.light_energy = 1.1
-		rl.omni_range = 7.0
+		rl.light_energy = 0.9
+		rl.omni_range = 6.5
 		add_child(rl)
 
-	# props lining the corridor: computer banks, crates, barrels
-	_mk("Prop_Computer", Vector3(-5.6, 0, -9), PI / 2.0)
-	_mk("Prop_Computer", Vector3(-5.6, 0, 9), PI / 2.0)
-	_mk("Prop_Computer", Vector3(5.6, 0, -3), -PI / 2.0)
-	_mk("Prop_Crate3", Vector3(5.2, 0, 13), 0.3)
-	_mk("Prop_Crate3", Vector3(5.6, 0, 14), -0.4)
-	_mk("Prop_Barrel_Large", Vector3(-5.4, 0, 15), 0)
-	_mk("Prop_Barrel_Large", Vector3(-5.9, 0, 16.2), 0)
+	# greeble: computer banks, vents, access consoles, crates, barrels
+	_mk("Prop_Computer", Vector3(-5.7, 0, -9), PI / 2.0)
+	_mk("Prop_Computer", Vector3(-5.7, 0, 9), PI / 2.0)
+	_mk("Prop_Computer", Vector3(5.7, 0, -1), -PI / 2.0)
+	_mk("Prop_AccessPoint", Vector3(-5.9, 0, -1), 0)
+	_mk("Prop_AccessPoint", Vector3(5.9, 0, 7), PI)
+	_mk("Prop_AccessPoint", Vector3(5.9, 0, -13), PI)
+	_mk("Prop_Vent_Big", Vector3(-3.0, 4.78, -6), 0)
+	_mk("Prop_Vent_Big", Vector3(3.0, 4.78, 10), 0)
+	_mk("Prop_Fan_Small", Vector3(0, 4.78, -16), 0)
+	_mk("Prop_Fan_Small", Vector3(0, 4.78, 16), 0)
+	_mk("Prop_Crate3", Vector3(5.2, 0, 17), 0.3)
+	_mk("Prop_Crate4", Vector3(5.7, 0, 18.4), -0.4)
+	_mk("Prop_Crate3", Vector3(-5.5, 0, -18), -0.2)
+	_mk("Prop_Barrel_Large", Vector3(-5.4, 0, 19), 0)
+	_mk("Prop_Barrel_Large", Vector3(-5.9, 0, 20.2), 0)
 	# a soft glow from the blast-door at the far end
 	var dg := OmniLight3D.new()
-	dg.position = Vector3(0, 2.4, -17)
+	dg.position = Vector3(0, 2.4, -21)
 	dg.light_color = Color(0.6, 0.75, 1.0)
 	dg.light_energy = 2.6
 	dg.omni_range = 10.0
 	add_child(dg)
 
 	# collisions: floor, the two side walls, two end caps
-	_collision_box(Vector3(0, -0.5, 0), Vector3(16, 1.0, 44))
+	_collision_box(Vector3(0, -0.5, 0), Vector3(16, 1.0, 52))
 	var pcol := GPUParticlesCollisionBox3D.new()
-	pcol.size = Vector3(13, 0.5, 40)
+	pcol.size = Vector3(13, 0.5, 48)
 	pcol.position.y = -0.25
 	add_child(pcol)
-	_collision_box(Vector3(-6.3, 2.5, 0), Vector3(0.6, 6.0, 44))
-	_collision_box(Vector3(6.3, 2.5, 0), Vector3(0.6, 6.0, 44))
-	_collision_box(Vector3(0, 2.5, -18.4), Vector3(14, 6.0, 0.6))
-	_collision_box(Vector3(0, 2.5, 18.4), Vector3(14, 6.0, 0.6))
+	_collision_box(Vector3(-6.3, 2.5, 0), Vector3(0.6, 6.0, 52))
+	_collision_box(Vector3(6.3, 2.5, 0), Vector3(0.6, 6.0, 52))
+	_collision_box(Vector3(0, 2.5, -22.4), Vector3(14, 6.0, 0.6))
+	_collision_box(Vector3(0, 2.5, 22.4), Vector3(14, 6.0, 0.6))
 
 	var probe := ReflectionProbe.new()
-	probe.size = Vector3(13, 6, 40)
+	probe.size = Vector3(13, 6, 48)
 	probe.position = Vector3(0, 2.5, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
+
+# A viewport onto space behind a window bay: an emissive starfield panel just
+# outside the wall, with a faint blue light spilling into the corridor.
+func _imp_starfield(side: float, z: float) -> void:
+	var q := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(3.6, 2.6)
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.albedo_texture = load("res://assets/textures/milky_way.jpg")
+	sm.emission_enabled = true
+	sm.emission_texture = load("res://assets/textures/milky_way.jpg")
+	sm.emission_energy_multiplier = 0.9
+	qm.material = sm
+	q.mesh = qm
+	q.position = Vector3(side * 6.45, 1.9, z)
+	q.rotation.y = (PI / 2.0) if side < 0 else (-PI / 2.0)
+	add_child(q)
+	var g := OmniLight3D.new()
+	g.position = Vector3(side * 5.6, 2.0, z)
+	g.light_color = Color(0.55, 0.7, 1.0)
+	g.light_energy = 1.3
+	g.omni_range = 6.0
+	add_child(g)
 
 func _build_boundary() -> void:
 	# Invisible ring keeping the duel off the walls and the dais
