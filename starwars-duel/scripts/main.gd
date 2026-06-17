@@ -43,6 +43,9 @@ func _ready() -> void:
 	elif "--groundc" in args:
 		_mode = "ground"
 		start_game("luke", "vader", {"theme": "control"})
+	elif "--groundi" in args:
+		_mode = "ground"
+		start_game("luke", "vader", {"theme": "imperial"})
 	elif "--campaign2" in args:
 		_mode = "ground"
 		_campaign_hero = "luke"
@@ -355,9 +358,9 @@ func _build_menu_ui() -> void:
 	_arena_row.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_arena_row.visible = false
 	root.add_child(_arena_row)
-	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CITÉ DES NUAGES", "bespin"], ["CENTRE DE CONTRÔLE", "control"]]:
-		var ab := UiKit.button(spec[0], 20)
-		ab.custom_minimum_size = Vector2(270, 120)
+	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CITÉ DES NUAGES", "bespin"], ["CENTRE DE CONTRÔLE", "control"], ["COULOIR IMPÉRIAL", "imperial"]]:
+		var ab := UiKit.button(spec[0], 19)
+		ab.custom_minimum_size = Vector2(240, 115)
 		ab.pressed.connect(func() -> void:
 			start_game(_player_pick, _enemy_pick, {"theme": spec[1]}))
 		_arena_row.add_child(ab)

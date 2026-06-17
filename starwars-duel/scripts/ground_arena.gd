@@ -304,6 +304,20 @@ func _build_corridor() -> void:
 		add_child(amb_b)
 		amb_b.play()
 		return
+	if theme == "imperial":
+		_build_imperial_environment()
+		_build_imperial()
+		_build_dust()
+		var amb_i := AudioStreamPlayer.new()
+		var hum_i: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
+		hum_i.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		hum_i.loop_end = hum_i.data.size() / 2
+		amb_i.stream = hum_i
+		amb_i.volume_db = -15.0
+		amb_i.bus = "SFX"
+		add_child(amb_i)
+		amb_i.play()
+		return
 	if theme == "control":
 		_build_control_environment()
 		_build_control()
@@ -1580,6 +1594,146 @@ func _build_control() -> void:
 	var probe := ReflectionProbe.new()
 	probe.size = Vector3(48, 18, 48)
 	probe.position = Vector3(0, 6, 0)
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(probe)
+
+# ------------------------------------------- Imperial corridor (Death Star)
+# A textured, PBR sci-fi corridor assembled from the Quaternius Modular SciFi
+# MegaKit (CC0, see CREDITS.md): dark metal plating, glowing red accent bands,
+# blast-door archway, wall lights and props. The classic corridor duel setting.
+
+func _mk(nm: String, pos: Vector3, yaw: float, parent: Node = self) -> Node3D:
+	var scn := load("res://assets/models/megakit/%s.gltf" % nm)
+	if scn == null:
+		return null
+	var n: Node3D = scn.instantiate()
+	n.position = pos
+	n.rotation.y = yaw
+	parent.add_child(n)
+	return n
+
+func _build_imperial_environment() -> void:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.015, 0.016, 0.02)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.42, 0.46, 0.56)
+	env.ambient_light_energy = 1.35
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.28
+	env.glow_enabled = true
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.12
+	env.glow_hdr_threshold = 0.9
+	var q: int = GameSettings.quality
+	env.ssao_enabled = q >= 1
+	env.ssao_intensity = 2.0
+	env.ssr_enabled = q >= 1
+	env.ssr_max_steps = 48
+	env.ssr_fade_out = 2.0
+	env.sdfgi_enabled = q >= 2
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.4, 0.45, 0.6)
+	env.fog_density = 0.004
+	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_density = 0.004
+	env.volumetric_fog_albedo = Color(0.5, 0.55, 0.7)
+	var we := WorldEnvironment.new()
+	we.environment = env
+	add_child(we)
+	var key := DirectionalLight3D.new()
+	key.light_energy = 0.7
+	key.light_color = Color(0.7, 0.78, 0.95)
+	key.rotation = Vector3(-1.2, -0.4, 0)
+	add_child(key)
+
+func _build_imperial() -> void:
+	var hx := 4.0                                   # wall origin x; inner faces at ±6
+	var zs := [-16, -12, -8, -4, 0, 4, 8, 12, 16]   # 4 m floor/wall grid
+	var floor_cols := [-4.0, 0.0, 4.0]
+	# deck
+	for z in zs:
+		for cx in floor_cols:
+			_mk("Platform_Metal", Vector3(cx, 0, z), 0)
+	# long side walls + top trim, facing inward
+	for z in zs:
+		_mk("WallBand_Straight", Vector3(-hx, 0, z), 0)
+		_mk("WallBand_Straight", Vector3(hx, 0, z), PI)
+		_mk("TopSimple_Straight", Vector3(-hx, 0, z), 0)
+		_mk("TopSimple_Straight", Vector3(hx, 0, z), PI)
+	# end caps: far end (-z) with a blast-door, near end (+z) sealed
+	for cx in floor_cols:
+		if cx == 0.0:
+			_mk("Door_Frame_Square", Vector3(0, 0, -18), 0)
+		else:
+			_mk("WallBand_Straight", Vector3(cx, 0, -18), -PI / 2.0)
+		_mk("WallBand_Straight", Vector3(cx, 0, 18), PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(cx, 0, -18), -PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(cx, 0, 18), PI / 2.0)
+
+	# dark metal ceiling so the corridor is enclosed
+	var ceil := MeshInstance3D.new()
+	var cm := BoxMesh.new()
+	cm.size = Vector3(13.5, 0.4, 40)
+	var cmat := StandardMaterial3D.new()
+	cmat.albedo_color = Color(0.07, 0.075, 0.09)
+	cmat.metallic = 0.7
+	cmat.roughness = 0.4
+	cm.material = cmat
+	ceil.mesh = cm
+	ceil.position = Vector3(0, 5.0, 0)
+	add_child(ceil)
+
+	# wall lights down both sides, each casting a real glow
+	for z in [-14, -7, 0, 7, 14]:
+		for side in [-1.0, 1.0]:
+			_mk("Prop_Light_Wide", Vector3(side * 5.9, 3.1, z), 0 if side < 0 else PI)
+			var ol := OmniLight3D.new()
+			ol.position = Vector3(side * 5.3, 3.0, z)
+			ol.light_color = Color(0.85, 0.9, 1.0)
+			ol.light_energy = 2.2
+			ol.omni_range = 9.0
+			ol.light_volumetric_fog_energy = 0.7
+			add_child(ol)
+	# warm red glow washing the accent bands at floor level
+	for z in [-12, -4, 4, 12]:
+		var rl := OmniLight3D.new()
+		rl.position = Vector3(0, 1.0, z)
+		rl.light_color = Color(1.0, 0.3, 0.2)
+		rl.light_energy = 1.1
+		rl.omni_range = 7.0
+		add_child(rl)
+
+	# props lining the corridor: computer banks, crates, barrels
+	_mk("Prop_Computer", Vector3(-5.6, 0, -9), PI / 2.0)
+	_mk("Prop_Computer", Vector3(-5.6, 0, 9), PI / 2.0)
+	_mk("Prop_Computer", Vector3(5.6, 0, -3), -PI / 2.0)
+	_mk("Prop_Crate3", Vector3(5.2, 0, 13), 0.3)
+	_mk("Prop_Crate3", Vector3(5.6, 0, 14), -0.4)
+	_mk("Prop_Barrel_Large", Vector3(-5.4, 0, 15), 0)
+	_mk("Prop_Barrel_Large", Vector3(-5.9, 0, 16.2), 0)
+	# a soft glow from the blast-door at the far end
+	var dg := OmniLight3D.new()
+	dg.position = Vector3(0, 2.4, -17)
+	dg.light_color = Color(0.6, 0.75, 1.0)
+	dg.light_energy = 2.6
+	dg.omni_range = 10.0
+	add_child(dg)
+
+	# collisions: floor, the two side walls, two end caps
+	_collision_box(Vector3(0, -0.5, 0), Vector3(16, 1.0, 44))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(13, 0.5, 40)
+	pcol.position.y = -0.25
+	add_child(pcol)
+	_collision_box(Vector3(-6.3, 2.5, 0), Vector3(0.6, 6.0, 44))
+	_collision_box(Vector3(6.3, 2.5, 0), Vector3(0.6, 6.0, 44))
+	_collision_box(Vector3(0, 2.5, -18.4), Vector3(14, 6.0, 0.6))
+	_collision_box(Vector3(0, 2.5, 18.4), Vector3(14, 6.0, 0.6))
+
+	var probe := ReflectionProbe.new()
+	probe.size = Vector3(13, 6, 40)
+	probe.position = Vector3(0, 2.5, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
 
