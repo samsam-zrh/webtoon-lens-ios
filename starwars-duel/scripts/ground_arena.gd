@@ -451,6 +451,19 @@ func _floor_prop(path: String, target_len: float, pos: Vector3, yaw: float, dark
 	m.position.y += pos.y - ab.position.y
 	return m
 
+# Tiles one Kenney Space Station Kit module (1×1 unit, origin centre-bottom,
+# detailed face on +z) into a wall grid cell. Scaled to fill the cell and
+# rotated to face the room interior (-z in the holder's local frame).
+func _station_panel(holder: Node3D, nm: String, x: float, y: float, w: float, h: float, depth := 1.7) -> void:
+	var scn := load("res://assets/models/station/%s.glb" % nm)
+	if scn == null:
+		return
+	var inst: Node3D = scn.instantiate()
+	inst.position = Vector3(x, y, 0)
+	inst.rotation.y = PI
+	inst.scale = Vector3(w * 1.02, h, depth)
+	holder.add_child(inst)
+
 func _build_floor() -> void:
 	# Mirror-black deck
 	var mi := MeshInstance3D.new()
@@ -1308,32 +1321,40 @@ func _build_bespin() -> void:
 			_box(Vector3(0.5, ROOM_H, 0.5), Vector3(seg_w / 2.0 - 0.4, ROOM_H / 2.0, 0), dark, holder)
 			_box(Vector3(seg_w, 0.1, 0.4), Vector3(0, 1.42, -0.05), amber, holder)
 		else:
-			_box(Vector3(seg_w, ROOM_H, 0.6), Vector3(0, ROOM_H / 2.0, 0), grime, holder)
-			# vertical pipes and machinery on the wall
-			for k in 3:
-				var px := -seg_w / 2.0 + 1.4 + k * (seg_w - 2.8) / 2.0
-				var pipe := MeshInstance3D.new()
-				var pcm := CylinderMesh.new()
-				pcm.top_radius = 0.26
-				pcm.bottom_radius = 0.26
-				pcm.height = ROOM_H - 1.0
-				pcm.material = dark
-				pipe.mesh = pcm
-				pipe.position = Vector3(px, ROOM_H / 2.0, -0.45)
-				holder.add_child(pipe)
-			_box(Vector3(seg_w - 1.0, 0.16, 0.2), Vector3(0, 1.2, -0.55), amber if i % 2 == 0 else cold, holder)
-			_box(Vector3(seg_w - 1.0, 0.16, 0.2), Vector3(0, ROOM_H - 1.6, -0.55), cold if i % 2 == 0 else amber, holder)
-			# a couple of pressure tanks at the base
+			# real paneled sci-fi wall, tiled from Kenney Space Station Kit
+			# modules (CC0): structural pillar ribs at the segment edges, plain
+			# panels filling the field, portholes high up and the odd doorway —
+			# so the chamber reads as a built location, not a flat box.
+			var cols := 4
+			var rows := 3
+			var cw := seg_w / float(cols)
+			var ch := ROOM_H / float(rows)
+			for col in cols:
+				for row in rows:
+					var nm := "wall"
+					if col == 0 or col == cols - 1:
+						nm = "wall_pillar"
+					elif row == rows - 1 and (col == 1 or col == 2):
+						nm = "wall_window"
+					elif row == 0 and col == 1 and i % 3 == 1:
+						nm = "wall_door"
+					var cx := -seg_w / 2.0 + (col + 0.5) * cw
+					_station_panel(holder, nm, cx, row * ch, cw, ch)
+			# glowing accent strips banding the paneling
+			_box(Vector3(seg_w - 1.6, 0.16, 0.2), Vector3(0, ch - 0.15, -0.62), amber if i % 2 == 0 else cold, holder)
+			_box(Vector3(seg_w - 1.6, 0.16, 0.2), Vector3(0, ch * 2.0 - 0.15, -0.62), cold if i % 2 == 0 else amber, holder)
+			# a real station crate + venting pipe at the base on odd segments
 			if i % 2 == 1:
-				var tank := MeshInstance3D.new()
-				var tkm := CapsuleMesh.new()
-				tkm.radius = 0.55
-				tkm.height = 2.2
-				tkm.material = dark
-				tank.mesh = tkm
-				tank.position = Vector3(seg_w / 2.0 - 1.2, 1.1, -1.2)
-				holder.add_child(tank)
-				_bespin_steam(holder.position + holder.transform.basis * Vector3(seg_w / 2.0 - 1.2, 2.2, -1.2), 1.6, 14)
+				var crate: Node3D = load("res://assets/models/station/container_tall.glb").instantiate()
+				crate.scale = Vector3.ONE * 2.3
+				crate.position = Vector3(seg_w / 2.0 - 1.4, 0, -1.0)
+				crate.rotation.y = 0.4
+				holder.add_child(crate)
+				var pipe2: Node3D = load("res://assets/models/station/pipe.glb").instantiate()
+				pipe2.scale = Vector3(2.2, 3.6, 2.2)
+				pipe2.position = Vector3(-seg_w / 2.0 + 1.3, 0, -0.9)
+				holder.add_child(pipe2)
+				_bespin_steam(holder.position + holder.transform.basis * Vector3(seg_w / 2.0 - 1.4, 2.1, -1.0), 1.6, 14)
 		# wall collision
 		var sb := StaticBody3D.new()
 		sb.collision_layer = 1
