@@ -322,7 +322,6 @@ func _build_corridor() -> void:
 		_build_control_environment()
 		_build_control()
 		_build_dust()
-		_build_boundary()
 		var amb_c := AudioStreamPlayer.new()
 		var hum_c: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
 		hum_c.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -1517,85 +1516,165 @@ func _build_control_environment() -> void:
 	add_child(key)
 
 func _build_control() -> void:
-	var s := 1.5
-	var model: Node3D = load("res://assets/models/swenv/control_room.glb").instantiate()
-	model.scale = Vector3.ONE * s
-	model.position = Vector3.ZERO
-	add_child(model)
-	var ab := ModelUtil.compute_aabb(model, Transform3D.IDENTITY)
-	var center := ab.position + ab.size * 0.5
-	# centre the open deck on the origin, rest the floor at y=0
-	model.position = Vector3(-center.x, -ab.position.y, -center.z)
+	# A PBR command centre from the same kit as the corridor: a wide bridge with
+	# a viewport onto space, a glowing reactor core and console banks.
+	var xcols := [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0]            # room x ±14
+	var zcols := [-16.0, -12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0, 16.0]  # room z ±18
+	var win := [-8.0, -4.0, 0.0, 4.0, 8.0]                          # viewport span
+	var rib_mat := StandardMaterial3D.new()
+	rib_mat.albedo_color = Color(0.09, 0.095, 0.11)
+	rib_mat.metallic = 0.75
+	rib_mat.roughness = 0.38
+	# deck
+	for x in xcols:
+		for z in zcols:
+			_mk("Platform_Metal", Vector3(x, 0, z), 0)
+	# side walls (x = ±14) with the entry door on the left
+	for z in zcols:
+		if z == 0.0:
+			_mk("Door_Frame_Square", Vector3(-14, 0, 0), -PI / 2.0)
+		else:
+			_mk("WallBand_Straight", Vector3(-12, 0, z), 0)
+		_mk("WallBand_Straight", Vector3(12, 0, z), PI)
+		_mk("TopSimple_Straight", Vector3(-12, 0, z), 0)
+		_mk("TopSimple_Straight", Vector3(12, 0, z), PI)
+	# end walls: -z opens onto space, +z is a viewport onto the reactor chamber
+	for x in xcols:
+		if x in win:
+			_mk("WallWindow_Straight", Vector3(x, 0, -18), -PI / 2.0)
+			_starfield_panel(Vector3(x, 1.9, -20.4), Vector3(0, 0, 1))
+			_mk("WallWindow_Straight", Vector3(x, 0, 18), PI / 2.0)
+		else:
+			_mk("WallBand_Straight", Vector3(x, 0, -18), -PI / 2.0)
+			_mk("WallBand_Straight", Vector3(x, 0, 18), PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(x, 0, -18), -PI / 2.0)
+		_mk("TopSimple_Straight", Vector3(x, 0, 18), PI / 2.0)
 
-	# clean flat collision deck + particle collider for dust
-	_collision_box(Vector3(0, -0.5, 0), Vector3(80, 1.0, 80))
-	var pcol := GPUParticlesCollisionBox3D.new()
-	pcol.size = Vector3(60, 0.5, 60)
-	pcol.position.y = -0.25
-	add_child(pcol)
+	# corner + mid-wall pilaster columns
+	for c in [Vector3(-12, 0, -16), Vector3(12, 0, -16), Vector3(-12, 0, 16), Vector3(12, 0, 16),
+			Vector3(-12, 0, 0), Vector3(12, 0, 0)]:
+		_mk("Column_Round", c, 0)
 
-	# faint reflective deck disc over the model floor so the arena reads clean
-	var deck := MeshInstance3D.new()
-	var dm := CylinderMesh.new()
-	dm.top_radius = ARENA_R + 0.5
-	dm.bottom_radius = ARENA_R + 0.5
-	dm.height = 0.06
-	dm.radial_segments = 48
-	var dmat := StandardMaterial3D.new()
-	dmat.albedo_color = Color(0.10, 0.12, 0.15)
-	dmat.metallic = 0.7
-	dmat.roughness = 0.3
-	dm.material = dmat
-	deck.mesh = dm
-	deck.position.y = 0.01
-	add_child(deck)
-	# glowing rim so the duel circle is legible
-	var rim := MeshInstance3D.new()
-	var rt := TorusMesh.new()
-	rt.inner_radius = ARENA_R - 0.7
-	rt.outer_radius = ARENA_R - 0.45
-	rt.rings = 64
-	rt.material = _mat_emissive(Color(0.4, 0.7, 1.0), 1.6)
-	rim.mesh = rt
-	rim.position.y = 0.05
-	rim.scale.y = 0.1
-	add_child(rim)
+	# glowing reactor core in a chamber behind the +z viewport (out of the deck)
+	var core := MeshInstance3D.new()
+	var corem := CylinderMesh.new()
+	corem.top_radius = 1.7
+	corem.bottom_radius = 1.7
+	corem.height = 5.2
+	corem.radial_segments = 28
+	corem.material = _mat_emissive(Color(0.4, 0.78, 1.0), 2.6)
+	core.mesh = corem
+	core.position = Vector3(0, 2.6, 21.0)
+	add_child(core)
+	for ry in [1.2, 2.6, 4.0]:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 2.0
+		tm.outer_radius = 2.3
+		tm.rings = 24
+		tm.material = rib_mat
+		ring.mesh = tm
+		ring.position = Vector3(0, ry, 21.0)
+		ring.rotation.x = PI / 2.0
+		add_child(ring)
+	var corelight := OmniLight3D.new()
+	corelight.position = Vector3(0, 2.6, 19.5)
+	corelight.light_color = Color(0.4, 0.75, 1.0)
+	corelight.light_energy = 4.5
+	corelight.omni_range = 16.0
+	corelight.light_volumetric_fog_energy = 1.2
+	add_child(corelight)
+	# console banks along the walls
+	for spec in [[Vector3(-13.0, 0, -6), PI / 2.0], [Vector3(13.0, 0, 6), -PI / 2.0],
+			[Vector3(-13.0, 0, 10), PI / 2.0], [Vector3(13.0, 0, -10), -PI / 2.0],
+			[Vector3(-13.0, 0, -14), PI / 2.0], [Vector3(13.0, 0, 14), -PI / 2.0]]:
+		_mk("Prop_Computer", spec[0], spec[1])
+	_mk("Prop_AccessPoint", Vector3(13.4, 0, 0), -PI / 2.0)
+	_mk("Prop_AccessPoint", Vector3(-13.4, 0, 4), PI / 2.0)
 
-	# overhead light banks + cool console fills around the deck
-	for spec in [
-			[Vector3(0, 9, 0), Color(0.85, 0.92, 1.0), 4.0, 30.0],
-			[Vector3(10, 5, 8), Color(0.5, 0.7, 1.0), 2.4, 16.0],
-			[Vector3(-10, 5, -8), Color(0.6, 0.8, 1.0), 2.4, 16.0],
-			[Vector3(-11, 4, 9), Color(0.9, 0.6, 0.3), 1.8, 14.0],
-			[Vector3(11, 4, -9), Color(0.4, 0.9, 0.7), 1.8, 14.0],
-			[Vector3(12, 6, 11), Color(0.8, 0.86, 1.0), 2.2, 20.0],
-			[Vector3(-12, 6, -11), Color(0.8, 0.86, 1.0), 2.2, 20.0],
-			[Vector3(0, 5, -13), Color(0.55, 0.72, 1.0), 3.0, 24.0],
-			[Vector3(0, 5, 13), Color(0.7, 0.8, 1.0), 2.6, 24.0]]:
+	# overhead ribs + ceiling + conduits
+	for z in [-16, -8, 0, 8, 16]:
+		var rib := MeshInstance3D.new()
+		var rbm := BoxMesh.new()
+		rbm.size = Vector3(28.4, 0.7, 0.8)
+		rbm.material = rib_mat
+		rib.mesh = rbm
+		rib.position = Vector3(0, 4.55, z)
+		add_child(rib)
+		_box(Vector3(27.0, 0.08, 0.12), Vector3(0, 4.18, z), _mat_emissive(Color(0.5, 0.7, 1.0), 1.2))
+	var ceil := MeshInstance3D.new()
+	var cm := BoxMesh.new()
+	cm.size = Vector3(29, 0.4, 38)
+	var cmat := StandardMaterial3D.new()
+	cmat.albedo_color = Color(0.06, 0.065, 0.08)
+	cmat.metallic = 0.7
+	cmat.roughness = 0.4
+	cm.material = cmat
+	ceil.mesh = cm
+	ceil.position = Vector3(0, 5.0, 0)
+	add_child(ceil)
+
+	# floor light-lines tracing the deck edge
+	for z in zcols:
+		_mk("Prop_Light_Floor", Vector3(-13.4, 0, z), PI / 2.0)
+		_mk("Prop_Light_Floor", Vector3(13.4, 0, z), -PI / 2.0)
+
+	# wall light glows
+	for p in [Vector3(-13.6, 3.0, -10), Vector3(-13.6, 3.0, 8), Vector3(13.6, 3.0, -8),
+			Vector3(13.6, 3.0, 10), Vector3(-13.6, 3.0, 0), Vector3(13.6, 3.0, 0)]:
 		var ol := OmniLight3D.new()
-		ol.position = spec[0]
-		ol.light_color = spec[1]
-		ol.light_energy = spec[2]
-		ol.omni_range = spec[3]
-		ol.light_volumetric_fog_energy = 0.8
+		ol.position = p
+		ol.light_color = Color(0.85, 0.9, 1.0)
+		ol.light_energy = 1.8
+		ol.omni_range = 9.0
 		add_child(ol)
 
-	# dark ceiling cap so looking up reads as a roof, not the void
-	var cap := MeshInstance3D.new()
-	var cbm := BoxMesh.new()
-	cbm.size = Vector3(60, 0.6, 60)
-	var capm := StandardMaterial3D.new()
-	capm.albedo_color = Color(0.04, 0.045, 0.06)
-	cbm.material = capm
-	cap.mesh = cbm
-	cap.position.y = 13.5
-	add_child(cap)
+	# interactive physics crates around the deck
+	_phys_prop("Prop_Crate3", Vector3(-7, 0, -6), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
+	_phys_prop("Prop_Crate4", Vector3(7, 0, -5), Vector3(0.56, 0.56, 0.56), 4.0, true, -0.2)
+	_phys_prop("Prop_Barrel_Large", Vector3(8, 0, 7), Vector3(0.25, 0.55, 0.27), 2.2, false)
+	_phys_prop("Prop_Crate3", Vector3(-8, 0, 7), Vector3(0.5, 0.5, 0.5), 3.5, true, -0.4)
+	_phys_prop("Prop_Barrel_Large", Vector3(-1, 0, 2), Vector3(0.25, 0.55, 0.27), 2.0, false)
+
+	# collisions: floor + four perimeter walls
+	_collision_box(Vector3(0, -0.5, 0), Vector3(34, 1.0, 42))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(28, 0.5, 36)
+	pcol.position.y = -0.25
+	add_child(pcol)
+	_collision_box(Vector3(-14.3, 2.5, 0), Vector3(0.6, 6.0, 38))
+	_collision_box(Vector3(14.3, 2.5, 0), Vector3(0.6, 6.0, 38))
+	_collision_box(Vector3(0, 2.5, -18.3), Vector3(30, 6.0, 0.6))
+	_collision_box(Vector3(0, 2.5, 18.3), Vector3(30, 6.0, 0.6))
 
 	var probe := ReflectionProbe.new()
-	probe.size = Vector3(48, 18, 48)
-	probe.position = Vector3(0, 6, 0)
+	probe.size = Vector3(30, 7, 38)
+	probe.position = Vector3(0, 3, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
+
+# An emissive starfield panel facing `face_dir`, used as a viewport onto space.
+func _starfield_panel(pos: Vector3, face_dir: Vector3) -> void:
+	var q := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(3.6, 2.6)
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.albedo_texture = load("res://assets/textures/milky_way.jpg")
+	sm.emission_enabled = true
+	sm.emission_texture = load("res://assets/textures/milky_way.jpg")
+	sm.emission_energy_multiplier = 0.9
+	qm.material = sm
+	q.mesh = qm
+	q.position = pos
+	q.look_at(pos - face_dir, Vector3.UP)
+	add_child(q)
+	var g := OmniLight3D.new()
+	g.position = pos + face_dir * 1.0
+	g.light_color = Color(0.55, 0.7, 1.0)
+	g.light_energy = 1.1
+	g.omni_range = 6.0
+	add_child(g)
 
 # ------------------------------------------- Imperial corridor (Death Star)
 # A textured, PBR sci-fi corridor assembled from the Quaternius Modular SciFi

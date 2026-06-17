@@ -17,8 +17,7 @@
 | X-wing (vaisseau garé du hangar, extrait du pack « Star Wars Virtual Museum » fourni par le propriétaire du repo) | rips communautaires | usage fan non commercial | pack joueur |
 | Props sci-fi de l'arène Bespin/hangar (console, tuyaux, panneau) | Quaternius / Kenney | CC0 | [poly.pizza](https://poly.pizza) |
 | Murs modulaires de la chambre de Bespin (panneaux, hublots, portes, piliers, caisses, tuyaux — assemblés en mur octogonal détaillé) | Kenney « Space Station Kit » | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [kenney.nl](https://kenney.nl/assets/space-station-kit) |
-| Salle « Centre de contrôle » (data center impérial : ordinateurs centraux, dérouleurs de bandes, réacteur — décor complet de l'arène) | Bruno Oliveira | [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/) | [Poly Pizza](https://poly.pizza/m/cA_lcvRC4NA) |
-| Arène « Couloir impérial » (couloir façon Étoile de la Mort : plaques métalliques PBR, bandes rouges, porte blindée, lampes murales, props — assemblé depuis le kit modulaire texturé) | Quaternius « Modular SciFi MegaKit » | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [quaternius.com](https://quaternius.com/packs/modularscifimegakit.html) |
+| Arènes « Couloir impérial » et « Centre de contrôle » (décors PBR façon Étoile de la Mort : plaques métalliques, bandes rouges, porte blindée, hublots, colonnes, réacteur, props physiques — assemblés depuis le kit modulaire texturé) | Quaternius « Modular SciFi MegaKit » | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [quaternius.com](https://quaternius.com/packs/modularscifimegakit.html) |
 | Générateur, turbine (machinerie d'arène) | divers auteurs poly.pizza | CC-BY | [poly.pizza](https://poly.pizza) |
 | Sabre laser (menu) | Martin Calviello | CC-BY | [Poly Pizza](https://poly.pizza/m/bsFV-B_VG17) |
 
