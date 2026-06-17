@@ -292,6 +292,7 @@ func _build_corridor() -> void:
 	if theme == "bespin":
 		_build_bespin_environment()
 		_build_bespin()
+		_scatter_phys_crates()
 		_build_dust()
 		_build_boundary()
 		var amb_b := AudioStreamPlayer.new()
@@ -345,6 +346,7 @@ func _build_corridor() -> void:
 		_build_banners()
 		_build_spectators()
 		_build_holotable(Vector3(-11.5, 0, 11.5))
+		_scatter_phys_crates()
 	_build_space_view()
 	_build_dust()
 	_build_boundary()
@@ -797,6 +799,17 @@ func _build_hangar() -> void:
 			b.rotation.y = rng.randf_range(-0.2, 0.2)
 			_box(Vector3(sz + 0.02, 0.1, sz + 0.02), b.position + Vector3(0, 0.5, 0), strip_r)
 		_collision_box(base + Vector3(0, spec[1] * 0.7, 0), Vector3(2.4, spec[1] * 1.5, 2.4))
+
+	# interactive physics crates on the deck + Imperial console greeble
+	_phys_prop("Prop_Crate3", Vector3(-5, 0, 3), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
+	_phys_prop("Prop_Crate4", Vector3(5, 0, -3), Vector3(0.56, 0.56, 0.56), 4.0, true, -0.2)
+	_phys_prop("Prop_Crate3", Vector3(4, 0, 4), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.6)
+	_phys_prop("Prop_Barrel_Large", Vector3(-4, 0, -4), Vector3(0.25, 0.55, 0.27), 2.2, false)
+	_phys_prop("Prop_Barrel_Large", Vector3(0, 0, 6), Vector3(0.25, 0.55, 0.27), 2.0, false)
+	for spec in [[Vector3(-HG_W + 1.3, 0, -6), PI / 2.0], [Vector3(HG_W - 1.3, 0, 6), -PI / 2.0],
+			[Vector3(-HG_W + 1.3, 0, 12), PI / 2.0], [Vector3(HG_W - 1.3, 0, -12), -PI / 2.0]]:
+		_mk("Prop_Computer", spec[0], spec[1])
+		_mk("Prop_AccessPoint", spec[0] + Vector3(0, 0, 3.0 * signf(spec[0].x)), spec[1])
 
 	# honor guard: a few troopers at attention along the back wall
 	var ps: PackedScene = load("res://assets/models/characters/trooper.glb")
@@ -2254,6 +2267,17 @@ func _phys_prop(model: String, pos: Vector3, half: Vector3, mass: float, centere
 	var vis: Node3D = load("res://assets/models/megakit/%s.gltf" % model).instantiate()
 	vis.position.y = 0.0 if centered else -half.y
 	rb.add_child(vis)
+
+# Scatters a handful of interactive physics crates/barrels around a round arena
+# (throne room, Bespin), kept off the centre so they don't crowd the spawn.
+func _scatter_phys_crates() -> void:
+	for spec in [
+			[Vector3(-7, 0, 4), "Prop_Crate3", true, Vector3(0.5, 0.5, 0.5), 3.5],
+			[Vector3(7, 0, -4), "Prop_Crate4", true, Vector3(0.56, 0.56, 0.56), 4.0],
+			[Vector3(6, 0, 6), "Prop_Crate3", true, Vector3(0.5, 0.5, 0.5), 3.5],
+			[Vector3(-6, 0, -6), "Prop_Barrel_Large", false, Vector3(0.25, 0.55, 0.27), 2.2],
+			[Vector3(8, 0, 1), "Prop_Barrel_Large", false, Vector3(0.25, 0.55, 0.27), 2.0]]:
+		_phys_prop(spec[1], spec[0], spec[3], spec[4], spec[2], randf_range(-0.6, 0.6))
 
 func _shockwave(at: Vector3) -> void:
 	var ring := MeshInstance3D.new()
