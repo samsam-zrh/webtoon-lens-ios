@@ -304,6 +304,21 @@ func _build_corridor() -> void:
 		add_child(amb_b)
 		amb_b.play()
 		return
+	if theme == "control":
+		_build_control_environment()
+		_build_control()
+		_build_dust()
+		_build_boundary()
+		var amb_c := AudioStreamPlayer.new()
+		var hum_c: AudioStreamWAV = load("res://assets/audio/ambient.wav").duplicate()
+		hum_c.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		hum_c.loop_end = hum_c.data.size() / 2
+		amb_c.stream = hum_c
+		amb_c.volume_db = -15.0
+		amb_c.bus = "SFX"
+		add_child(amb_c)
+		amb_c.play()
+		return
 	_build_environment()
 	if theme == "hangar":
 		_build_hangar()
@@ -1441,6 +1456,132 @@ func _bespin_steam(at: Vector3, height: float, amount: int) -> void:
 	p.position = at
 	p.visibility_aabb = AABB(Vector3(-6, -1, -6), Vector3(12, height + 4, 12))
 	add_child(p)
+
+# ------------------------------------------- Imperial control room (data centre)
+# A real downloaded sci-fi room model (CC-BY, see CREDITS.md): banks of mainframe
+# computers, tape drives and a reactor column ringing a wide open deck. The duel
+# happens on the clean central floor; the machinery is the backdrop.
+
+func _build_control_environment() -> void:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.02, 0.025, 0.035)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.54, 0.6, 0.7)
+	env.ambient_light_energy = 2.1
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.34
+	env.glow_enabled = true
+	env.glow_intensity = 0.35
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 1.0
+	var q: int = GameSettings.quality
+	env.ssao_enabled = q >= 1
+	env.ssao_intensity = 1.4
+	env.ssr_enabled = q >= 1
+	env.ssr_max_steps = 32
+	env.sdfgi_enabled = q >= 2
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.45, 0.55, 0.75)
+	env.fog_light_energy = 1.4
+	env.fog_density = 0.006
+	env.fog_sky_affect = 0.0
+	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_density = 0.006
+	env.volumetric_fog_albedo = Color(0.55, 0.66, 0.88)
+	env.volumetric_fog_emission = Color(0.04, 0.05, 0.08)
+	var we := WorldEnvironment.new()
+	we.environment = env
+	add_child(we)
+
+	# cool overhead key, like ceiling fluorescents
+	var key := DirectionalLight3D.new()
+	key.light_energy = 1.5
+	key.light_color = Color(0.82, 0.9, 1.0)
+	key.rotation = Vector3(-1.15, -0.5, 0)
+	key.shadow_enabled = true
+	add_child(key)
+
+func _build_control() -> void:
+	var s := 1.5
+	var model: Node3D = load("res://assets/models/swenv/control_room.glb").instantiate()
+	model.scale = Vector3.ONE * s
+	model.position = Vector3.ZERO
+	add_child(model)
+	var ab := ModelUtil.compute_aabb(model, Transform3D.IDENTITY)
+	var center := ab.position + ab.size * 0.5
+	# centre the open deck on the origin, rest the floor at y=0
+	model.position = Vector3(-center.x, -ab.position.y, -center.z)
+
+	# clean flat collision deck + particle collider for dust
+	_collision_box(Vector3(0, -0.5, 0), Vector3(80, 1.0, 80))
+	var pcol := GPUParticlesCollisionBox3D.new()
+	pcol.size = Vector3(60, 0.5, 60)
+	pcol.position.y = -0.25
+	add_child(pcol)
+
+	# faint reflective deck disc over the model floor so the arena reads clean
+	var deck := MeshInstance3D.new()
+	var dm := CylinderMesh.new()
+	dm.top_radius = ARENA_R + 0.5
+	dm.bottom_radius = ARENA_R + 0.5
+	dm.height = 0.06
+	dm.radial_segments = 48
+	var dmat := StandardMaterial3D.new()
+	dmat.albedo_color = Color(0.10, 0.12, 0.15)
+	dmat.metallic = 0.7
+	dmat.roughness = 0.3
+	dm.material = dmat
+	deck.mesh = dm
+	deck.position.y = 0.01
+	add_child(deck)
+	# glowing rim so the duel circle is legible
+	var rim := MeshInstance3D.new()
+	var rt := TorusMesh.new()
+	rt.inner_radius = ARENA_R - 0.7
+	rt.outer_radius = ARENA_R - 0.45
+	rt.rings = 64
+	rt.material = _mat_emissive(Color(0.4, 0.7, 1.0), 1.6)
+	rim.mesh = rt
+	rim.position.y = 0.05
+	rim.scale.y = 0.1
+	add_child(rim)
+
+	# overhead light banks + cool console fills around the deck
+	for spec in [
+			[Vector3(0, 9, 0), Color(0.85, 0.92, 1.0), 4.0, 30.0],
+			[Vector3(10, 5, 8), Color(0.5, 0.7, 1.0), 2.4, 16.0],
+			[Vector3(-10, 5, -8), Color(0.6, 0.8, 1.0), 2.4, 16.0],
+			[Vector3(-11, 4, 9), Color(0.9, 0.6, 0.3), 1.8, 14.0],
+			[Vector3(11, 4, -9), Color(0.4, 0.9, 0.7), 1.8, 14.0],
+			[Vector3(12, 6, 11), Color(0.8, 0.86, 1.0), 2.2, 20.0],
+			[Vector3(-12, 6, -11), Color(0.8, 0.86, 1.0), 2.2, 20.0],
+			[Vector3(0, 5, -13), Color(0.55, 0.72, 1.0), 3.0, 24.0],
+			[Vector3(0, 5, 13), Color(0.7, 0.8, 1.0), 2.6, 24.0]]:
+		var ol := OmniLight3D.new()
+		ol.position = spec[0]
+		ol.light_color = spec[1]
+		ol.light_energy = spec[2]
+		ol.omni_range = spec[3]
+		ol.light_volumetric_fog_energy = 0.8
+		add_child(ol)
+
+	# dark ceiling cap so looking up reads as a roof, not the void
+	var cap := MeshInstance3D.new()
+	var cbm := BoxMesh.new()
+	cbm.size = Vector3(60, 0.6, 60)
+	var capm := StandardMaterial3D.new()
+	capm.albedo_color = Color(0.04, 0.045, 0.06)
+	cbm.material = capm
+	cap.mesh = cbm
+	cap.position.y = 13.5
+	add_child(cap)
+
+	var probe := ReflectionProbe.new()
+	probe.size = Vector3(48, 18, 48)
+	probe.position = Vector3(0, 6, 0)
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	add_child(probe)
 
 func _build_boundary() -> void:
 	# Invisible ring keeping the duel off the walls and the dais

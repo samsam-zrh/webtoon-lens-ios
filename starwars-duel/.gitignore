@@ -1,2 +1,5 @@
 .godot/
 *.tmp
+
+# Godot import sidecars for showcase screenshots (not shipped)
+media/*.import
