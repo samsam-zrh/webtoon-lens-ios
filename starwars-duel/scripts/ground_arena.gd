@@ -1501,14 +1501,14 @@ func _build_control_environment() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.02, 0.025, 0.035)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.4, 0.46, 0.58)
-	env.ambient_light_energy = 1.35
+	env.ambient_light_color = Color(0.46, 0.52, 0.64)
+	env.ambient_light_energy = 1.95
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.22
+	env.tonemap_exposure = 1.32
 	env.glow_enabled = true
-	env.glow_intensity = 0.45
+	env.glow_intensity = 0.4
 	env.glow_bloom = 0.06
-	env.glow_hdr_threshold = 1.2
+	env.glow_hdr_threshold = 1.15
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.8
@@ -1530,8 +1530,8 @@ func _build_control_environment() -> void:
 
 	# cool overhead key, like ceiling fluorescents
 	var key := DirectionalLight3D.new()
-	key.light_energy = 1.5
-	key.light_color = Color(0.82, 0.9, 1.0)
+	key.light_energy = 1.9
+	key.light_color = Color(0.85, 0.92, 1.0)
 	key.rotation = Vector3(-1.15, -0.5, 0)
 	key.shadow_enabled = true
 	add_child(key)
@@ -1646,9 +1646,17 @@ func _build_control() -> void:
 		var ol := OmniLight3D.new()
 		ol.position = p
 		ol.light_color = Color(0.85, 0.9, 1.0)
-		ol.light_energy = 1.8
-		ol.omni_range = 9.0
+		ol.light_energy = 2.6
+		ol.omni_range = 12.0
 		add_child(ol)
+	# overhead fill lights down the centre so the deck reads clearly
+	for z in [-12, -4, 4, 12]:
+		var cl := OmniLight3D.new()
+		cl.position = Vector3(0, 4.5, z)
+		cl.light_color = Color(0.8, 0.87, 1.0)
+		cl.light_energy = 2.2
+		cl.omni_range = 13.0
+		add_child(cl)
 
 	# interactive physics crates around the deck
 	_phys_prop("Prop_Crate3", Vector3(-7, 0, -6), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
