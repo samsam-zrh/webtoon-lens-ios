@@ -418,6 +418,22 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 	move_and_slide()
 
+	# Knock loose physics props (crates, barrels) aside — a gentle nudge when
+	# walking, a real shove when dashing through them.
+	for ci in get_slide_collision_count():
+		var col := get_slide_collision(ci)
+		var rb := col.get_collider()
+		if rb is RigidBody3D:
+			var pdir := -col.get_normal()
+			pdir.y = 0.0
+			if pdir.length() < 0.01:
+				continue
+			var spd: float = clampf(Vector2(velocity.x, velocity.z).length(), 1.0, 9.0)
+			var strength: float = spd * (1.9 if dash_timer > 0.0 else 0.55)
+			(rb as RigidBody3D).apply_impulse(
+				pdir.normalized() * strength + Vector3.UP * (0.9 if dash_timer > 0.0 else 0.2),
+				col.get_position() - (rb as RigidBody3D).global_position)
+
 	# Turn toward face_yaw (heavier characters turn slower)
 	rotation.y = lerp_angle(rotation.y, face_yaw, cfg.get("turn_speed", 12.0) * delta)
 
@@ -639,6 +655,8 @@ func try_dash() -> void:
 	dash_timer = 0.22
 	dash_cooldown = 1.1
 	play_sound("res://assets/audio/boost.wav", -10.0, 1.5)
+	if arena != null and arena.has_method("dash_fx"):
+		arena.dash_fx(self, dash_dir)
 
 func take_hit(dmg: float, from: GroundFighter) -> void:
 	if not alive:

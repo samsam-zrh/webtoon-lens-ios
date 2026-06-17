@@ -251,7 +251,7 @@ func _end_intro() -> void:
 func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Dictionary = {}) -> GroundFighter:
 	var f := GroundFighter.new()
 	f.collision_layer = 2
-	f.collision_mask = 3
+	f.collision_mask = 7   # environment (1) + fighters (2) + physics props (4)
 	add_child(f)
 	var cfg: Dictionary = ROSTER[id].duplicate(true)
 	if mods.has("name"):
@@ -1758,6 +1758,17 @@ func _build_imperial() -> void:
 	_mk("Prop_Crate3", Vector3(-5.5, 0, -18), -0.2)
 	_mk("Prop_Barrel_Large", Vector3(-5.4, 0, 19), 0)
 	_mk("Prop_Barrel_Large", Vector3(-5.9, 0, 20.2), 0)
+
+	# interactive physics props strewn down the hall — dash through them or
+	# Force-push them and they tumble away
+	_phys_prop("Prop_Crate3", Vector3(-2.6, 0, 6), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
+	_phys_prop("Prop_Crate4", Vector3(2.4, 0, 6.8), Vector3(0.56, 0.56, 0.56), 4.0, true, -0.2)
+	_phys_prop("Prop_Crate3", Vector3(2.0, 0, 7.9), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.6)
+	_phys_prop("Prop_Barrel_Large", Vector3(-3.2, 0, -6), Vector3(0.25, 0.55, 0.27), 2.2, false)
+	_phys_prop("Prop_Barrel_Large", Vector3(-2.6, 0, -7), Vector3(0.25, 0.55, 0.27), 2.2, false, 0.4)
+	_phys_prop("Prop_Crate3", Vector3(3.0, 0, -8), Vector3(0.5, 0.5, 0.5), 3.5, true, -0.5)
+	_phys_prop("Prop_Crate4", Vector3(3.2, 0, -8.9), Vector3(0.56, 0.56, 0.56), 4.0, true, 0.2)
+	_phys_prop("Prop_Barrel_Large", Vector3(0.4, 0, 0), Vector3(0.25, 0.55, 0.27), 2.0, false)
 	# a soft glow from the blast-door at the far end
 	var dg := OmniLight3D.new()
 	dg.position = Vector3(0, 2.4, -21)
@@ -2085,10 +2096,85 @@ func force_push(caster: GroundFighter) -> void:
 		target.take_push(to_t.normalized())
 		_hit_flash(target.global_position + Vector3(0, 1.1, 0), Color(0.55, 0.75, 1.0))
 		_shake = maxf(_shake, 0.45 if target == player else 0.3)
+	# the blast also hurls loose crates and barrels out of the way
+	for child in get_children():
+		if child is RigidBody3D:
+			var to_p: Vector3 = child.global_position - origin
+			to_p.y = 0
+			if to_p.length() < 7.0 and fwd.dot(to_p.normalized()) > 0.1:
+				var f2 := 1.0 - to_p.length() / 7.0
+				(child as RigidBody3D).apply_impulse(
+					(to_p.normalized() + Vector3.UP * 0.5) * (10.0 * f2 + 3.0))
 	_shockwave(origin + Vector3(0, 1.1, 0) + fwd * 0.6)
 	_rumble(0.4, 0.6, 0.2)
 	if music != null:
 		music.combat_event()
+
+# A Force-speed dash flourish: trailing after-image silhouettes in the
+# fighter's blade colour, a motion streak, and a quick ground scuff.
+func dash_fx(f: GroundFighter, dir: Vector3) -> void:
+	var col: Color = f.cfg.get("saber_color", Color(0.6, 0.8, 1.0))
+	var base := f.global_position
+	for i in 3:
+		var ghost := MeshInstance3D.new()
+		var gm := CapsuleMesh.new()
+		gm.radius = 0.3
+		gm.height = 1.7
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		m.albedo_color = Color(col.r, col.g, col.b, 0.34 - i * 0.08)
+		gm.material = m
+		ghost.mesh = gm
+		ghost.position = base + Vector3(0, 0.95, 0) - dir * (0.35 * (i + 1))
+		add_child(ghost)
+		var tw := create_tween().set_parallel()
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.28 + i * 0.05)
+		tw.tween_property(ghost, "position", ghost.position - dir * 0.6, 0.3)
+		tw.chain().tween_callback(ghost.queue_free)
+	# motion streak shooting out behind the dash
+	var streak := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.16, 0.55, 2.8)
+	var smat := StandardMaterial3D.new()
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	smat.albedo_color = Color(col.r, col.g, col.b, 0.5)
+	sm.material = smat
+	streak.mesh = sm
+	var sp := base + Vector3(0, 1.0, 0) - dir * 1.2
+	streak.position = sp
+	streak.look_at(sp + dir, Vector3.UP)
+	add_child(streak)
+	var tw2 := create_tween().set_parallel()
+	tw2.tween_property(streak, "scale", Vector3(0.4, 0.4, 1.8), 0.26)
+	tw2.tween_property(smat, "albedo_color:a", 0.0, 0.26)
+	tw2.chain().tween_callback(streak.queue_free)
+	_hit_flash(base + Vector3(0, 0.15, 0) + dir * 0.4, Color(col.r, col.g, col.b) * 0.7)
+
+# Builds an interactive physics prop (RigidBody3D) on the props layer (4) so
+# fighters can shove it around. `centered` is true when the model's origin sits
+# at its middle (crates), false when it sits on the floor (barrels).
+func _phys_prop(model: String, pos: Vector3, half: Vector3, mass: float, centered: bool, yaw := 0.0) -> void:
+	var rb := RigidBody3D.new()
+	rb.collision_layer = 4
+	rb.collision_mask = 1 | 4
+	rb.mass = mass
+	rb.linear_damp = 0.6
+	rb.angular_damp = 1.2
+	rb.position = Vector3(pos.x, half.y + 0.02, pos.z)
+	rb.rotation.y = yaw
+	add_child(rb)
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = half * 2.0
+	cs.shape = box
+	rb.add_child(cs)
+	var vis: Node3D = load("res://assets/models/megakit/%s.gltf" % model).instantiate()
+	vis.position.y = 0.0 if centered else -half.y
+	rb.add_child(vis)
 
 func _shockwave(at: Vector3) -> void:
 	var ring := MeshInstance3D.new()
