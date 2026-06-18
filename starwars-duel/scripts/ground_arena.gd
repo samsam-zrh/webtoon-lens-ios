@@ -98,7 +98,6 @@ const ROSTER := {
 			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
 		},
 	},
-	},
 }
 
 var player: GroundFighter

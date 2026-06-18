@@ -330,6 +330,38 @@ for o in list(bpy.data.objects):
     if o.type == 'EMPTY':
         bpy.data.objects.remove(o, do_unlink=True)
 
+# ---- collapse finger weights into the solid hand bone.
+# Vader's hands are a closed glove (no separate fingers), but the weight
+# transfer copied Kyle's per-finger bone weights onto them. When an attack
+# animation curls those finger bones, the glove geometry splays apart and reads
+# as "extra hands". Merge every finger-bone weight back into the parent
+# Left/RightHand so the fist moves as one rigid piece.
+FINGER_KEYS = ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky')
+def collapse_fingers(o):
+    for side in ('Left', 'Right'):
+        hand = 'mixamorig:%sHand' % side
+        fingers = [g for g in o.vertex_groups
+                   if g.name.startswith('mixamorig:%sHand' % side)
+                   and any(k in g.name for k in FINGER_KEYS)]
+        if not fingers:
+            continue
+        hg = o.vertex_groups.get(hand) or o.vertex_groups.new(name=hand)
+        gi = {g.index for g in fingers}
+        moved = 0
+        for v in o.data.vertices:
+            w = sum(g.weight for g in v.groups if g.group in gi)
+            if w > 0.0:
+                hg.add([v.index], w, 'ADD')
+                moved += 1
+        for g in fingers:
+            o.vertex_groups.remove(g)
+        print('COLLAPSE FINGERS', o.name, side, 'verts', moved)
+for name in transfer_meshes:
+    o = bpy.data.objects[name]
+    collapse_fingers(o)
+    select_only([o], o)
+    bpy.ops.object.vertex_group_normalize_all(lock_active=False)
+
 ad = arm.animation_data or arm.animation_data_create()
 for act in bpy.data.actions:
     if act.name.startswith(('DEL_','FIX_','_')):
