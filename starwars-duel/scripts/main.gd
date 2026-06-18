@@ -363,7 +363,7 @@ func _build_menu_ui() -> void:
 	if _mode == "ships":
 		help_text = "Souris : piloter   •   Clic / Espace : tirer   •   Maj : boost   •   Z/S : gaz   •   Q/D : tonneau   •   Échap : pause"
 	else:
-		help_text = "ZQSD : se déplacer   •   Clic : attaque   •   Clic droit : parade (renvoie les tirs !)   •   Maj : esquive   •   E : poussée de Force   •   Échap : menu"
+		help_text = "ZQSD : bouger  •  Clic : attaque  •  Clic droit : parade (parade PARFAITE = riposte !)  •  Maj : esquive (i-frames)  •  E : Poussée  •  F : Attraction  •  Échap : menu"
 	var n_music := MusicDirector.detected_count()
 	var music_l := UiKit.label(
 		"♪ Musique personnalisée : %d piste(s) détectée(s)" % n_music if n_music > 0

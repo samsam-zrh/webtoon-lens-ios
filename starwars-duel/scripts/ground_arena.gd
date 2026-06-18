@@ -136,6 +136,9 @@ var _shake_t := 0.0
 var music: MusicDirector
 var survival_mode := false
 var wave := 0
+var score := 0
+var combo := 0
+var _combo_t := 0.0
 var _survival_id := "trooper"
 var _intro_done := false
 var _post_mat: ShaderMaterial
@@ -2042,13 +2045,29 @@ func _draw_hud() -> void:
 		return
 	var vp := _hud.get_viewport_rect().size
 	_bar(Vector2(36, 52), 300, player.hp / player.cfg["hp"], Color(0.3, 0.9, 0.45))
-	for i in enemies.size():
+	# enemy bars: show at most 4 so big survival waves don't march off-screen
+	var shown := mini(enemies.size(), 4)
+	for i in shown:
 		var e := enemies[i]
+		if not is_instance_valid(e):
+			continue
 		_bar(Vector2(vp.x - 36 - 300, 52 + i * 22), 300, e.hp / e.cfg["hp"], Color(1, 0.32, 0.27))
-	# Dash + Force push cooldown pips
+	# Dash + Force push/pull cooldown pips
 	_bar(Vector2(36, 74), 120, 1.0 - player.dash_cooldown / 1.1, Color(0.4, 0.7, 1.0))
 	if player.has_force():
 		_bar(Vector2(36, 90), 120, 1.0 - player.push_cooldown / 6.0, Color(0.65, 0.55, 1.0))
+		_bar(Vector2(36, 106), 120, 1.0 - player.pull_cooldown / 5.0, Color(0.5, 0.85, 0.9))
+	# Survival HUD: wave, score, combo streak
+	if survival_mode:
+		var font := UiKit.display_font()
+		_hud.draw_string(font, Vector2(vp.x / 2.0 - 110, 44), "VAGUE %d" % wave,
+			HORIZONTAL_ALIGNMENT_CENTER, 220, 24, Color(1.0, 0.85, 0.3))
+		_hud.draw_string(font, Vector2(vp.x - 260, 108), "SCORE %d" % score,
+			HORIZONTAL_ALIGNMENT_RIGHT, 224, 22, Color(0.9, 0.95, 1.0))
+		if combo > 1:
+			var ca := clampf(_combo_t / 2.6, 0.25, 1.0)
+			_hud.draw_string(font, Vector2(vp.x / 2.0 - 130, 86), "COMBO ×%d" % combo,
+				HORIZONTAL_ALIGNMENT_CENTER, 260, 30, Color(1.0, 0.68, 0.2, ca))
 	# Hitmarker: brief X at screen center when your strike lands
 	if _hitmark_t > 0.0:
 		_hitmark_t -= get_process_delta_time()
@@ -2127,6 +2146,8 @@ func _physics_process(delta: float) -> void:
 			player.try_dash()
 		if Input.is_action_just_pressed("force_push"):
 			player.try_force_push()
+		if Input.is_action_just_pressed("force_pull"):
+			player.try_force_pull()
 
 	# the player always squares up against the nearest living opponent
 	var best: GroundFighter = null
@@ -2164,6 +2185,11 @@ func _update_camera(delta: float) -> void:
 	_cam_pitch_node.rotation.x = _cam_pitch
 	var hv := Vector2(target.velocity.x, target.velocity.z).length()
 	camera.fov = lerpf(camera.fov, GameSettings.fov + hv * 0.35, 5.0 * delta)
+	# combo streak decays if you stop landing hits
+	if _combo_t > 0.0:
+		_combo_t -= delta
+		if _combo_t <= 0.0:
+			combo = 0
 	# impact shake: smooth decaying oscillation (reads as a thud, not static)
 	_shake = maxf(0.0, _shake - 3.2 * delta)
 	_shake_t += delta
@@ -2198,6 +2224,9 @@ func _rumble(weak: float, strong: float, dur: float) -> void:
 func melee_hit(attacker: GroundFighter) -> bool:
 	var connected := false
 	var hit_player := false
+	# a riposte right after a perfect parry hits much harder
+	var riposte := attacker.counter_window > 0.0
+	var dmg: float = attacker.cfg["dmg"] * (1.9 if riposte else 1.0)
 	var targets: Array = [player] if attacker != player else enemies.duplicate()
 	for target: GroundFighter in targets:
 		if not is_instance_valid(target) or not target.alive:
@@ -2208,10 +2237,18 @@ func melee_hit(attacker: GroundFighter) -> bool:
 		if to_t.length() <= attacker.saber_reach() and facing > 0.35:
 			connected = true
 			hit_player = hit_player or target == player
-			target.take_hit(attacker.cfg["dmg"], attacker)
-			_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
+			target.take_hit(dmg, attacker)
+			_hit_flash(target.global_position + Vector3(0, 1.2, 0),
+				Color(1, 1, 1) if riposte else attacker.cfg["saber_color"])
 	# fire the screen-feedback once per swing, not once per target hit
 	if connected:
+		if riposte:
+			attacker.counter_window = 0.0
+			hit_stop(0.14, 0.06)
+		if survival_mode and attacker == player:
+			combo += 1
+			_combo_t = 2.6
+			score += int(dmg * (1.0 + combo * 0.12)) * (2 if riposte else 1)
 		_shake = maxf(_shake, 0.55 if hit_player else 0.35)
 		if attacker == player:
 			_hitmark_t = 0.22
@@ -2249,6 +2286,38 @@ func force_push(caster: GroundFighter) -> void:
 	_rumble(0.4, 0.6, 0.2)
 	if music != null:
 		music.combat_event()
+
+# Telekinetic pull: yanks the nearest opponent in the front cone toward the
+# caster into striking range — a combo opener.
+func force_pull(caster: GroundFighter) -> void:
+	var targets: Array = [player] if caster != player else enemies.duplicate()
+	var origin := caster.global_position
+	var fwd := -caster.global_transform.basis.z
+	var best: GroundFighter = null
+	var best_d := 9.0
+	for target: GroundFighter in targets:
+		if not is_instance_valid(target) or not target.alive:
+			continue
+		var to_t: Vector3 = target.global_position - origin
+		to_t.y = 0
+		if to_t.length() < best_d and fwd.dot(to_t.normalized()) > 0.25:
+			best = target
+			best_d = to_t.length()
+	if best != null:
+		var to_b: Vector3 = origin - best.global_position
+		to_b.y = 0
+		best.take_push(to_b.normalized() * 1.4)
+		best.hit_stun = maxf(best.hit_stun, 0.3)
+		_hit_flash(best.global_position + Vector3(0, 1.1, 0), Color(0.45, 0.85, 1.0))
+	# pull loose crates toward the caster too
+	for child in get_children():
+		if child is RigidBody3D:
+			var to_p: Vector3 = origin - child.global_position
+			to_p.y = 0
+			if to_p.length() < 8.0 and to_p.length() > 1.0 and (-to_p).normalized().dot(-fwd) > 0.1:
+				(child as RigidBody3D).apply_impulse(to_p.normalized() * 7.0 + Vector3.UP * 1.5)
+	_shockwave(origin + Vector3(0, 1.1, 0) + fwd * 0.5)
+	_rumble(0.3, 0.45, 0.18)
 
 # A Force-speed dash flourish: trailing after-image silhouettes in the
 # fighter's blade colour, a motion streak, and a quick ground scuff.
@@ -2629,9 +2698,11 @@ func _spawn_wave() -> void:
 func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
+	if survival_mode and f != player:
+		score += (50 + wave * 15) * maxi(1, combo)
 	var foes_left := false
 	for e in enemies:
-		if e.alive:
+		if is_instance_valid(e) and e.alive:
 			foes_left = true
 	if f != player and foes_left:
 		_show_msg("ENCORE UN !")
@@ -2692,7 +2763,7 @@ func _show_end(won: bool) -> void:
 	box.add_child(title)
 	var sub_txt := "La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"]
 	if survival_mode:
-		sub_txt = "Tu as résisté jusqu'à la VAGUE %d." % wave
+		sub_txt = "VAGUE %d atteinte  •  SCORE %d" % [wave, score]
 	var sub := UiKit.label(sub_txt, 22, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)

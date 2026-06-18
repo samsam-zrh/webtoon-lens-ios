@@ -27,10 +27,13 @@ var combo_queued := false
 var attack_buffer_t := 0.0   # remembers a recent attack press (input buffering)
 var hit_window_done := false
 var blocking := false
+var parry_window := 0.0   # >0 just after raising guard → a perfect parry lands
+var counter_window := 0.0 # >0 just after a perfect parry → your next hit is a riposte
 var hit_stun := 0.0
 var dash_timer := 0.0
 var dash_cooldown := 0.0
 var push_cooldown := 0.0
+var pull_cooldown := 0.0
 var dash_dir := Vector3.ZERO
 var fire_cooldown := 0.0
 var burst_left := 0
@@ -352,9 +355,12 @@ func _physics_process(delta: float) -> void:
 	fire_cooldown = maxf(0.0, fire_cooldown - delta)
 	dash_cooldown = maxf(0.0, dash_cooldown - delta)
 	push_cooldown = maxf(0.0, push_cooldown - delta)
+	pull_cooldown = maxf(0.0, pull_cooldown - delta)
 	attack_recoil_t = maxf(0.0, attack_recoil_t - delta)
 	hit_stun = maxf(0.0, hit_stun - delta)
 	attack_buffer_t = maxf(0.0, attack_buffer_t - delta)
+	parry_window = maxf(0.0, parry_window - delta)
+	counter_window = maxf(0.0, counter_window - delta)
 
 	if controls_enabled and not is_player:
 		_ai_think(delta)
@@ -613,6 +619,9 @@ func set_blocking(want: bool) -> void:
 	if not cfg["melee"] or attacking or not alive:
 		blocking = false
 		return
+	# raising the guard opens a short perfect-parry window
+	if want and not blocking:
+		parry_window = 0.22
 	blocking = want
 
 func has_force() -> bool:
@@ -630,6 +639,19 @@ func try_force_push() -> void:
 	_play_oneshot("19_Block3", 0.1, 1.5)
 	play_sound("res://assets/audio/force_push.wav", -2.0, randf_range(0.95, 1.05))
 	arena.force_push(self)
+
+func try_force_pull() -> void:
+	if pull_cooldown > 0.0 or not alive or not has_force() or hit_stun > 0.2:
+		return
+	if attacking:
+		attacking = false
+		combo_queued = false
+		combo_index = 0
+	pull_cooldown = 5.0
+	blocking = false
+	_play_oneshot("19_Block3", 0.1, 1.5)
+	play_sound("res://assets/audio/force_push.wav", -4.0, randf_range(1.15, 1.3))
+	arena.force_pull(self)
 
 func take_push(dir: Vector3) -> void:
 	if not alive:
@@ -673,11 +695,29 @@ func try_dash() -> void:
 func take_hit(dmg: float, from: GroundFighter) -> void:
 	if not alive:
 		return
+	# Dodge: i-frames during the dash burst — a well-timed roll avoids everything
+	if dash_timer > 0.0:
+		if from.cfg["melee"]:
+			play_sound("res://assets/audio/boost.wav", -14.0, 1.8)
+		return
 	var to_attacker := from.global_position - global_position
 	to_attacker.y = 0
 	var facing := (-global_transform.basis.z).dot(to_attacker.normalized())
-	if blocking and facing > 0.25 and from.cfg["melee"]:
-		# Saber clash: blocked! The attacker recoils, exposed.
+	if blocking and parry_window > 0.0 and facing > 0.25 and from.cfg["melee"]:
+		# PERFECT PARRY: no damage, the attacker is hard-staggered and you get a
+		# riposte window where your next hit is buffed
+		arena.saber_clash((global_position + from.global_position) / 2.0 + Vector3(0, 1.3, 0))
+		arena.saber_clash(global_position + Vector3(0, 1.4, 0))
+		velocity -= to_attacker.normalized() * 0.8
+		from.velocity += to_attacker.normalized() * 4.2
+		from.attack_recoil()
+		from.hit_stun = maxf(from.hit_stun, 0.55)
+		counter_window = 0.9
+		parry_window = 0.0
+		if arena.has_method("hit_stop"):
+			arena.hit_stop(0.13, 0.06)
+	elif blocking and facing > 0.25 and from.cfg["melee"]:
+		# Saber clash: blocked (held guard). The attacker recoils, exposed.
 		arena.saber_clash((global_position + from.global_position) / 2.0 + Vector3(0, 1.3, 0))
 		velocity -= to_attacker.normalized() * 1.8
 		from.velocity += to_attacker.normalized() * 2.6
@@ -769,6 +809,8 @@ func _ai_think(delta: float) -> void:
 					_ai_atk_cd = randf_range(0.9, 1.5) - skill * 0.5
 				elif has_force() and push_cooldown <= 0.0 and dist < 4.0 and randf() < skill * delta * 2.0:
 					try_force_push()
+				elif has_force() and pull_cooldown <= 0.0 and dist > 4.5 and dist < 8.5 and randf() < skill * delta * 1.6:
+					try_force_pull()
 				if _ai_state_t <= 0.0 or _ai_chain <= 0:
 					if randf() < 0.45:
 						_ai_state = "retreat"
