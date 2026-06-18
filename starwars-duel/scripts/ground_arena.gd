@@ -397,11 +397,11 @@ func _build_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.22, 0.24, 0.31)
-	env.ambient_light_energy = 2.0
+	env.ambient_light_color = Color(0.4, 0.44, 0.54)
+	env.ambient_light_energy = 2.15
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.32
+	env.tonemap_exposure = 1.38
 	env.glow_enabled = true
 	env.glow_intensity = 0.42
 	env.glow_bloom = 0.06
@@ -748,6 +748,15 @@ func _build_hangar() -> void:
 	field.position = Vector3(0, (HG_H - 1.8) / 2.0, -HG_D)
 	add_child(field)
 	_collision_box(Vector3(0, HG_H / 2.0, -HG_D), Vector3(HG_W * 2, HG_H * 2, 0.5))
+
+	# overhead fill so the whole deck stays bright, not just the bay side
+	for fp in [Vector3(-8, 8, 6), Vector3(8, 8, 6), Vector3(-8, 8, -6), Vector3(8, 8, -6), Vector3(0, 9, 0)]:
+		var fl := OmniLight3D.new()
+		fl.position = fp
+		fl.light_color = Color(0.92, 0.95, 1.0)
+		fl.light_energy = 2.6
+		fl.omni_range = 18.0
+		add_child(fl)
 
 	# ceiling: lattice beams + hanging light banks
 	_box(Vector3(HG_W * 2, 0.5, HG_D * 2), Vector3(0, HG_H + 0.25, 0), panel)
@@ -1743,14 +1752,14 @@ func _build_imperial_environment() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.015, 0.016, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.42, 0.46, 0.56)
-	env.ambient_light_energy = 1.35
+	env.ambient_light_color = Color(0.48, 0.54, 0.66)
+	env.ambient_light_energy = 1.95
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.28
+	env.tonemap_exposure = 1.36
 	env.glow_enabled = true
-	env.glow_intensity = 0.5
-	env.glow_bloom = 0.12
-	env.glow_hdr_threshold = 0.9
+	env.glow_intensity = 0.42
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 1.05
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 2.0
@@ -1768,8 +1777,8 @@ func _build_imperial_environment() -> void:
 	we.environment = env
 	add_child(we)
 	var key := DirectionalLight3D.new()
-	key.light_energy = 0.7
-	key.light_color = Color(0.7, 0.78, 0.95)
+	key.light_energy = 1.4
+	key.light_color = Color(0.78, 0.85, 1.0)
 	key.rotation = Vector3(-1.2, -0.4, 0)
 	add_child(key)
 
@@ -1855,10 +1864,18 @@ func _build_imperial() -> void:
 			var ol := OmniLight3D.new()
 			ol.position = Vector3(side * 5.2, 3.0, z)
 			ol.light_color = Color(0.85, 0.9, 1.0)
-			ol.light_energy = 2.0
-			ol.omni_range = 8.5
-			ol.light_volumetric_fog_energy = 0.6
+			ol.light_energy = 2.6
+			ol.omni_range = 10.0
+			ol.light_volumetric_fog_energy = 0.5
 			add_child(ol)
+	# overhead fill down the centre so the deck never falls into shadow
+	for z in [-18, -10, -2, 6, 14, 20]:
+		var fl := OmniLight3D.new()
+		fl.position = Vector3(0, 4.4, z)
+		fl.light_color = Color(0.8, 0.86, 1.0)
+		fl.light_energy = 2.0
+		fl.omni_range = 12.0
+		add_child(fl)
 	# warm red glow washing the accent bands at floor level
 	for z in [-16, -8, 0, 8, 16]:
 		var rl := OmniLight3D.new()
