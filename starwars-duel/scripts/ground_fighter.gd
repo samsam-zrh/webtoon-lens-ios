@@ -34,6 +34,14 @@ var dash_timer := 0.0
 var dash_cooldown := 0.0
 var push_cooldown := 0.0
 var pull_cooldown := 0.0
+# survival perk modifiers (applied between waves)
+var lifesteal := 0.0        # HP restored per melee hit landed
+var armor := 0.0            # incoming-damage reduction, 0..0.7
+var dash_cd_mul := 1.0      # <1 = faster dash recharge
+var force_cd_mul := 1.0     # <1 = faster Force recharge
+var parry_bonus := 0.0      # added to the perfect-parry window
+var riposte_mul := 1.9      # riposte damage multiplier
+var berserker := false      # extra damage while low on HP
 var dash_dir := Vector3.ZERO
 var fire_cooldown := 0.0
 var burst_left := 0
@@ -621,7 +629,7 @@ func set_blocking(want: bool) -> void:
 		return
 	# raising the guard opens a short perfect-parry window
 	if want and not blocking:
-		parry_window = 0.22
+		parry_window = 0.22 + parry_bonus
 	blocking = want
 
 func has_force() -> bool:
@@ -634,7 +642,7 @@ func try_force_push() -> void:
 		attacking = false
 		combo_queued = false
 		combo_index = 0
-	push_cooldown = 6.0
+	push_cooldown = 6.0 * force_cd_mul
 	blocking = false
 	_play_oneshot("19_Block3", 0.1, 1.5)
 	play_sound("res://assets/audio/force_push.wav", -2.0, randf_range(0.95, 1.05))
@@ -647,7 +655,7 @@ func try_force_pull() -> void:
 		attacking = false
 		combo_queued = false
 		combo_index = 0
-	pull_cooldown = 5.0
+	pull_cooldown = 5.0 * force_cd_mul
 	blocking = false
 	_play_oneshot("19_Block3", 0.1, 1.5)
 	play_sound("res://assets/audio/force_push.wav", -4.0, randf_range(1.15, 1.3))
@@ -687,7 +695,7 @@ func try_dash() -> void:
 		d = fwd
 	dash_dir = d.normalized()
 	dash_timer = 0.22
-	dash_cooldown = 1.1
+	dash_cooldown = 1.1 * dash_cd_mul
 	play_sound("res://assets/audio/boost.wav", -10.0, 1.5)
 	if arena != null and arena.has_method("dash_fx"):
 		arena.dash_fx(self, dash_dir)
@@ -728,7 +736,7 @@ func take_hit(dmg: float, from: GroundFighter) -> void:
 		arena.saber_clash(global_position + Vector3(0, 1.3, 0))
 		hp -= dmg * 0.25
 	else:
-		hp -= dmg
+		hp -= dmg * (1.0 - armor)
 		hit_stun = 0.45
 		velocity -= to_attacker.normalized() * 2.4
 		damage_flash(1.0)

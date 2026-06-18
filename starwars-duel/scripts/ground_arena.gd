@@ -139,6 +139,8 @@ var wave := 0
 var score := 0
 var combo := 0
 var _combo_t := 0.0
+var _finisher_cd := 0.0
+var _finisher_active := false
 var _survival_id := "trooper"
 var _intro_done := false
 var _post_mat: ShaderMaterial
@@ -2192,6 +2194,7 @@ func _update_camera(delta: float) -> void:
 		_combo_t -= delta
 		if _combo_t <= 0.0:
 			combo = 0
+	_finisher_cd = maxf(0.0, _finisher_cd - delta)
 	# impact shake: smooth decaying oscillation (reads as a thud, not static)
 	_shake = maxf(0.0, _shake - 3.2 * delta)
 	_shake_t += delta
@@ -2223,12 +2226,71 @@ func _rumble(weak: float, strong: float, dur: float) -> void:
 	if GameSettings.rumble:
 		Input.start_joy_vibration(0, weak, strong, dur)
 
+# wait `t` real seconds even while Engine.time_scale is low (4th arg = ignore time scale)
+func _real_wait(t: float) -> void:
+	await get_tree().create_timer(t, true, false, true).timeout
+
+# a quick full-screen white impact flash that fades in real time
+func _white_flash(peak: float) -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 30
+	add_child(layer)
+	var r := ColorRect.new()
+	r.color = Color(1, 1, 1, peak)
+	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(r)
+	for step in 6:
+		await _real_wait(0.03)
+		r.color.a = peak * (1.0 - (step + 1) / 6.0)
+	layer.queue_free()
+
+# Cinematic kill finisher (researched timeline): hard freeze on impact, then
+# eased slow-mo, and — for the cinematic tier — a mid-sequence snap back to full
+# speed on the "crush" before easing out. Drives Engine.time_scale on real time.
+func _finisher(victim: GroundFighter, cinematic: bool) -> void:
+	if _ended or _finisher_active:
+		return
+	_finisher_active = true
+	_finisher_cd = 3.5
+	if is_instance_valid(victim):
+		_hit_flash(victim.global_position + Vector3(0, 1.2, 0), Color(1, 1, 1))
+		_sparks(victim.global_position + Vector3(0, 1.2, 0), Color(1, 0.95, 0.8), 26, 7.0)
+	_white_flash(0.7 if cinematic else 0.4)
+	_shake = maxf(_shake, 0.6 if cinematic else 0.4)
+	_rumble(0.9, 1.0, 0.12)
+	if camera != null:
+		camera.fov = maxf(34.0, camera.fov - (12.0 if cinematic else 5.0))
+	# hard freeze = the impact
+	Engine.time_scale = 0.02
+	await _real_wait(0.09)
+	if _ended:
+		Engine.time_scale = 1.0
+		return
+	# eased cinematic slow-mo
+	Engine.time_scale = 0.22 if cinematic else 0.35
+	await _real_wait(0.5 if cinematic else 0.13)
+	if cinematic and not _ended:
+		# the "crush": snap to full speed for a beat (the key trick from MGR)
+		Engine.time_scale = 1.0
+		_white_flash(0.45)
+		_rumble(0.8, 1.0, 0.1)
+		await _real_wait(0.06)
+		if not _ended:
+			Engine.time_scale = 0.3
+			await _real_wait(0.18)
+	if not _ended:
+		Engine.time_scale = 1.0
+	_finisher_active = false
+
 func melee_hit(attacker: GroundFighter) -> bool:
 	var connected := false
 	var hit_player := false
 	# a riposte right after a perfect parry hits much harder
 	var riposte := attacker.counter_window > 0.0
-	var dmg: float = attacker.cfg["dmg"] * (1.9 if riposte else 1.0)
+	var dmg: float = attacker.cfg["dmg"] * (attacker.riposte_mul if riposte else 1.0)
+	# berserker perk: more damage while wounded
+	if attacker.berserker and attacker.hp < attacker.cfg["hp"] * 0.4:
+		dmg *= 1.35
 	var targets: Array = [player] if attacker != player else enemies.duplicate()
 	for target: GroundFighter in targets:
 		if not is_instance_valid(target) or not target.alive:
@@ -2244,6 +2306,8 @@ func melee_hit(attacker: GroundFighter) -> bool:
 				Color(1, 1, 1) if riposte else attacker.cfg["saber_color"])
 	# fire the screen-feedback once per swing, not once per target hit
 	if connected:
+		if attacker.lifesteal > 0.0:
+			attacker.hp = minf(attacker.cfg["hp"], attacker.hp + attacker.lifesteal)
 		if riposte:
 			attacker.counter_window = 0.0
 			hit_stop(0.14, 0.06)
@@ -2697,6 +2761,176 @@ func _spawn_wave() -> void:
 	if music != null:
 		music.combat_event()
 
+# ------------------------------------------------- Survival upgrade screen
+# A roguelite-style "pick 1 of 3" between waves (researched from Hades / Brotato
+# / Slay the Spire): the world pauses, tiers are colour-coded, and the rarity
+# odds drift upward as the waves climb. Picks modify the player's perk fields.
+
+const _PERK_COLORS := {
+	"common": Color(0.72, 0.74, 0.8), "rare": Color(0.4, 0.85, 0.5),
+	"epic": Color(0.62, 0.5, 1.0), "force": Color(1.0, 0.36, 0.3),
+}
+const _PERK_LABELS := {
+	"common": "COMMUN", "rare": "RARE", "epic": "ÉPIQUE", "force": "CÔTÉ OBSCUR",
+}
+var _perks_taken: Dictionary = {}
+
+func _perk_pool() -> Array:
+	return [
+		{"id": "dmg", "tier": "common", "cap": 5, "name": "Forme agressive",
+			"desc": "+15 % de dégâts au sabre",
+			"apply": func() -> void: player.cfg["dmg"] *= 1.15},
+		{"id": "hp", "tier": "common", "cap": 6, "name": "Méditation de combat",
+			"desc": "+35 PV max (et soigné)",
+			"apply": func() -> void:
+				player.cfg["hp"] += 35.0
+				player.hp += 35.0},
+		{"id": "speed", "tier": "common", "cap": 4, "name": "Pas léger",
+			"desc": "+12 % de vitesse de déplacement",
+			"apply": func() -> void: player.cfg["speed"] *= 1.12},
+		{"id": "swing", "tier": "common", "cap": 4, "name": "Maître d'armes",
+			"desc": "+12 % de vitesse d'attaque",
+			"apply": func() -> void: player.cfg["attack_anim_speed"] = player.cfg.get("attack_anim_speed", 1.3) * 1.12},
+		{"id": "heal", "tier": "common", "cap": 99, "name": "Reprends ton souffle",
+			"desc": "Régénère toute ta vie",
+			"apply": func() -> void: player.hp = player.cfg["hp"]},
+		{"id": "lifesteal", "tier": "rare", "cap": 4, "name": "Lame vampirique",
+			"desc": "+5 PV à chaque coup porté",
+			"apply": func() -> void: player.lifesteal += 5.0},
+		{"id": "armor", "tier": "rare", "cap": 4, "name": "Garde renforcée",
+			"desc": "−12 % de dégâts subis",
+			"apply": func() -> void: player.armor = clampf(player.armor + 0.12, -0.3, 0.6)},
+		{"id": "reach", "tier": "rare", "cap": 3, "name": "Allonge",
+			"desc": "+0.4 de portée du sabre",
+			"apply": func() -> void: player.cfg["reach"] = player.cfg.get("reach", 2.4) + 0.4},
+		{"id": "dashcd", "tier": "rare", "cap": 3, "name": "Esquive affûtée",
+			"desc": "Esquive 30 % plus rapide à recharger",
+			"apply": func() -> void: player.dash_cd_mul *= 0.7},
+		{"id": "forcecd", "tier": "epic", "cap": 3, "name": "Flux de Force",
+			"desc": "Pouvoirs de Force 35 % plus rapides",
+			"apply": func() -> void: player.force_cd_mul *= 0.65},
+		{"id": "parry", "tier": "epic", "cap": 3, "name": "Maître de la riposte",
+			"desc": "Fenêtre de parade +60 % • riposte renforcée",
+			"apply": func() -> void:
+				player.parry_bonus += 0.13
+				player.riposte_mul += 0.4},
+		{"id": "darkside", "tier": "force", "cap": 1, "name": "Côté obscur",
+			"desc": "+50 % de dégâts… mais +15 % de dégâts subis",
+			"apply": func() -> void:
+				player.cfg["dmg"] *= 1.5
+				player.armor = clampf(player.armor - 0.15, -0.3, 0.6)},
+		{"id": "berserker", "tier": "force", "cap": 1, "name": "Rage",
+			"desc": "+35 % de dégâts quand ta vie est basse",
+			"apply": func() -> void: player.berserker = true},
+	]
+
+func _roll_perks() -> Array:
+	# tier weights drift toward higher rarity as waves climb
+	var w := {
+		"common": maxf(0.25, 0.6 - wave * 0.03),
+		"rare": 0.28 + wave * 0.01,
+		"epic": 0.1 + wave * 0.016,
+		"force": 0.04 + wave * 0.006,
+	}
+	var pool := _perk_pool()
+	var picked: Array = []
+	var picked_ids: Array = []
+	for card in 3:
+		# weighted tier roll
+		var total := 0.0
+		for t in w:
+			total += w[t]
+		var r := randf() * total
+		var tier := "common"
+		for t in ["common", "rare", "epic", "force"]:
+			r -= w[t]
+			if r <= 0.0:
+				tier = t
+				break
+		# candidates of that tier not capped and not already on this offer
+		var cands := pool.filter(func(p: Dictionary) -> bool:
+			return p["tier"] == tier and not p["id"] in picked_ids \
+				and _perks_taken.get(p["id"], 0) < p["cap"])
+		if cands.is_empty():
+			cands = pool.filter(func(p: Dictionary) -> bool:
+				return not p["id"] in picked_ids and _perks_taken.get(p["id"], 0) < p["cap"])
+		if cands.is_empty():
+			continue
+		var chosen: Dictionary = cands[randi() % cands.size()]
+		picked.append(chosen)
+		picked_ids.append(chosen["id"])
+	return picked
+
+func _show_perk_screen() -> void:
+	var perks := _roll_perks()
+	if perks.is_empty():
+		_spawn_wave()
+		return
+	get_tree().paused = true
+	var layer := CanvasLayer.new()
+	layer.layer = 25
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.66)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(dim)
+	var root := VBoxContainer.new()
+	root.set_anchors_preset(Control.PRESET_CENTER)
+	root.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	root.grow_vertical = Control.GROW_DIRECTION_BOTH
+	root.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_theme_constant_override("separation", 26)
+	layer.add_child(root)
+	var title := UiKit.label("VAGUE %d FRANCHIE — CHOISIS UNE AMÉLIORATION" % wave, 30, UiKit.SW_YELLOW, true)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 26)
+	root.add_child(row)
+	var first_btn: Button = null
+	for p: Dictionary in perks:
+		var col: Color = _PERK_COLORS[p["tier"]]
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(300, 230)
+		card.add_theme_stylebox_override("normal", UiKit.panel_style(col, Color(0.06, 0.07, 0.1, 0.96)))
+		card.add_theme_stylebox_override("hover", UiKit.panel_style(col, Color(0.12, 0.13, 0.18, 0.98)))
+		card.add_theme_stylebox_override("focus", UiKit.panel_style(col, Color(0.12, 0.13, 0.18, 0.98)))
+		card.add_theme_stylebox_override("pressed", UiKit.panel_style(col, Color(0.14, 0.15, 0.2, 1.0)))
+		row.add_child(card)
+		var vb := VBoxContainer.new()
+		vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+		vb.alignment = BoxContainer.ALIGNMENT_CENTER
+		vb.add_theme_constant_override("separation", 12)
+		vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(vb)
+		var tier_l := UiKit.label(_PERK_LABELS[p["tier"]], 15, col, true)
+		tier_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vb.add_child(tier_l)
+		var name_l := UiKit.label(p["name"], 23, Color(1, 1, 1), true)
+		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		name_l.custom_minimum_size = Vector2(270, 0)
+		vb.add_child(name_l)
+		var desc_l := UiKit.label(p["desc"], 16, Color(0.82, 0.85, 0.92))
+		desc_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		desc_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc_l.custom_minimum_size = Vector2(270, 0)
+		vb.add_child(desc_l)
+		card.pressed.connect(func() -> void: _apply_perk(p, layer))
+		if first_btn == null:
+			first_btn = card
+	if first_btn != null:
+		first_btn.call_deferred("grab_focus")
+
+func _apply_perk(p: Dictionary, layer: CanvasLayer) -> void:
+	(p["apply"] as Callable).call()
+	_perks_taken[p["id"]] = _perks_taken.get(p["id"], 0) + 1
+	layer.queue_free()
+	get_tree().paused = false
+	_spawn_wave()
+
 func _on_died(f: GroundFighter) -> void:
 	if _ended:
 		return
@@ -2708,24 +2942,39 @@ func _on_died(f: GroundFighter) -> void:
 			foes_left = true
 	if f != player and foes_left:
 		_show_msg("ENCORE UN !")
-		hit_stop(0.12, 0.1)
+		# an occasional quick finisher on a mid-wave kill (cooldown-gated so it
+		# stays a treat, never a cutscene every kill)
+		if _finisher_cd <= 0.0 and not _finisher_active and randf() < 0.4:
+			_finisher(f, false)
+		else:
+			hit_stop(0.12, 0.1)
 		return
 	if f != player and survival_mode and player.alive:
-		# wave cleared — patch up a little and send the next one
-		hit_stop(0.18, 0.12)
+		# wave cleared — cinematic finisher on the last kill, then the upgrade
+		# screen, then the next wave
 		player.hp = minf(player.cfg["hp"], player.hp + player.cfg["hp"] * 0.22)
 		_show_msg("VAGUE %d SURVÉCUE !" % wave)
-		get_tree().create_timer(2.0).timeout.connect(_spawn_wave)
+		if not _finisher_active:
+			await _finisher(f, true)
+		else:
+			await _real_wait(0.7)
+		if not _ended:
+			_show_perk_screen()
 		return
 	if not _intro_done:
 		_end_intro()
+	var won := f != player
+	if won:
+		# cinematic finisher on the killing blow before the victory orbit
+		await _finisher(f, true)
+		if _ended:
+			return
 	_ended = true
 	Engine.time_scale = 0.32
-	var won := f != player
-	get_tree().create_timer(0.5).timeout.connect(func() -> void:
+	get_tree().create_timer(0.5, true, false, true).timeout.connect(func() -> void:
 		Engine.time_scale = 1.0
 		_start_cinematic(player if won else f))
-	get_tree().create_timer(3.4).timeout.connect(func() -> void: _show_end(won))
+	get_tree().create_timer(3.4, true, false, true).timeout.connect(func() -> void: _show_end(won))
 
 func _start_cinematic(winner: GroundFighter) -> void:
 	# slow orbit around the victor while the end panel fades in
