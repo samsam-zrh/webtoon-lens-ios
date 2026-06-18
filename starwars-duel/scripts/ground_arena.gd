@@ -98,21 +98,6 @@ const ROSTER := {
 			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
 		},
 	},
-	"critter": {
-		"name": "Bestiole", "type": "beast", "melee": true,
-		"model": "res://assets/models/megakit/Alien_Cyclop.gltf",
-		"model_yaw": 0.0, "model_scale": 1.25, "model_offset_y": 1.35,
-		"saber_color": Color(0.6, 0.95, 0.6),
-		"hp": 26.0, "speed": 5.0, "dmg": 5.0, "reach": 2.0, "lunge": 4.0, "turn_speed": 15.0,
-		"attack_time": 0.6, "attack_anim_speed": 1.0, "attack_move_factor": 0.65,
-		"ai_skill": 0.35, "ai_block_chance": 0.0,
-		"quote": "Grrrrk !",
-		"anims": {
-			"idle": "Alien_Idle", "run_f": "Alien_Idle", "run_b": "Alien_Idle",
-			"run_l": "Alien_Idle", "run_r": "Alien_Idle",
-			"attack": ["Alien_Idle"], "block": "Alien_Idle",
-			"hit": "Alien_Idle", "death": "Alien_Idle",
-		},
 	},
 }
 
@@ -293,18 +278,7 @@ func _spawn(id: String, is_player: bool, pos: Vector3, yaw: float, mods: Diction
 	f.global_position = pos
 	f.face_yaw = yaw
 	f.rotation.y = yaw
-	if f.cfg["melee"]:
-		var trail := MeshInstance3D.new()
-		trail.mesh = ImmediateMesh.new()
-		var tm := StandardMaterial3D.new()
-		tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		tm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		tm.vertex_color_use_as_albedo = true
-		tm.cull_mode = BaseMaterial3D.CULL_DISABLED
-		trail.material_override = tm
-		add_child(trail)
-		_trails[f] = {"points": [], "mesh": trail}
+	# (saber swing-trail removed — it obscured the view)
 	return f
 
 # --------------------------------------------- Imperial throne room arena
@@ -2806,28 +2780,25 @@ func _spawn_wave() -> void:
 	var boss := wave % 5 == 0
 	var hpmul := 1.0 + (wave - 1) * 0.1
 	var dmgmul := minf(1.0 + (wave - 1) * 0.05, 1.8)
-	# build the wave roster: weak critters as fodder, troopers/Sith as the
-	# threat, and a Sith master (with an escort) on every 5th wave
+	# build the wave roster: Stormtroopers as the fodder, Sith as the threat,
+	# and a Sith master (with a trooper escort) on every 5th wave
 	var roster: Array = []
 	if boss:
 		roster.append(["vader", {"name": "MAÎTRE SITH", "mul": {"hp": 1.7 * hpmul, "dmg": 1.3},
 			"set": {"ai_skill": 0.84, "ai_block_chance": 0.6}}])
 		for k in mini(2 + wave / 5, 4):
-			roster.append(["critter", {"mul": {"hp": 1.0 + wave * 0.04}}])
+			roster.append(["trooper", {"mul": {"hp": hpmul, "dmg": dmgmul}}])
 	else:
 		var n := clampi(2 + wave / 2, 2, 6)
 		for i in n:
 			var pick: String
 			if wave <= 2:
-				pick = "trooper" if i == 0 else "critter"
+				pick = "sith" if i == 0 else "trooper"
 			elif wave <= 4:
-				pick = ["sith", "critter", "trooper", "critter"][i % 4]
+				pick = ["sith", "trooper", "trooper", "sith"][i % 4]
 			else:
-				pick = ["sith", "trooper", "critter", "sith", "critter"][i % 5]
-			if pick == "critter":
-				roster.append(["critter", {"mul": {"hp": 1.0 + wave * 0.04, "dmg": dmgmul}}])
-			else:
-				roster.append([pick, {"mul": {"hp": hpmul, "dmg": dmgmul}}])
+				pick = ["sith", "trooper", "sith", "sith", "trooper"][i % 5]
+			roster.append([pick, {"mul": {"hp": hpmul, "dmg": dmgmul}}])
 	var cnt := roster.size()
 	for i in cnt:
 		var x: float = clampf((i - (cnt - 1) / 2.0) * 2.6, -5.0, 5.0)
@@ -2947,6 +2918,7 @@ func _show_perk_screen() -> void:
 		_spawn_wave()
 		return
 	get_tree().paused = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)   # so you can click the cards
 	var layer := CanvasLayer.new()
 	layer.layer = 25
 	layer.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -3009,6 +2981,7 @@ func _apply_perk(p: Dictionary, layer: CanvasLayer) -> void:
 	_perks_taken[p["id"]] = _perks_taken.get(p["id"], 0) + 1
 	layer.queue_free()
 	get_tree().paused = false
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)   # back to camera look
 	_spawn_wave()
 
 func _on_died(f: GroundFighter) -> void:

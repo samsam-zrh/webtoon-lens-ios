@@ -8,14 +8,16 @@ const ORDER := ["vader", "anakin", "han"]
 var _menu_root: Node
 var _arena: Arena
 var _preview_ships: Array = []
-var _phase := 0  # 0 = pick your pilot, 1 = pick the opponent
-var _mode := "ships"  # "ships" (dogfight) or "ground" (character duel)
+var _phase := 0  # 0 = pick hero, 1 = pick opponent, 2 = pick arena
+var _mode := "ships"     # "ships" (dogfight) or "ground" (character duel)
+var _submode := "1v1"    # ground only: "1v1" or "survival"
 var _player_pick := ""
 var _enemy_pick := ""
+var _arena_pick := "imperial"
 var _cards: Dictionary = {}
 var _header: Label
-var _survival_picking := false
 var _arena_row: HBoxContainer
+var _launch_row: VBoxContainer
 var _fps_label: Label
 
 func _ready() -> void:
@@ -153,7 +155,6 @@ func show_menu() -> void:
 	_phase = 0
 	_player_pick = ""
 	_enemy_pick = ""
-	_survival_picking = false
 	_menu_root = Node.new()
 	_menu_root.name = "Menu"
 	add_child(_menu_root)
@@ -298,38 +299,49 @@ func _build_menu_ui() -> void:
 	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	top.add_child(_header)
 
-	# Mode toggle: ship dogfight or character duel
+	# Mode buttons: Ships dogfight, 1v1 duel, Survival, Options
 	var modes := HBoxContainer.new()
 	modes.alignment = BoxContainer.ALIGNMENT_CENTER
-	modes.add_theme_constant_override("separation", 16)
+	modes.add_theme_constant_override("separation", 14)
 	top.add_child(modes)
 	var bs := UiKit.button("VAISSEAUX", 16)
-	bs.custom_minimum_size = Vector2(220, 40)
+	bs.custom_minimum_size = Vector2(190, 40)
 	bs.pressed.connect(func() -> void:
 		_mode = "ships"
 		show_menu())
 	modes.add_child(bs)
-	var bg := UiKit.button("PERSONNAGES", 16)
-	bg.custom_minimum_size = Vector2(220, 40)
-	bg.pressed.connect(func() -> void:
+	var b1 := UiKit.button("DUEL 1V1", 16)
+	b1.custom_minimum_size = Vector2(190, 40)
+	b1.pressed.connect(func() -> void:
 		_mode = "ground"
+		_submode = "1v1"
 		show_menu())
-	modes.add_child(bg)
+	modes.add_child(b1)
+	var bv := UiKit.button("SURVIE", 16)
+	bv.custom_minimum_size = Vector2(190, 40)
+	bv.pressed.connect(func() -> void:
+		_mode = "ground"
+		_submode = "survival"
+		show_menu())
+	modes.add_child(bv)
 	var bo := UiKit.button("OPTIONS", 16)
-	bo.custom_minimum_size = Vector2(160, 40)
+	bo.custom_minimum_size = Vector2(150, 40)
 	bo.pressed.connect(_show_options)
 	modes.add_child(bo)
+	# highlight the active mode
 	if _mode == "ships":
 		bs.disabled = true
+	elif _submode == "survival":
+		bv.disabled = true
 	else:
-		bg.disabled = true
-		var bv := UiKit.button("SURVIE", 16)
-		bv.custom_minimum_size = Vector2(220, 40)
-		bv.pressed.connect(func() -> void:
-			_survival_picking = true
-			_phase = 0
-			_header.text = "SURVIE : CHOISIS TON HÉROS")
-		modes.add_child(bv)
+		b1.disabled = true
+	# set the starting prompt for the chosen mode
+	if _mode == "ground" and _submode == "survival":
+		_header.text = "SURVIE — CHOISIS TON HÉROS"
+	elif _mode == "ground":
+		_header.text = "DUEL — CHOISIS TON HÉROS"
+	else:
+		_header.text = "CHOISIS TON PILOTE"
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -343,21 +355,34 @@ func _build_menu_ui() -> void:
 	for id in (ORDER if _mode == "ships" else ["luke", "kenobi", "vader", "trooper", "sith"]):
 		row.add_child(_make_card(id))
 
-	# arena selection row (phase 2), hidden until the opponent is picked
+	# arena selection row (1v1 phase 2), hidden until the opponent is picked
 	_arena_row = HBoxContainer.new()
 	_arena_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_arena_row.add_theme_constant_override("separation", 36)
+	_arena_row.add_theme_constant_override("separation", 24)
 	_arena_row.set_anchors_preset(Control.PRESET_CENTER)
 	_arena_row.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_arena_row.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_arena_row.visible = false
 	root.add_child(_arena_row)
 	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CITÉ DES NUAGES", "bespin"], ["CENTRE DE CONTRÔLE", "control"], ["COULOIR IMPÉRIAL", "imperial"]]:
-		var ab := UiKit.button(spec[0], 19)
-		ab.custom_minimum_size = Vector2(240, 115)
+		var ab := UiKit.button(spec[0], 18)
+		ab.custom_minimum_size = Vector2(230, 110)
 		ab.pressed.connect(func() -> void:
-			start_game(_player_pick, _enemy_pick, {"theme": spec[1]}))
+			_arena_pick = spec[1]
+			_header.text = "ARÈNE : %s — PRÊT ?" % spec[0]
+			_arena_row.visible = false
+			_show_launch("LANCER LE COMBAT", func() -> void:
+				start_game(_player_pick, _enemy_pick, {"theme": _arena_pick})))
 		_arena_row.add_child(ab)
+
+	# launch row (the explicit "start the fight" button), hidden until ready
+	_launch_row = VBoxContainer.new()
+	_launch_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_launch_row.set_anchors_preset(Control.PRESET_CENTER)
+	_launch_row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_launch_row.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_launch_row.visible = false
+	root.add_child(_launch_row)
 
 	var help_text: String
 	if _mode == "ships":
@@ -431,28 +456,58 @@ func _make_card(id: String) -> Button:
 	_cards[id] = b
 	return b
 
-func _on_card_pressed(id: String) -> void:
-	if _survival_picking:
-		_survival_picking = false
-		start_survival(id)
+# highlight a picked card so the selection is visible
+func _mark_card(id: String) -> void:
+	if not _cards.has(id):
 		return
+	var card: Button = _cards[id]
+	card.disabled = true
+	card.add_theme_stylebox_override("disabled",
+		UiKit.panel_style(SW_YELLOW, Color(0.07, 0.065, 0.03, 0.92)))
+
+# show the explicit "start" button with the given label + callback
+func _show_launch(text: String, cb: Callable) -> void:
+	for c in _cards.values():
+		(c as Button).visible = false
+	for c in _launch_row.get_children():
+		c.queue_free()
+	var b := UiKit.button(text, 30)
+	b.custom_minimum_size = Vector2(460, 90)
+	b.pressed.connect(cb)
+	_launch_row.add_child(b)
+	var back := UiKit.button("Changer de mode", 15)
+	back.custom_minimum_size = Vector2(220, 38)
+	back.pressed.connect(show_menu)
+	_launch_row.add_child(back)
+	_launch_row.visible = true
+
+func _on_card_pressed(id: String) -> void:
+	# SURVIE: pick a hero → launch (arena is fixed)
+	if _mode == "ground" and _submode == "survival":
+		_player_pick = id
+		_mark_card(id)
+		_header.text = "PRÊT POUR LA SURVIE ?"
+		_show_launch("LANCER LA SURVIE", func() -> void: start_survival(_player_pick))
+		return
+	# 1v1 / ships: pick hero → opponent → (arena for 1v1) → launch
 	if _phase == 0:
 		_player_pick = id
 		_phase = 1
 		_header.text = "CHOISIS TON ADVERSAIRE"
-		var card: Button = _cards[id]
-		card.disabled = true
-		var picked := UiKit.panel_style(SW_YELLOW, Color(0.07, 0.065, 0.03, 0.92))
-		card.add_theme_stylebox_override("disabled", picked)
+		_mark_card(id)
 	elif _phase == 1:
 		if id == _player_pick:
 			return
 		_enemy_pick = id
-		_phase = 2
-		_header.text = "CHOISIS L'ARÈNE"
-		for c in _cards.values():
-			(c as Button).visible = false
-		_arena_row.visible = true
+		if _mode == "ships":
+			_header.text = "PRÊT AU DÉCOLLAGE ?"
+			_show_launch("LANCER LE COMBAT", func() -> void: start_game(_player_pick, _enemy_pick))
+		else:
+			_phase = 2
+			_header.text = "CHOISIS L'ARÈNE"
+			for c in _cards.values():
+				(c as Button).visible = false
+			_arena_row.visible = true
 
 # ----------------------------------------------------------------- Game
 
