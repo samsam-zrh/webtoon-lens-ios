@@ -134,8 +134,6 @@ var _shake := 0.0
 var _hitmark_t := 0.0
 var _shake_t := 0.0
 var music: MusicDirector
-var campaign_next := false   # set by main: a "next chapter" exists after victory
-var campaign_mode := false
 var survival_mode := false
 var wave := 0
 var _survival_id := "trooper"
@@ -2206,24 +2204,28 @@ func _rumble(weak: float, strong: float, dur: float) -> void:
 
 func melee_hit(attacker: GroundFighter) -> bool:
 	var connected := false
+	var hit_player := false
 	var targets: Array = [player] if attacker != player else enemies.duplicate()
 	for target: GroundFighter in targets:
-		if target == null or not target.alive:
+		if not is_instance_valid(target) or not target.alive:
 			continue
 		var to_t: Vector3 = target.global_position - attacker.global_position
 		to_t.y = 0
 		var facing := (-attacker.global_transform.basis.z).dot(to_t.normalized())
 		if to_t.length() <= attacker.saber_reach() and facing > 0.35:
 			connected = true
+			hit_player = hit_player or target == player
 			target.take_hit(attacker.cfg["dmg"], attacker)
 			_hit_flash(target.global_position + Vector3(0, 1.2, 0), attacker.cfg["saber_color"])
-			_shake = maxf(_shake, 0.55 if target == player else 0.35)
-			if attacker == player:
-				_hitmark_t = 0.22
-			hit_stop(0.09, 0.07)
-			_rumble(0.7 if target == player else 0.35, 0.9 if target == player else 0.5, 0.22)
-			if music != null:
-				music.combat_event()
+	# fire the screen-feedback once per swing, not once per target hit
+	if connected:
+		_shake = maxf(_shake, 0.55 if hit_player else 0.35)
+		if attacker == player:
+			_hitmark_t = 0.22
+		hit_stop(0.09, 0.07)
+		_rumble(0.7 if hit_player else 0.35, 0.9 if hit_player else 0.5, 0.22)
+		if music != null:
+			music.combat_event()
 	return connected
 
 # Telekinetic shove: knocks back every opponent caught in the front cone.
@@ -2530,14 +2532,21 @@ func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
 		if is_instance_valid(p):
 			p.queue_free())
 
-# Ribbon trail behind each saber while swinging.
+# Ribbon trail behind each saber while swinging — a white-hot core under a
+# wider coloured glow so the swing reads as an energy arc, not a stick.
 func _update_trails() -> void:
-	for f: GroundFighter in _trails:
+	for f: GroundFighter in _trails.keys():
+		if not is_instance_valid(f):
+			var dead: Dictionary = _trails[f]
+			if dead.has("mesh") and is_instance_valid(dead["mesh"]):
+				dead["mesh"].queue_free()
+			_trails.erase(f)
+			continue
 		var t: Dictionary = _trails[f]
 		var pts: Array = t["points"]
 		if f.alive and f.attacking:
 			pts.append([f.trail_base, f.trail_tip])
-		if pts.size() > 16 or (not f.attacking and pts.size() > 0):
+		if pts.size() > 22 or (not f.attacking and pts.size() > 0):
 			pts.pop_front()
 		if not f.attacking and pts.size() > 0:
 			pts.pop_front()
@@ -2545,13 +2554,25 @@ func _update_trails() -> void:
 		im.clear_surfaces()
 		if pts.size() < 2:
 			continue
-		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
 		var col: Color = f.cfg["saber_color"]
-		for i in pts.size():
-			var alpha := pow(float(i) / pts.size(), 1.4) * 0.42
-			im.surface_set_color(Color(col.r, col.g, col.b, alpha))
+		var n := pts.size()
+		# outer coloured glow
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		for i in n:
+			var a := pow(float(i) / n, 1.3) * 0.85
+			im.surface_set_color(Color(col.r, col.g, col.b, a))
 			im.surface_add_vertex(pts[i][0])
 			im.surface_add_vertex(pts[i][1])
+		im.surface_end()
+		# white-hot inner core (thin, near the blade axis)
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		for i in n:
+			var a2 := pow(float(i) / n, 1.5) * 0.9
+			im.surface_set_color(Color(1.0, 1.0, 1.0, a2))
+			var base: Vector3 = pts[i][0]
+			var tip: Vector3 = pts[i][1]
+			im.surface_add_vertex(base.lerp(tip, 0.32))
+			im.surface_add_vertex(base.lerp(tip, 0.68))
 		im.surface_end()
 
 # ------------------------------------------------------------ match flow
@@ -2559,9 +2580,19 @@ func _update_trails() -> void:
 # Survival: each cleared wave brings a bigger, tougher one. Boss waves (every
 # 5th) send a Sith master. The player heals a little between waves.
 func _spawn_wave() -> void:
+	# the inter-wave timer may fire after the player has already died — never
+	# spawn a wave onto the defeat screen
+	if _ended or player == null or not player.alive:
+		return
 	wave += 1
 	for old in enemies:
 		if is_instance_valid(old):
+			# free the dead fighter's swing trail too, or it leaks every wave
+			if _trails.has(old):
+				var t: Dictionary = _trails[old]
+				if t.has("mesh") and is_instance_valid(t["mesh"]):
+					t["mesh"].queue_free()
+				_trails.erase(old)
 			old.queue_free()
 	enemies.clear()
 	var boss := wave % 5 == 0
@@ -2669,17 +2700,10 @@ func _show_end(won: bool) -> void:
 	var sub_txt := "La Force est puissante en toi." if won else "« %s »" % enemy.cfg["quote"]
 	if survival_mode:
 		sub_txt = "Tu as résisté jusqu'à la VAGUE %d." % wave
-	elif won and campaign_mode and not campaign_next:
-		sub_txt = "La campagne est terminée. La galaxie se souviendra de toi."
 	var sub := UiKit.label(sub_txt, 22, Color(0.85, 0.85, 0.92))
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
-	if won and campaign_mode and campaign_next:
-		var bn := UiKit.button("CHAPITRE SUIVANT", 22)
-		bn.custom_minimum_size = Vector2(440, 58)
-		bn.pressed.connect(func() -> void: request_next.emit())
-		box.add_child(bn)
-	var b1 := UiKit.button("RECOMMENCER CE DUEL" if campaign_mode else "REJOUER", 22)
+	var b1 := UiKit.button("REJOUER", 22)
 	b1.custom_minimum_size = Vector2(440, 58)
 	b1.pressed.connect(func() -> void: request_restart.emit())
 	box.add_child(b1)

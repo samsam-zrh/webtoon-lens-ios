@@ -144,11 +144,14 @@ func combat_event(amount := 1.0) -> void:
 	_heat = clampf(_heat + amount, 0.0, 6.0)
 
 func _process(delta: float) -> void:
-	if _arena == null or _arena.player == null:
+	if _arena == null or not is_instance_valid(_arena.player):
 		return
 	_heat = maxf(0.0, _heat - delta * 0.5)
 	var p := _arena.player
 	var e := _arena.enemy
+	# enemy can be freed for a frame during a survival wave transition
+	if not is_instance_valid(e):
+		return
 	var dist := p.global_position.distance_to(e.global_position)
 	var fighting := (dist < 10.0 and p.controls_enabled) or _heat > 0.5
 	var low_hp: float = minf(p.hp / p.cfg["hp"], e.hp / e.cfg["hp"])
