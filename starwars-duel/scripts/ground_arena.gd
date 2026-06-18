@@ -1170,31 +1170,33 @@ func _build_bespin_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.25
-	env.ambient_light_color = Color(0.68, 0.55, 0.45)
+	env.ambient_light_energy = 1.2
+	env.ambient_light_color = Color(0.6, 0.55, 0.52)
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.18
+	env.tonemap_exposure = 1.16
 	env.glow_enabled = true
-	env.glow_intensity = 0.45
-	env.glow_bloom = 0.1
-	env.glow_hdr_threshold = 1.0
+	env.glow_intensity = 0.4
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 1.1
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
-	env.ssao_intensity = 1.6
+	env.ssao_intensity = 1.8
 	env.ssr_enabled = q >= 2
 	env.ssr_max_steps = 16
 	env.ssr_fade_out = 1.5
 	env.sdfgi_enabled = q >= 3
+	# much lighter, desaturated fog so the chamber has contrast instead of an
+	# orange whiteout (audit fix)
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.95, 0.62, 0.32)
-	env.fog_density = 0.0035
-	env.fog_sky_affect = 0.25
+	env.fog_light_color = Color(0.8, 0.62, 0.48)
+	env.fog_density = 0.0014
+	env.fog_sky_affect = 0.2
 	env.volumetric_fog_enabled = q >= 1
-	env.volumetric_fog_density = 0.0035
-	env.volumetric_fog_albedo = Color(0.9, 0.72, 0.55)
-	env.volumetric_fog_emission = Color(0.05, 0.025, 0.01)
-	env.volumetric_fog_length = 60.0
+	env.volumetric_fog_density = 0.0014
+	env.volumetric_fog_albedo = Color(0.7, 0.62, 0.56)
+	env.volumetric_fog_emission = Color(0.04, 0.022, 0.012)
+	env.volumetric_fog_length = 50.0
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
