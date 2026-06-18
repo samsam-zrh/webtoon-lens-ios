@@ -1581,32 +1581,32 @@ func _build_control() -> void:
 	# deck
 	for x in xcols:
 		for z in zcols:
-			_mk("Platform_Metal", Vector3(x, 0, z), 0)
+			_mm_add("Platform_Metal", Vector3(x, 0, z), 0)
 	# side walls (x = ±14) with the entry door on the left
 	for z in zcols:
 		if z == 0.0:
 			_mk("Door_Frame_Square", Vector3(-14, 0, 0), -PI / 2.0)
 		else:
-			_mk("WallBand_Straight", Vector3(-12, 0, z), 0)
-		_mk("WallBand_Straight", Vector3(12, 0, z), PI)
-		_mk("TopSimple_Straight", Vector3(-12, 0, z), 0)
-		_mk("TopSimple_Straight", Vector3(12, 0, z), PI)
+			_mm_add("WallBand_Straight", Vector3(-12, 0, z), 0)
+		_mm_add("WallBand_Straight", Vector3(12, 0, z), PI)
+		_mm_add("TopSimple_Straight", Vector3(-12, 0, z), 0)
+		_mm_add("TopSimple_Straight", Vector3(12, 0, z), PI)
 	# end walls: -z opens onto space, +z is a viewport onto the reactor chamber
 	for x in xcols:
 		if x in win:
-			_mk("WallWindow_Straight", Vector3(x, 0, -18), -PI / 2.0)
+			_mm_add("WallWindow_Straight", Vector3(x, 0, -18), -PI / 2.0)
 			_starfield_panel(Vector3(x, 1.9, -20.4), Vector3(0, 0, 1))
-			_mk("WallWindow_Straight", Vector3(x, 0, 18), PI / 2.0)
+			_mm_add("WallWindow_Straight", Vector3(x, 0, 18), PI / 2.0)
 		else:
-			_mk("WallBand_Straight", Vector3(x, 0, -18), -PI / 2.0)
-			_mk("WallBand_Straight", Vector3(x, 0, 18), PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(x, 0, -18), -PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(x, 0, 18), PI / 2.0)
+			_mm_add("WallBand_Straight", Vector3(x, 0, -18), -PI / 2.0)
+			_mm_add("WallBand_Straight", Vector3(x, 0, 18), PI / 2.0)
+		_mm_add("TopSimple_Straight", Vector3(x, 0, -18), -PI / 2.0)
+		_mm_add("TopSimple_Straight", Vector3(x, 0, 18), PI / 2.0)
 
 	# corner + mid-wall pilaster columns
 	for c in [Vector3(-12, 0, -16), Vector3(12, 0, -16), Vector3(-12, 0, 16), Vector3(12, 0, 16),
 			Vector3(-12, 0, 0), Vector3(12, 0, 0)]:
-		_mk("Column_Round", c, 0)
+		_mm_add("Column_Round", c, 0)
 
 	# glowing reactor core in a chamber behind the +z viewport (out of the deck)
 	var core := MeshInstance3D.new()
@@ -1669,8 +1669,8 @@ func _build_control() -> void:
 
 	# floor light-lines tracing the deck edge
 	for z in zcols:
-		_mk("Prop_Light_Floor", Vector3(-13.4, 0, z), PI / 2.0)
-		_mk("Prop_Light_Floor", Vector3(13.4, 0, z), -PI / 2.0)
+		_mm_add("Prop_Light_Floor", Vector3(-13.4, 0, z), PI / 2.0)
+		_mm_add("Prop_Light_Floor", Vector3(13.4, 0, z), -PI / 2.0)
 
 	# a lean set of wall lights (big range; high ambient carries the rest)
 	for p in [Vector3(-13.6, 3.2, -8), Vector3(13.6, 3.2, 8), Vector3(-13.6, 3.2, 8), Vector3(13.6, 3.2, -8)]:
@@ -1712,6 +1712,8 @@ func _build_control() -> void:
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
 
+	_mm_flush()   # batch the ~120 queued deck/wall modules into a few draw calls
+
 # An emissive starfield panel facing `face_dir`, used as a viewport onto space.
 func _starfield_panel(pos: Vector3, face_dir: Vector3) -> void:
 	var q := MeshInstance3D.new()
@@ -1749,6 +1751,74 @@ func _mk(nm: String, pos: Vector3, yaw: float, parent: Node = self) -> Node3D:
 	n.rotation.y = yaw
 	parent.add_child(n)
 	return n
+
+# ---- MultiMesh batching: identical static modules collapse to one draw call.
+var _mm_batch: Dictionary = {}   # module name -> Array[Transform3D]
+var _mm_cache: Dictionary = {}   # module name -> {mesh, offset}
+
+# queue a module for batched (MultiMesh) rendering instead of a live instance
+func _mm_add(name: String, pos: Vector3, yaw: float) -> void:
+	if not _mm_batch.has(name):
+		_mm_batch[name] = []
+	_mm_batch[name].append(Transform3D(Basis(Vector3.UP, yaw), pos))
+
+func _find_mesh_instance(n: Node) -> MeshInstance3D:
+	if n is MeshInstance3D:
+		return n
+	for c in n.get_children():
+		var m := _find_mesh_instance(c)
+		if m != null:
+			return m
+	return null
+
+func _xform_to_root(root: Node, node: Node3D) -> Transform3D:
+	var t := Transform3D.IDENTITY
+	var cur: Node = node
+	while cur != null and cur != root:
+		if cur is Node3D:
+			t = (cur as Node3D).transform * t
+		cur = cur.get_parent()
+	return t
+
+func _module_mesh(name: String) -> Dictionary:
+	if _mm_cache.has(name):
+		return _mm_cache[name]
+	var data: Dictionary = {}
+	var scn := load("res://assets/models/megakit/%s.gltf" % name)
+	if scn != null:
+		var inst: Node3D = scn.instantiate()
+		var mi := _find_mesh_instance(inst)
+		if mi != null and mi.mesh != null:
+			data["mesh"] = mi.mesh
+			data["offset"] = _xform_to_root(inst, mi)
+			var ov: Material = mi.get_surface_override_material(0) if mi.get_surface_override_material_count() > 0 else null
+			data["override"] = ov
+		inst.queue_free()
+	_mm_cache[name] = data
+	return data
+
+# build one MultiMeshInstance3D per queued module type, then clear the batch
+func _mm_flush() -> void:
+	for name in _mm_batch:
+		var data := _module_mesh(name)
+		var xforms: Array = _mm_batch[name]
+		if not data.has("mesh"):
+			for xf: Transform3D in xforms:
+				_mk(name, xf.origin, xf.basis.get_euler().y)
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = data["mesh"]
+		mm.instance_count = xforms.size()
+		var off: Transform3D = data["offset"]
+		for i in xforms.size():
+			mm.set_instance_transform(i, (xforms[i] as Transform3D) * off)
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		if data.get("override") != null:
+			mmi.material_override = data["override"]
+		add_child(mmi)
+	_mm_batch.clear()
 
 func _build_imperial_environment() -> void:
 	var env := Environment.new()
@@ -1794,26 +1864,26 @@ func _build_imperial() -> void:
 	# deck
 	for z in zs:
 		for cx in floor_cols:
-			_mk("Platform_Metal", Vector3(cx, 0, z), 0)
+			_mm_add("Platform_Metal", Vector3(cx, 0, z), 0)
 	# long side walls + top trim; window bays where they open onto space
 	for z in zs:
 		for side in [-1.0, 1.0]:
 			var yaw := 0.0 if side < 0 else PI
 			if z in windows:
-				_mk("WallWindow_Straight", Vector3(side * hx, 0, z), yaw)
+				_mm_add("WallWindow_Straight", Vector3(side * hx, 0, z), yaw)
 				_imp_starfield(side, float(z))
 			else:
-				_mk("WallBand_Straight", Vector3(side * hx, 0, z), yaw)
-			_mk("TopSimple_Straight", Vector3(side * hx, 0, z), yaw)
+				_mm_add("WallBand_Straight", Vector3(side * hx, 0, z), yaw)
+			_mm_add("TopSimple_Straight", Vector3(side * hx, 0, z), yaw)
 	# end caps: far end (-z) with a blast-door, near end (+z) sealed
 	for cx in floor_cols:
 		if cx == 0.0:
 			_mk("Door_Frame_Square", Vector3(0, 0, -22), 0)
 		else:
-			_mk("WallBand_Straight", Vector3(cx, 0, -22), -PI / 2.0)
-		_mk("WallBand_Straight", Vector3(cx, 0, 22), PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(cx, 0, -22), -PI / 2.0)
-		_mk("TopSimple_Straight", Vector3(cx, 0, 22), PI / 2.0)
+			_mm_add("WallBand_Straight", Vector3(cx, 0, -22), -PI / 2.0)
+		_mm_add("WallBand_Straight", Vector3(cx, 0, 22), PI / 2.0)
+		_mm_add("TopSimple_Straight", Vector3(cx, 0, -22), -PI / 2.0)
+		_mm_add("TopSimple_Straight", Vector3(cx, 0, 22), PI / 2.0)
 
 	# pilaster columns + overhead ribs giving the hall rhythm and depth
 	var rib_mat := StandardMaterial3D.new()
@@ -1821,8 +1891,8 @@ func _build_imperial() -> void:
 	rib_mat.metallic = 0.75
 	rib_mat.roughness = 0.38
 	for z in ribs:
-		_mk("Column_Simple", Vector3(-5.7, 0, z), 0)
-		_mk("Column_Simple", Vector3(5.7, 0, z), PI)
+		_mm_add("Column_Simple", Vector3(-5.7, 0, z), 0)
+		_mm_add("Column_Simple", Vector3(5.7, 0, z), PI)
 		var rib := MeshInstance3D.new()
 		var rbm := BoxMesh.new()
 		rbm.size = Vector3(12.4, 0.7, 0.8)
@@ -1857,14 +1927,14 @@ func _build_imperial() -> void:
 
 	# floor light-lines down both edges → strong leading lines into the depth
 	for z in zs:
-		_mk("Prop_Light_Floor", Vector3(-5.4, 0, z), PI / 2.0)
-		_mk("Prop_Light_Floor", Vector3(5.4, 0, z), -PI / 2.0)
+		_mm_add("Prop_Light_Floor", Vector3(-5.4, 0, z), PI / 2.0)
+		_mm_add("Prop_Light_Floor", Vector3(5.4, 0, z), -PI / 2.0)
 
 	# wall light fixtures (emissive models, free) at every bay — these carry the
 	# look; the high ambient does most of the actual lighting
 	for z in [-16, -8, 0, 8, 16]:
 		for side in [-1.0, 1.0]:
-			_mk("Prop_Light_Wide", Vector3(side * 5.9, 3.1, z), 0 if side < 0 else PI)
+			_mm_add("Prop_Light_Wide", Vector3(side * 5.9, 3.1, z), 0 if side < 0 else PI)
 	# a deliberately lean set of real lights (big-range so few are needed)
 	for z in [-12, 0, 12]:
 		for side in [-1.0, 1.0]:
@@ -1934,6 +2004,8 @@ func _build_imperial() -> void:
 	probe.position = Vector3(0, 2.5, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
+
+	_mm_flush()   # collapse the ~110 queued modules into a few MultiMesh draws
 
 # A viewport onto space behind a window bay: an emissive starfield panel just
 # outside the wall, with a faint blue light spilling into the corridor.
