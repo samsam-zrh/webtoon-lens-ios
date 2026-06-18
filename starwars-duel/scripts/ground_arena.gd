@@ -407,11 +407,11 @@ func _build_environment() -> void:
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.4
-	env.ssr_enabled = q >= 1
-	env.ssr_max_steps = 48
+	env.ssr_enabled = q >= 2
+	env.ssr_max_steps = 16
 	env.ssr_fade_in = 0.12
 	env.ssr_fade_out = 1.5
-	env.sdfgi_enabled = q >= 2
+	env.sdfgi_enabled = q >= 3
 	env.volumetric_fog_enabled = q >= 1
 	env.volumetric_fog_density = 0.005
 	env.volumetric_fog_albedo = Color(0.55, 0.62, 0.8)
@@ -1179,10 +1179,10 @@ func _build_bespin_environment() -> void:
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.6
-	env.ssr_enabled = q >= 1
-	env.ssr_max_steps = 40
+	env.ssr_enabled = q >= 2
+	env.ssr_max_steps = 16
 	env.ssr_fade_out = 1.5
-	env.sdfgi_enabled = q >= 2
+	env.sdfgi_enabled = q >= 3
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.95, 0.62, 0.32)
 	env.fog_density = 0.0035
@@ -1537,9 +1537,9 @@ func _build_control_environment() -> void:
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.8
-	env.ssr_enabled = q >= 1
-	env.ssr_max_steps = 40
-	env.sdfgi_enabled = q >= 2
+	env.ssr_enabled = q >= 2
+	env.ssr_max_steps = 16
+	env.sdfgi_enabled = q >= 3
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.4, 0.5, 0.7)
 	env.fog_light_energy = 1.0
@@ -1665,23 +1665,21 @@ func _build_control() -> void:
 		_mk("Prop_Light_Floor", Vector3(-13.4, 0, z), PI / 2.0)
 		_mk("Prop_Light_Floor", Vector3(13.4, 0, z), -PI / 2.0)
 
-	# wall light glows
-	for p in [Vector3(-13.6, 3.0, -10), Vector3(-13.6, 3.0, 8), Vector3(13.6, 3.0, -8),
-			Vector3(13.6, 3.0, 10), Vector3(-13.6, 3.0, 0), Vector3(13.6, 3.0, 0)]:
+	# a lean set of wall lights (big range; high ambient carries the rest)
+	for p in [Vector3(-13.6, 3.2, -8), Vector3(13.6, 3.2, 8), Vector3(-13.6, 3.2, 8), Vector3(13.6, 3.2, -8)]:
 		var ol := OmniLight3D.new()
 		ol.position = p
 		ol.light_color = Color(0.85, 0.9, 1.0)
-		ol.light_energy = 2.6
-		ol.omni_range = 12.0
+		ol.light_energy = 3.0
+		ol.omni_range = 16.0
 		add_child(ol)
-	# overhead fill lights down the centre so the deck reads clearly
-	for z in [-12, -4, 4, 12]:
-		var cl := OmniLight3D.new()
-		cl.position = Vector3(0, 4.5, z)
-		cl.light_color = Color(0.8, 0.87, 1.0)
-		cl.light_energy = 2.2
-		cl.omni_range = 13.0
-		add_child(cl)
+	# one overhead centre fill
+	var cl := OmniLight3D.new()
+	cl.position = Vector3(0, 4.6, 0)
+	cl.light_color = Color(0.8, 0.87, 1.0)
+	cl.light_energy = 2.4
+	cl.omni_range = 20.0
+	add_child(cl)
 
 	# interactive physics crates around the deck
 	_phys_prop("Prop_Crate3", Vector3(-7, 0, -6), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
@@ -1750,8 +1748,8 @@ func _build_imperial_environment() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.015, 0.016, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.48, 0.54, 0.66)
-	env.ambient_light_energy = 1.95
+	env.ambient_light_color = Color(0.5, 0.56, 0.68)
+	env.ambient_light_energy = 2.2
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.36
 	env.glow_enabled = true
@@ -1760,11 +1758,11 @@ func _build_imperial_environment() -> void:
 	env.glow_hdr_threshold = 1.05
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
-	env.ssao_intensity = 2.0
-	env.ssr_enabled = q >= 1
-	env.ssr_max_steps = 48
+	env.ssao_intensity = 1.8
+	env.ssr_enabled = q >= 2
+	env.ssr_max_steps = 16
 	env.ssr_fade_out = 2.0
-	env.sdfgi_enabled = q >= 2
+	env.sdfgi_enabled = q >= 3
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.4, 0.45, 0.6)
 	env.fog_density = 0.004
@@ -1855,32 +1853,27 @@ func _build_imperial() -> void:
 		_mk("Prop_Light_Floor", Vector3(-5.4, 0, z), PI / 2.0)
 		_mk("Prop_Light_Floor", Vector3(5.4, 0, z), -PI / 2.0)
 
-	# wall lights between the bays, each casting a real glow
+	# wall light fixtures (emissive models, free) at every bay — these carry the
+	# look; the high ambient does most of the actual lighting
 	for z in [-16, -8, 0, 8, 16]:
 		for side in [-1.0, 1.0]:
 			_mk("Prop_Light_Wide", Vector3(side * 5.9, 3.1, z), 0 if side < 0 else PI)
+	# a deliberately lean set of real lights (big-range so few are needed)
+	for z in [-12, 0, 12]:
+		for side in [-1.0, 1.0]:
 			var ol := OmniLight3D.new()
-			ol.position = Vector3(side * 5.2, 3.0, z)
+			ol.position = Vector3(side * 5.2, 3.2, z)
 			ol.light_color = Color(0.85, 0.9, 1.0)
-			ol.light_energy = 2.6
-			ol.omni_range = 10.0
-			ol.light_volumetric_fog_energy = 0.5
+			ol.light_energy = 3.2
+			ol.omni_range = 14.0
 			add_child(ol)
-	# overhead fill down the centre so the deck never falls into shadow
-	for z in [-18, -10, -2, 6, 14, 20]:
-		var fl := OmniLight3D.new()
-		fl.position = Vector3(0, 4.4, z)
-		fl.light_color = Color(0.8, 0.86, 1.0)
-		fl.light_energy = 2.0
-		fl.omni_range = 12.0
-		add_child(fl)
-	# warm red glow washing the accent bands at floor level
-	for z in [-16, -8, 0, 8, 16]:
+	# two warm red accent washes over the floor bands
+	for z in [-9, 9]:
 		var rl := OmniLight3D.new()
 		rl.position = Vector3(0, 0.9, z)
 		rl.light_color = Color(1.0, 0.3, 0.2)
-		rl.light_energy = 0.9
-		rl.omni_range = 6.5
+		rl.light_energy = 1.1
+		rl.omni_range = 8.0
 		add_child(rl)
 
 	# greeble: computer banks, vents, access consoles, crates, barrels

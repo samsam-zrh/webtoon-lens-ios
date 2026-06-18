@@ -91,6 +91,15 @@ func setup(p_cfg: Dictionary, p_is_player: bool, p_arena: Node3D) -> void:
 		model.position.y = cfg["model_offset_y"]
 	add_child(model)
 
+	# soft contact shadow projected on the floor so the fighter feels grounded
+	var shadow := Decal.new()
+	shadow.texture_albedo = load("res://assets/textures/contact_shadow.png")
+	shadow.size = Vector3(1.7, 1.4, 1.7)
+	shadow.position = Vector3(0, 0.6, 0)
+	shadow.modulate = Color(0, 0, 0, 0.9)
+	shadow.cull_mask = 1
+	add_child(shadow)
+
 	_base_yaw = cfg.get("model_yaw", 0.0)
 	anim = model.find_child("AnimationPlayer", true, false)
 	if anim != null:
@@ -245,8 +254,8 @@ func _setup_blade() -> void:
 		blade_mesh.add_sibling.call_deferred(halo_mesh)
 		blade_light = OmniLight3D.new()
 		blade_light.light_color = color
-		blade_light.light_energy = 2.6
-		blade_light.omni_range = 3.8
+		blade_light.light_energy = 1.5
+		blade_light.omni_range = 2.2
 		blade_mesh.add_child(blade_light)
 	# Glowing hilt details (Vader's saber controls)
 	for extra_name in cfg.get("blade_extra", []):
