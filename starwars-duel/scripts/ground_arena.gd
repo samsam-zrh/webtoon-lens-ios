@@ -417,7 +417,7 @@ func _build_environment() -> void:
 	env.ssr_fade_in = 0.12
 	env.ssr_fade_out = 1.5
 	env.sdfgi_enabled = q >= 3
-	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_enabled = q >= 2
 	env.volumetric_fog_density = 0.005
 	env.volumetric_fog_albedo = Color(0.55, 0.62, 0.8)
 	env.volumetric_fog_emission = Color(0.02, 0.025, 0.045)
@@ -1194,7 +1194,7 @@ func _build_bespin_environment() -> void:
 	env.fog_light_color = Color(0.8, 0.62, 0.48)
 	env.fog_density = 0.0014
 	env.fog_sky_affect = 0.2
-	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_enabled = q >= 2
 	env.volumetric_fog_density = 0.0014
 	env.volumetric_fog_albedo = Color(0.7, 0.62, 0.56)
 	env.volumetric_fog_emission = Color(0.04, 0.022, 0.012)
@@ -1552,7 +1552,7 @@ func _build_control_environment() -> void:
 	env.fog_light_energy = 1.0
 	env.fog_density = 0.0022
 	env.fog_sky_affect = 0.0
-	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_enabled = q >= 2
 	env.volumetric_fog_density = 0.0022
 	env.volumetric_fog_albedo = Color(0.5, 0.58, 0.74)
 	env.volumetric_fog_emission = Color(0.02, 0.025, 0.04)
@@ -1773,7 +1773,7 @@ func _build_imperial_environment() -> void:
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.4, 0.45, 0.6)
 	env.fog_density = 0.004
-	env.volumetric_fog_enabled = q >= 1
+	env.volumetric_fog_enabled = q >= 2
 	env.volumetric_fog_density = 0.004
 	env.volumetric_fog_albedo = Color(0.5, 0.55, 0.7)
 	var we := WorldEnvironment.new()
@@ -2524,6 +2524,11 @@ func spawn_bolt(from: GroundFighter) -> void:
 	_bolts.append({"node": bolt, "dir": dir, "life": 1.6, "from": from})
 
 func _update_bolts(delta: float) -> void:
+	if _bolts.is_empty():
+		return
+	# build the fighter list once per frame instead of once per bolt
+	var fighters: Array = [player]
+	fighters.append_array(enemies)
 	var keep: Array = []
 	for b in _bolts:
 		var node: MeshInstance3D = b["node"]
@@ -2532,8 +2537,8 @@ func _update_bolts(delta: float) -> void:
 		node.position += b["dir"] * 32.0 * delta
 		var dead: bool = b["life"] <= 0.0
 		# Hit fighters — a saber held in guard DEFLECTS the bolt back
-		for f: GroundFighter in [player] + enemies:
-			if f == b["from"] or not f.alive or dead:
+		for f: GroundFighter in fighters:
+			if not is_instance_valid(f) or f == b["from"] or not f.alive or dead:
 				continue
 			var center: Vector3 = f.global_position + Vector3(0, 1.0, 0)
 			if _seg_point_dist(prev, node.position, center) < 0.55:
@@ -2632,9 +2637,12 @@ func _sparks(at: Vector3, color: Color, count: int, vel: float) -> void:
 	mat.color = color
 	mat.damping_min = 1.2
 	mat.damping_max = 3.0
-	mat.collision_mode = ParticleProcessMaterial.COLLISION_RIGID
-	mat.collision_bounce = 0.5
-	mat.collision_friction = 0.3
+	# particle-floor collision only on the High tier — sparks fire constantly in
+	# combat and the SDF collision sampling is the cost; they just fall otherwise
+	if GameSettings.quality >= 2:
+		mat.collision_mode = ParticleProcessMaterial.COLLISION_RIGID
+		mat.collision_bounce = 0.5
+		mat.collision_friction = 0.3
 	var dm := SphereMesh.new()
 	dm.radius = 0.022
 	dm.height = 0.044

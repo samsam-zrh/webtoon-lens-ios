@@ -267,6 +267,10 @@ func _setup_blade() -> void:
 		blade_light.light_color = color
 		blade_light.light_energy = 1.5
 		blade_light.omni_range = 2.2
+		# distant blade lights (crowded survival waves) stop shading
+		blade_light.distance_fade_enabled = true
+		blade_light.distance_fade_begin = 16.0
+		blade_light.distance_fade_length = 6.0
 		blade_mesh.add_child(blade_light)
 	# Glowing hilt details (Vader's saber controls)
 	for extra_name in cfg.get("blade_extra", []):

@@ -11,7 +11,7 @@ var fov := 65.0
 var volume_master := 1.0    # 0..1
 var volume_music := 1.0
 var volume_sfx := 1.0
-var quality := 2            # 0 = low, 1 = medium, 2 = high
+var quality := 1            # 0 = low, 1 = medium, 2 = high, 3 = ultra
 var rumble := true
 var show_fps := false
 var fullscreen := true
@@ -64,3 +64,22 @@ func apply() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	elif not fullscreen and mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+
+	# tie the GPU-heavy viewport settings to the quality tier
+	var q := clampi(quality, 0, 3)
+	var vp := get_viewport()
+	if vp != null:
+		vp.msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_4X][q]
+		# cheap FXAA stands in for MSAA on Low; TAA only on Ultra
+		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
+		vp.use_taa = q >= 3
+		if q == 0:
+			# render at lower resolution and upscale (FSR) — big win on weak GPUs
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
+			vp.scaling_3d_scale = 0.77
+		else:
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+			vp.scaling_3d_scale = 1.0
+		vp.positional_shadow_atlas_size = 2048 if q <= 1 else 4096
+	# smaller directional shadow on the low tiers
+	RenderingServer.directional_shadow_atlas_set_size(2048 if q <= 1 else 4096, true)
