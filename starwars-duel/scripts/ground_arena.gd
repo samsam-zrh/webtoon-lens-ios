@@ -344,6 +344,7 @@ func _build_corridor() -> void:
 		_build_floor()
 		_build_walls()
 		_build_ceiling()
+		_build_pilasters()
 		_build_throne()
 		_build_banners()
 		_build_spectators()
@@ -374,10 +375,10 @@ func _build_environment() -> void:
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.4, 0.44, 0.54)
-	env.ambient_light_energy = 2.15
+	env.ambient_light_energy = 2.0
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.38
+	env.tonemap_exposure = 1.28
 	env.glow_enabled = true
 	env.glow_intensity = 0.42
 	env.glow_bloom = 0.06
@@ -505,7 +506,7 @@ func _build_floor() -> void:
 	cm.height = 0.2
 	cm.radial_segments = 8
 	var fm := StandardMaterial3D.new()
-	fm.albedo_color = Color(0.035, 0.037, 0.045)
+	fm.albedo_color = Color(0.07, 0.073, 0.085)
 	fm.metallic = 0.85
 	fm.roughness = 0.13
 	fm.normal_enabled = true
@@ -540,7 +541,7 @@ func _build_walls() -> void:
 	# Octagonal room; the three north segments are one giant viewport
 	var panel := _mat_panel()
 	var dark := StandardMaterial3D.new()
-	dark.albedo_color = Color(0.08, 0.083, 0.10)
+	dark.albedo_color = Color(0.16, 0.17, 0.21)
 	dark.metallic = 0.4
 	dark.roughness = 0.5
 	var strip_w := _mat_emissive(Color(0.8, 0.88, 1.0), 2.6)
@@ -610,6 +611,56 @@ func _build_ceiling() -> void:
 		beam.position = Vector3(sin(ang) * (ROOM_R + 8.0) / 2.0, ROOM_H - 0.3, -cos(ang) * (ROOM_R + 8.0) / 2.0)
 		beam.rotation.y = -ang
 
+func _build_pilasters() -> void:
+	# Freestanding columns at the eight octagon corners give the flat-walled
+	# chamber vertical rhythm and catch the rim lights. Column_Round is 1x5x1
+	# (origin centre-bottom) and carries the kit's red Imperial trim sheet.
+	var scn := load("res://assets/models/megakit/Column_Round.gltf")
+	if scn == null:
+		return
+	var circum := ROOM_R / cos(PI / 8.0)        # distance to a corner vertex
+	for i in 8:
+		var ang := TAU * i / 8.0 + PI / 8.0      # corner, between two wall faces
+		var col: Node3D = scn.instantiate()
+		col.position = Vector3(sin(ang) * (circum - 0.7), 0, -cos(ang) * (circum - 0.7))
+		col.rotation.y = -ang
+		col.scale = Vector3(1.35, ROOM_H / 5.0 + 0.1, 1.35)   # fill floor-to-ceiling
+		add_child(col)
+		# slim emissive band where the capital meets the ceiling
+		var cap := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.78
+		cm.bottom_radius = 0.78
+		cm.height = 0.18
+		cm.radial_segments = 12
+		cm.material = _mat_emissive(Color(1.0, 0.16, 0.1), 1.4)
+		cap.mesh = cm
+		cap.position = Vector3(sin(ang) * (circum - 0.7), ROOM_H - 0.5, -cos(ang) * (circum - 0.7))
+		add_child(cap)
+		# every corner gets a soft cool fill so the chamber walls and the duel
+		# ground stay readable instead of sinking into black
+		var fill := OmniLight3D.new()
+		fill.position = Vector3(sin(ang) * (circum - 2.5), 5.5, -cos(ang) * (circum - 2.5))
+		fill.light_color = Color(0.74, 0.82, 1.0)
+		fill.light_energy = 1.8
+		fill.omni_range = 18.0
+		add_child(fill)
+	# central duel keylight: lifts the fighters and the mirror floor at the
+	# centre of the chamber so they never silhouette against the bright viewport
+	var duel_key := OmniLight3D.new()
+	duel_key.position = Vector3(0, 6.0, 1.5)
+	duel_key.light_color = Color(0.86, 0.9, 1.0)
+	duel_key.light_energy = 3.2
+	duel_key.omni_range = 20.0
+	add_child(duel_key)
+	# soft fill from the viewport (south) side so the duelists' camera-facing
+	# fronts catch light instead of going dark against the starfield
+	var south := DirectionalLight3D.new()
+	south.light_energy = 0.7
+	south.light_color = Color(0.8, 0.86, 1.0)
+	south.rotation = Vector3(-0.5, 0.0, 0.0)
+	add_child(south)
+
 func _build_throne() -> void:
 	# Raised dais with the throne, facing the viewport (south side)
 	var panel := _mat_panel()
@@ -638,13 +689,38 @@ func _build_throne() -> void:
 		lip.position.y = 0.28 * (i + 1)
 		lip.scale.y = 0.1
 		holder.add_child(lip)
-	# The throne itself: tall back, armrests, seat
+	# The throne itself: tall back, armrests, seat — carved obsidian, not deck panel
+	var obsidian := StandardMaterial3D.new()
+	obsidian.albedo_color = Color(0.04, 0.042, 0.05)
+	obsidian.metallic = 0.5
+	obsidian.roughness = 0.22
+	obsidian.rim_enabled = true
+	obsidian.rim = 0.6
+	obsidian.rim_tint = 0.7
 	var seat_y := 3 * 0.28
-	_box(Vector3(1.5, 0.5, 1.3), Vector3(0, seat_y + 0.25, 0.4), panel, holder)
-	_box(Vector3(1.6, 3.0, 0.4), Vector3(0, seat_y + 1.5, 1.05), panel, holder)
-	_box(Vector3(0.32, 0.85, 1.1), Vector3(-0.92, seat_y + 0.7, 0.45), panel, holder)
-	_box(Vector3(0.32, 0.85, 1.1), Vector3(0.92, seat_y + 0.7, 0.45), panel, holder)
+	_box(Vector3(1.5, 0.5, 1.3), Vector3(0, seat_y + 0.25, 0.4), obsidian, holder)
+	_box(Vector3(1.6, 3.0, 0.4), Vector3(0, seat_y + 1.5, 1.05), obsidian, holder)
+	_box(Vector3(0.32, 0.85, 1.1), Vector3(-0.92, seat_y + 0.7, 0.45), obsidian, holder)
+	_box(Vector3(0.32, 0.85, 1.1), Vector3(0.92, seat_y + 0.7, 0.45), obsidian, holder)
 	_box(Vector3(1.2, 0.08, 0.1), Vector3(0, seat_y + 2.6, 0.84), _mat_emissive(Color(1.0, 0.2, 0.12), 2.0), holder)
+	# Hero rim light: a tight red wash behind the throne so it reads as the focal
+	# point of the chamber without flooding the room.
+	var hero := OmniLight3D.new()
+	hero.position = Vector3(0, seat_y + 2.4, 1.9)
+	hero.omni_range = 6.5
+	hero.light_energy = 2.2
+	hero.light_color = Color(1.0, 0.22, 0.14)
+	hero.light_volumetric_fog_energy = 1.6
+	holder.add_child(hero)
+	# Cool key from the viewport side to model the obsidian faces (contrast)
+	var modkey := SpotLight3D.new()
+	modkey.position = Vector3(0, seat_y + 4.5, -3.5)
+	modkey.look_at_from_position(modkey.position, holder.position + Vector3(0, seat_y + 1.5, 0.6), Vector3.UP)
+	modkey.spot_range = 12.0
+	modkey.spot_angle = 32.0
+	modkey.light_energy = 3.2
+	modkey.light_color = Color(0.82, 0.88, 1.0)
+	holder.add_child(modkey)
 	_collision_box(holder.position + Vector3(0, 1.0, 0.3), Vector3(4.5, 2.0, 3.0))
 
 # --------------------------------------------------- Imperial hangar arena
@@ -710,6 +786,7 @@ func _build_hangar() -> void:
 	_box(Vector3(2.2, HG_H, 1.2), Vector3(-HG_W + 1.1, HG_H / 2.0, -HG_D), panel)
 	_box(Vector3(2.2, HG_H, 1.2), Vector3(HG_W - 1.1, HG_H / 2.0, -HG_D), panel)
 	_box(Vector3(HG_W * 2 - 4.4, 0.1, 0.9), Vector3(0, 0.05, -HG_D), strip_w)
+	_hangar_star_destroyer()
 	var field := MeshInstance3D.new()
 	var fq := PlaneMesh.new()
 	fq.size = Vector2(HG_W * 2 - 4.4, HG_H - 1.8)
@@ -725,13 +802,15 @@ func _build_hangar() -> void:
 	add_child(field)
 	_collision_box(Vector3(0, HG_H / 2.0, -HG_D), Vector3(HG_W * 2, HG_H * 2, 0.5))
 
-	# overhead fill so the whole deck stays bright, not just the bay side
-	for fp in [Vector3(-8, 8, 6), Vector3(8, 8, 6), Vector3(-8, 8, -6), Vector3(8, 8, -6), Vector3(0, 9, 0)]:
+	# two stronger overhead fills (was five flat omnis): the four hanging light
+	# banks do the modelling, these just keep the back of the deck from going
+	# black. Fewer, brighter lights read more cinematic and cost less.
+	for fp in [Vector3(0, 9, 7), Vector3(0, 9, -7)]:
 		var fl := OmniLight3D.new()
 		fl.position = fp
 		fl.light_color = Color(0.92, 0.95, 1.0)
-		fl.light_energy = 2.6
-		fl.omni_range = 18.0
+		fl.light_energy = 3.0
+		fl.omni_range = 24.0
 		add_child(fl)
 
 	# ceiling: lattice beams + hanging light banks
@@ -842,6 +921,43 @@ func _build_hangar() -> void:
 			["turbine", 2.0, Vector3(-HG_W + 1.7, 0, 11.0), 1.57]]:
 		_floor_prop("res://assets/models/scifi/%s.glb" % spec[0], spec[1],
 			spec[2], spec[3], Color(0.8, 0.78, 0.74))
+
+# A distant Star Destroyer hanging in the void beyond the open bay, so the
+# starfield reads as deep space next to a fleet instead of empty sky. Built
+# from a few dark grey wedges (the classic dagger silhouette) lit by a faint
+# cold rim, far enough out (-z) to sit behind the force field plane.
+func _hangar_star_destroyer() -> void:
+	var hull := StandardMaterial3D.new()
+	hull.albedo_color = Color(0.16, 0.18, 0.22)
+	hull.metallic = 0.2
+	hull.roughness = 0.8
+	var lit := StandardMaterial3D.new()                # speckle of window lights
+	lit.albedo_color = Color(0.05, 0.05, 0.06)
+	lit.emission_enabled = true
+	lit.emission = Color(0.7, 0.82, 1.0)
+	lit.emission_energy_multiplier = 0.7
+	var sd := Node3D.new()
+	sd.position = Vector3(-26, 17, -HG_D - 78)
+	sd.rotation = Vector3(0.06, 0.5, 0.0)
+	add_child(sd)
+	# main dagger body: long tapering wedge (approximated with stacked boxes)
+	for spec in [[Vector3(20, 5.0, 46), Vector3(0, 0, 0)],
+			[Vector3(13, 3.4, 30), Vector3(0, 3.8, -7)],
+			[Vector3(7, 2.2, 16), Vector3(0, 6.6, -14)]]:
+		_box(spec[0], spec[1], hull, sd)
+	# command tower
+	_box(Vector3(4.5, 3.2, 5.0), Vector3(0, 8.6, -16), hull, sd)
+	_box(Vector3(2.0, 1.6, 2.0), Vector3(0, 10.6, -16), hull, sd)
+	# faint window-light bands down the flanks
+	for z in [-12.0, -2.0, 8.0, 18.0]:
+		_box(Vector3(20.2, 0.5, 1.4), Vector3(0, 1.2, z), lit, sd)
+	# cold rim so it catches starlight and stays a silhouette, not a black hole
+	var rim := OmniLight3D.new()
+	rim.position = Vector3(-10, 30, -HG_D - 60)
+	rim.light_color = Color(0.6, 0.72, 1.0)
+	rim.light_energy = 1.6
+	rim.omni_range = 70.0
+	add_child(rim)
 
 # ---------------------------------------------------- Star Wars set pieces
 
@@ -1145,11 +1261,11 @@ func _build_bespin_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.2
+	env.ambient_light_energy = 1.5
 	env.ambient_light_color = Color(0.6, 0.55, 0.52)
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.16
+	env.tonemap_exposure = 1.22
 	env.glow_enabled = true
 	env.glow_intensity = 0.4
 	env.glow_bloom = 0.08
@@ -1165,10 +1281,10 @@ func _build_bespin_environment() -> void:
 	# orange whiteout (audit fix)
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.8, 0.62, 0.48)
-	env.fog_density = 0.0014
+	env.fog_density = 0.0009
 	env.fog_sky_affect = 0.2
 	env.volumetric_fog_enabled = q >= 2
-	env.volumetric_fog_density = 0.0014
+	env.volumetric_fog_density = 0.0009
 	env.volumetric_fog_albedo = Color(0.7, 0.62, 0.56)
 	env.volumetric_fog_emission = Color(0.04, 0.022, 0.012)
 	env.volumetric_fog_length = 50.0
@@ -1237,7 +1353,7 @@ func _build_bespin() -> void:
 	pm.bottom_radius = 3.4
 	pm.height = 0.14
 	pm.radial_segments = 32
-	pm.material = _mat_emissive(Color(1.0, 0.5, 0.12), 1.3)
+	pm.material = _mat_emissive(Color(1.0, 0.5, 0.12), 2.0)
 	pit.mesh = pm
 	pit.position.y = 0.02
 	add_child(pit)
@@ -1261,8 +1377,8 @@ func _build_bespin() -> void:
 	var glow := OmniLight3D.new()
 	glow.position = Vector3(0, 0.6, 0)
 	glow.light_color = Color(1.0, 0.5, 0.15)
-	glow.light_energy = 1.8
-	glow.omni_range = 10.0
+	glow.light_energy = 2.4
+	glow.omni_range = 11.0
 	glow.light_volumetric_fog_energy = 1.2
 	add_child(glow)
 	# steam billowing up from the pit
@@ -1507,13 +1623,13 @@ func _build_control_environment() -> void:
 	env.background_color = Color(0.02, 0.025, 0.035)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.46, 0.52, 0.64)
-	env.ambient_light_energy = 1.95
+	env.ambient_light_energy = 1.8
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.32
+	env.tonemap_exposure = 1.25
 	env.glow_enabled = true
 	env.glow_intensity = 0.4
 	env.glow_bloom = 0.06
-	env.glow_hdr_threshold = 1.15
+	env.glow_hdr_threshold = 1.1
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.8
@@ -1588,17 +1704,18 @@ func _build_control() -> void:
 	corem.bottom_radius = 1.7
 	corem.height = 5.2
 	corem.radial_segments = 28
-	corem.material = _mat_emissive(Color(0.4, 0.78, 1.0), 1.5)
+	corem.material = _mat_emissive(Color(0.4, 0.78, 1.0), 2.4)
 	core.mesh = corem
 	core.position = Vector3(0, 2.6, 21.0)
 	add_child(core)
+	var ring_glow := _mat_emissive(Color(0.45, 0.85, 1.0), 1.8)
 	for ry in [1.2, 2.6, 4.0]:
 		var ring := MeshInstance3D.new()
 		var tm := TorusMesh.new()
 		tm.inner_radius = 2.0
 		tm.outer_radius = 2.3
 		tm.rings = 24
-		tm.material = rib_mat
+		tm.material = ring_glow
 		ring.mesh = tm
 		ring.position = Vector3(0, ry, 21.0)
 		ring.rotation.x = PI / 2.0
@@ -1799,13 +1916,13 @@ func _build_imperial_environment() -> void:
 	env.background_color = Color(0.015, 0.016, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.5, 0.56, 0.68)
-	env.ambient_light_energy = 2.2
+	env.ambient_light_energy = 1.9
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.36
+	env.tonemap_exposure = 1.28
 	env.glow_enabled = true
 	env.glow_intensity = 0.42
 	env.glow_bloom = 0.08
-	env.glow_hdr_threshold = 1.05
+	env.glow_hdr_threshold = 1.1
 	var q: int = GameSettings.quality
 	env.ssao_enabled = q >= 1
 	env.ssao_intensity = 1.8
@@ -1857,6 +1974,9 @@ func _build_imperial() -> void:
 		_mm_add("WallBand_Straight", Vector3(cx, 0, 22), PI / 2.0)
 		_mm_add("TopSimple_Straight", Vector3(cx, 0, -22), -PI / 2.0)
 		_mm_add("TopSimple_Straight", Vector3(cx, 0, 22), PI / 2.0)
+	# emissive backing behind the far blast-door so the doorway glows as the
+	# brightest point at the end of the hall (a strong vanishing-point anchor)
+	_box(Vector3(5.0, 5.0, 0.2), Vector3(0, 2.5, -22.5), _mat_emissive(Color(0.45, 0.62, 1.0), 1.6))
 
 	# pilaster columns + overhead ribs giving the hall rhythm and depth
 	var rib_mat := StandardMaterial3D.new()
@@ -1873,8 +1993,8 @@ func _build_imperial() -> void:
 		rib.mesh = rbm
 		rib.position = Vector3(0, 4.55, z)
 		add_child(rib)
-		# a thin emissive strip under each rib for an accent line
-		var strip := _box(Vector3(11.0, 0.08, 0.12), Vector3(0, 4.18, z), _mat_emissive(Color(0.5, 0.7, 1.0), 1.3))
+		# a bright emissive strip under each rib for a strong accent line
+		var strip := _box(Vector3(11.0, 0.10, 0.18), Vector3(0, 4.18, z), _mat_emissive(Color(0.5, 0.7, 1.0), 1.7))
 		strip.name = "ribstrip"
 
 	# dark metal ceiling + conduits running the length
@@ -1917,12 +2037,17 @@ func _build_imperial() -> void:
 			ol.light_energy = 3.2
 			ol.omni_range = 14.0
 			add_child(ol)
-	# two warm red accent washes over the floor bands
+	# glowing red floor seams across the deck — the classic Imperial corridor
+	# accent, doubling as leading lines toward the blast-door
+	var red_band := _mat_emissive(Color(1.0, 0.22, 0.12), 1.8)
+	for z in [-12, -4, 4, 12]:
+		_box(Vector3(7.4, 0.04, 0.16), Vector3(0, 0.025, z), red_band)
+	# two warm red accent washes so the seams actually bounce light onto the deck
 	for z in [-9, 9]:
 		var rl := OmniLight3D.new()
 		rl.position = Vector3(0, 0.9, z)
 		rl.light_color = Color(1.0, 0.3, 0.2)
-		rl.light_energy = 1.1
+		rl.light_energy = 1.0
 		rl.omni_range = 8.0
 		add_child(rl)
 
