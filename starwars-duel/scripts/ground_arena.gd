@@ -2493,36 +2493,6 @@ func _build_imperial() -> void:
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
 
-	# slow-drifting dust motes filling the hall — pure atmosphere, no extra light
-	var dust := GPUParticles3D.new()
-	var dmat := ParticleProcessMaterial.new()
-	dmat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	dmat.emission_box_extents = Vector3(5.5, 2.4, 22.0)
-	dmat.direction = Vector3(0, -1, 0)
-	dmat.spread = 30.0
-	dmat.gravity = Vector3(0, -0.05, 0)
-	dmat.initial_velocity_min = 0.05
-	dmat.initial_velocity_max = 0.18
-	dmat.scale_min = 0.018
-	dmat.scale_max = 0.05
-	dmat.color = Color(0.7, 0.78, 0.95, 0.5)
-	var dq := QuadMesh.new()
-	dq.size = Vector2(1.0, 1.0)
-	var dqm := StandardMaterial3D.new()
-	dqm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dqm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dqm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	dqm.albedo_color = Color(0.6, 0.7, 0.95, 0.5)
-	dqm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	dq.material = dqm
-	dust.draw_pass_1 = dq
-	dust.process_material = dmat
-	dust.amount = 120
-	dust.lifetime = 14.0
-	dust.preprocess = 12.0
-	dust.position = Vector3(0, 2.6, 0)
-	dust.visibility_aabb = AABB(Vector3(-6, -1, -24), Vector3(12, 7, 48))
-	add_child(dust)
 	_mm_flush()   # collapse the ~110 queued modules into a few MultiMesh draws
 
 # A viewport onto space behind a window bay: an emissive starfield panel just

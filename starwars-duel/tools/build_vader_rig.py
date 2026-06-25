@@ -339,13 +339,17 @@ for o in list(bpy.data.objects):
 FINGER_KEYS = ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky')
 def collapse_fingers(o):
     for side in ('Left', 'Right'):
-        hand = 'mixamorig:%sHand' % side
+        # match either separator ('mixamorig:RightHandIndex1' or '..._RightHand...')
         fingers = [g for g in o.vertex_groups
-                   if g.name.startswith('mixamorig:%sHand' % side)
+                   if ('%sHand' % side) in g.name
                    and any(k in g.name for k in FINGER_KEYS)]
         if not fingers:
             continue
-        hg = o.vertex_groups.get(hand) or o.vertex_groups.new(name=hand)
+        # merge into the actual hand group whatever its exact name
+        hand_groups = [g for g in o.vertex_groups
+                       if ('%sHand' % side) in g.name
+                       and not any(k in g.name for k in FINGER_KEYS)]
+        hg = hand_groups[0] if hand_groups else o.vertex_groups.new(name='mixamorig:%sHand' % side)
         gi = {g.index for g in fingers}
         moved = 0
         for v in o.data.vertices:
@@ -361,6 +365,18 @@ for name in transfer_meshes:
     collapse_fingers(o)
     select_only([o], o)
     bpy.ops.object.vertex_group_normalize_all(lock_active=False)
+
+# Bulletproof the gloves: strip all finger-bone animation so the solid glove
+# meshes can never splay open during an attack, regardless of residual finger
+# weights. Vader's hands are closed gloves — they grip rigidly with the wrist.
+FINGER_BONE_KEYS = ('HandThumb', 'HandIndex', 'HandMiddle', 'HandRing', 'HandPinky')
+stripped = 0
+for act in bpy.data.actions:
+    for fc in list(act.fcurves):
+        if any(k in fc.data_path for k in FINGER_BONE_KEYS):
+            act.fcurves.remove(fc)
+            stripped += 1
+print('STRIPPED FINGER FCURVES', stripped)
 
 ad = arm.animation_data or arm.animation_data_create()
 for act in bpy.data.actions:
