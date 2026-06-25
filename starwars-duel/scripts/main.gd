@@ -602,6 +602,15 @@ func _show_options() -> void:
 	q.selected = GameSettings.quality
 	q.item_selected.connect(func(i: int) -> void: GameSettings.quality = i)
 	grid.add_child(q)
+	grid.add_child(UiKit.label("Upscaling (FSR 2.2)", 18, Color(0.85, 0.88, 1.0)))
+	var up := OptionButton.new()
+	for n in ["Natif", "Qualité", "Équilibré", "Performance"]:
+		up.add_item(n)
+	up.selected = GameSettings.upscale
+	up.item_selected.connect(func(i: int) -> void:
+		GameSettings.upscale = i
+		GameSettings.apply())
+	grid.add_child(up)
 	add_check.call("Vibrations manette", GameSettings.rumble,
 		func(v: bool) -> void: GameSettings.rumble = v)
 	add_check.call("Plein écran", GameSettings.fullscreen,

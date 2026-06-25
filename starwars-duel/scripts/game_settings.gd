@@ -12,6 +12,7 @@ var volume_master := 1.0    # 0..1
 var volume_music := 1.0
 var volume_sfx := 1.0
 var quality := 1            # 0 = low, 1 = medium, 2 = high, 3 = ultra
+var upscale := 0            # 0 = native, 1 = FSR2 Quality, 2 = Balanced, 3 = Performance
 var rumble := true
 var show_fps := false
 var fullscreen := true
@@ -35,6 +36,7 @@ func load_settings() -> void:
 	rumble = cf.get_value("input", "rumble", rumble)
 	fov = cf.get_value("video", "fov", fov)
 	quality = cf.get_value("video", "quality", quality)
+	upscale = cf.get_value("video", "upscale", upscale)
 	show_fps = cf.get_value("video", "show_fps", show_fps)
 	fullscreen = cf.get_value("video", "fullscreen", fullscreen)
 	volume_master = cf.get_value("audio", "master", volume_master)
@@ -48,6 +50,7 @@ func save_settings() -> void:
 	cf.set_value("input", "rumble", rumble)
 	cf.set_value("video", "fov", fov)
 	cf.set_value("video", "quality", quality)
+	cf.set_value("video", "upscale", upscale)
 	cf.set_value("video", "show_fps", show_fps)
 	cf.set_value("video", "fullscreen", fullscreen)
 	cf.set_value("audio", "master", volume_master)
@@ -67,19 +70,24 @@ func apply() -> void:
 
 	# tie the GPU-heavy viewport settings to the quality tier
 	var q := clampi(quality, 0, 3)
+	var up := clampi(upscale, 0, 3)
 	var vp := get_viewport()
 	if vp != null:
 		vp.msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_4X][q]
-		# cheap FXAA stands in for MSAA on Low; TAA only on Ultra
-		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
-		vp.use_taa = q >= 3
-		if q == 0:
-			# render at lower resolution and upscale (FSR) — big win on weak GPUs
-			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-			vp.scaling_3d_scale = 0.77
+		if up > 0:
+			# FSR 2.2: render below native and reconstruct with a temporal
+			# upscaler (DLSS-like). It does its OWN anti-aliasing, so TAA/FXAA
+			# are disabled to avoid stacking two temporal passes.
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
+			vp.scaling_3d_scale = [1.0, 0.667, 0.59, 0.5][up]   # Quality/Balanced/Performance
+			vp.use_taa = false
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 		else:
+			# native resolution: cheap FXAA on Low, TAA on Ultra
 			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 			vp.scaling_3d_scale = 1.0
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
+			vp.use_taa = q >= 3
 		vp.positional_shadow_atlas_size = 2048 if q <= 1 else 4096
 	# smaller directional shadow on the low tiers
 	RenderingServer.directional_shadow_atlas_set_size(2048 if q <= 1 else 4096, true)
