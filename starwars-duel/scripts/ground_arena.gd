@@ -537,6 +537,34 @@ func _build_floor() -> void:
 		ring.scale.y = 0.08
 		add_child(ring)
 
+	# Inlaid Imperial seal cast into the deck between the rings and the throne —
+	# faint emissive geometry that reflects in the mirror floor, no extra light.
+	var crest := Node3D.new()
+	crest.position = Vector3(0, 0.014, 8.0)
+	add_child(crest)
+	var disc := MeshInstance3D.new()
+	var dcm := CylinderMesh.new()
+	dcm.top_radius = 1.5
+	dcm.bottom_radius = 1.5
+	dcm.height = 0.02
+	dcm.radial_segments = 32
+	dcm.material = _mat_emissive(Color(1.0, 0.14, 0.08), 0.9)
+	disc.mesh = dcm
+	crest.add_child(disc)
+	var crm := MeshInstance3D.new()
+	var ctm := TorusMesh.new()
+	ctm.inner_radius = 1.7
+	ctm.outer_radius = 1.9
+	ctm.rings = 48
+	ctm.material = _mat_emissive(Color(1.0, 0.2, 0.12), 1.6)
+	crm.mesh = ctm
+	crm.scale.y = 0.12
+	crest.add_child(crm)
+	for s in 8:
+		var spoke_ang := TAU * s / 8.0
+		var spoke := _box(Vector3(0.1, 0.02, 1.5), Vector3(sin(spoke_ang) * 0.9, 0.0, -cos(spoke_ang) * 0.9), _mat_emissive(Color(1.0, 0.18, 0.1), 1.2), crest)
+		spoke.rotation.y = -spoke_ang
+
 func _build_walls() -> void:
 	# Octagonal room; the three north segments are one giant viewport
 	var panel := _mat_panel()
@@ -559,6 +587,10 @@ func _build_walls() -> void:
 			_box(Vector3(seg_w, 1.1, 0.5), Vector3(0, 0.55, 0), panel, holder)
 			_box(Vector3(seg_w, 1.6, 0.5), Vector3(0, ROOM_H - 0.8, 0), panel, holder)
 			_box(Vector3(seg_w, 0.07, 0.46), Vector3(0, 1.14, 0), strip_w, holder)
+			# slim red accent runs framing the viewport edges, tying the bright
+			# starfield into the chamber's Imperial red trim (reflects in the floor)
+			for ex in [-seg_w / 2.0 + 0.3, seg_w / 2.0 - 0.3]:
+				_box(Vector3(0.08, ROOM_H - 3.2, 0.08), Vector3(ex, ROOM_H / 2.0 - 0.6, -0.2), strip_r, holder)
 			var n_mul := 4
 			for k in n_mul + 1:
 				var x := -seg_w / 2.0 + seg_w * k / float(n_mul)
@@ -721,6 +753,41 @@ func _build_throne() -> void:
 	modkey.light_energy = 3.2
 	modkey.light_color = Color(0.82, 0.88, 1.0)
 	holder.add_child(modkey)
+	# Slow ember/ash motes rising behind the throne — warm life around the focal
+	# point, additive so it lifts the dais instead of darkening it.
+	var emb := GPUParticles3D.new()
+	var emat := ParticleProcessMaterial.new()
+	emat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	emat.emission_box_extents = Vector3(2.2, 0.2, 0.8)
+	emat.gravity = Vector3(0, 0.18, 0)
+	emat.initial_velocity_min = 0.1
+	emat.initial_velocity_max = 0.35
+	emat.direction = Vector3(0, 1, 0)
+	emat.spread = 22.0
+	emat.scale_min = 0.5
+	emat.scale_max = 1.4
+	var eqm := QuadMesh.new()
+	eqm.size = Vector2(0.035, 0.035)
+	var eqmat := StandardMaterial3D.new()
+	eqmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	eqmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	eqmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	eqmat.albedo_color = Color(1.0, 0.42, 0.18, 0.5)
+	eqmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	eqm.material = eqmat
+	emb.draw_pass_1 = eqm
+	emb.process_material = emat
+	emb.amount = 60
+	emb.lifetime = 9.0
+	emb.preprocess = 9.0
+	emb.position = Vector3(0, seat_y + 0.4, 0.9)
+	emb.visibility_aabb = AABB(Vector3(-3, 0, -2), Vector3(6, ROOM_H, 4))
+	holder.add_child(emb)
+	# Ceremonial floor lights lining the approach to the dais — kit props that
+	# fill the bare mirror deck and throw clean reflections, clear of the ring.
+	for lx in [-3.4, 3.4]:
+		_mk("Prop_Light_Floor", Vector3(lx, 0, ROOM_R - 7.5), 0.0)
+		_mk("Prop_Light_Floor", Vector3(lx, 0, ROOM_R - 11.5), 0.0)
 	_collision_box(holder.position + Vector3(0, 1.0, 0.3), Vector3(4.5, 2.0, 3.0))
 
 # --------------------------------------------------- Imperial hangar arena
@@ -801,6 +868,13 @@ func _build_hangar() -> void:
 	field.position = Vector3(0, (HG_H - 1.8) / 2.0, -HG_D)
 	add_child(field)
 	_collision_box(Vector3(0, HG_H / 2.0, -HG_D), Vector3(HG_W * 2, HG_H * 2, 0.5))
+
+	# amber hazard chevrons painted along the open-bay threshold
+	var haz := _mat_emissive(Color(0.95, 0.7, 0.12), 1.1)
+	for i in 14:
+		var cx := -HG_W + 3.0 + i * 2.7
+		var chev := _box(Vector3(1.7, 0.02, 0.32), Vector3(cx, 0.014, -HG_D + 1.7), haz)
+		chev.rotation.y = 0.6 if (i % 2 == 0) else -0.6
 
 	# two stronger overhead fills (was five flat omnis): the four hanging light
 	# banks do the modelling, these just keep the back of the deck from going
@@ -890,6 +964,13 @@ func _build_hangar() -> void:
 			_box(Vector3(sz + 0.02, 0.1, sz + 0.02), b.position + Vector3(0, 0.5, 0), strip_r)
 		_collision_box(base + Vector3(0, spec[1] * 0.7, 0), Vector3(2.4, spec[1] * 1.5, 2.4))
 
+	# runway-style floor markers leading from the duel circle out to the bay
+	for side in [-1.0, 1.0]:
+		for i in 5:
+			var mz := -HG_D + 3.0 + i * 5.0
+			_mm_add("Prop_Light_Floor", Vector3(side * 9.0, 0.0, mz), 0.0)
+	_mm_flush()
+
 	# interactive physics crates on the deck + Imperial console greeble
 	_phys_prop("Prop_Crate3", Vector3(-5, 0, 3), Vector3(0.5, 0.5, 0.5), 3.5, true, 0.3)
 	_phys_prop("Prop_Crate4", Vector3(5, 0, -3), Vector3(0.56, 0.56, 0.56), 4.0, true, -0.2)
@@ -921,6 +1002,51 @@ func _build_hangar() -> void:
 			["turbine", 2.0, Vector3(-HG_W + 1.7, 0, 11.0), 1.57]]:
 		_floor_prop("res://assets/models/scifi/%s.glb" % spec[0], spec[1],
 			spec[2], spec[3], Color(0.8, 0.78, 0.74))
+
+	# slow warm dust drifting through the bay floodlights (additive, no new light)
+	var dust := GPUParticles3D.new()
+	var dmat := ParticleProcessMaterial.new()
+	dmat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	dmat.emission_box_extents = Vector3(HG_W - 2.0, HG_H * 0.45, HG_D - 2.0)
+	dmat.gravity = Vector3(0, -0.015, 0)
+	dmat.initial_velocity_min = 0.02
+	dmat.initial_velocity_max = 0.10
+	dmat.direction = Vector3(0.4, -0.2, 0.1)
+	dmat.spread = 180.0
+	dmat.scale_min = 0.5
+	dmat.scale_max = 1.2
+	var dq := QuadMesh.new()
+	dq.size = Vector2(0.02, 0.02)
+	var dqm := StandardMaterial3D.new()
+	dqm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dqm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dqm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dqm.albedo_color = Color(1.0, 0.92, 0.78, 0.35)
+	dqm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dq.material = dqm
+	dust.draw_pass_1 = dq
+	dust.process_material = dmat
+	dust.amount = 90
+	dust.lifetime = 18.0
+	dust.preprocess = 18.0
+	dust.position = Vector3(0, HG_H * 0.45, 0)
+	dust.visibility_aabb = AABB(Vector3(-HG_W, -2, -HG_D), Vector3(HG_W * 2, HG_H * 2, HG_D * 2))
+	add_child(dust)
+
+	# frame the open bay with pillars + one warm threshold floodlight
+	for sx in [-HG_W + 3.2, HG_W - 3.2]:
+		var col := _mk("Column_Round", Vector3(sx, 0, -HG_D + 1.4), 0.0)
+		if col != null:
+			col.scale = Vector3(1.4, HG_H / 5.0, 1.4)
+	var bayfl := SpotLight3D.new()
+	bayfl.position = Vector3(0, HG_H - 1.5, -HG_D + 6.0)
+	bayfl.rotation.x = -0.5
+	bayfl.rotation.y = PI
+	bayfl.spot_range = 18.0
+	bayfl.spot_angle = 55.0
+	bayfl.light_energy = 3.2
+	bayfl.light_color = Color(1.0, 0.9, 0.76)
+	add_child(bayfl)
 
 # A distant Star Destroyer hanging in the void beyond the open bay, so the
 # starfield reads as deep space next to a fleet instead of empty sky. Built
@@ -1383,6 +1509,42 @@ func _build_bespin() -> void:
 	add_child(glow)
 	# steam billowing up from the pit
 	_bespin_steam(Vector3(0, 0.1, 0), 2.6, 16)
+	# carbon-ash embers drifting up out of the freeze pit (additive, no texture)
+	var embers := GPUParticles3D.new()
+	var em_mat := ParticleProcessMaterial.new()
+	em_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
+	em_mat.emission_ring_axis = Vector3(0, 1, 0)
+	em_mat.emission_ring_radius = 2.6
+	em_mat.emission_ring_inner_radius = 0.4
+	em_mat.emission_ring_height = 0.2
+	em_mat.direction = Vector3(0, 1, 0)
+	em_mat.spread = 18.0
+	em_mat.initial_velocity_min = 0.7
+	em_mat.initial_velocity_max = 1.6
+	em_mat.gravity = Vector3(0, 0.5, 0)
+	em_mat.scale_min = 0.04
+	em_mat.scale_max = 0.12
+	em_mat.color = Color(1.0, 0.62, 0.25, 1.0)
+	var eq := QuadMesh.new()
+	eq.size = Vector2(0.16, 0.16)
+	var eqm := StandardMaterial3D.new()
+	eqm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	eqm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	eqm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	eqm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	eqm.albedo_color = Color(1.0, 0.6, 0.22, 1.0)
+	eqm.emission_enabled = true
+	eqm.emission = Color(1.0, 0.55, 0.18)
+	eqm.emission_energy_multiplier = 3.0
+	eq.material = eqm
+	embers.draw_pass_1 = eq
+	embers.process_material = em_mat
+	embers.amount = 48
+	embers.lifetime = 4.0
+	embers.preprocess = 2.5
+	embers.position = Vector3(0, 0.2, 0)
+	embers.visibility_aabb = AABB(Vector3(-4, -1, -4), Vector3(8, 9, 8))
+	add_child(embers)
 
 	# carbon-freezing apparatus: angled hydraulic pistons ringing the pit, the
 	# machinery that drives the clamps into the chamber
@@ -1433,6 +1595,31 @@ func _build_bespin() -> void:
 		_box(Vector3(0.5, 0.08, 0.5), Vector3(0.7, 1.16, 0.0), amber, con)
 		_collision_box(cs[0] + Vector3(0, 0.6, 0), Vector3(2.4, 1.2, 1.0))
 
+	# iconic carbonite slabs stood on end against the chamber wall
+	var carb := StandardMaterial3D.new()
+	carb.albedo_color = Color(0.16, 0.16, 0.19)
+	carb.metallic = 0.75
+	carb.roughness = 0.4
+	for slab in [[Vector3(9.4, 0, -2.0), -1.0], [Vector3(-9.4, 0, 2.2), 2.0], [Vector3(2.0, 0, 9.4), 0.2]]:
+		var sp: Vector3 = slab[0]
+		var sy: float = slab[1]
+		var sholder := Node3D.new()
+		sholder.position = sp
+		sholder.rotation.y = sy
+		add_child(sholder)
+		_box(Vector3(1.6, 3.0, 0.45), Vector3(0, 1.5, 0), carb, sholder)
+		_box(Vector3(1.62, 0.08, 0.47), Vector3(0, 2.9, 0), cold, sholder)
+		_box(Vector3(1.62, 0.08, 0.47), Vector3(0, 0.12, 0), cold, sholder)
+		_box(Vector3(0.9, 0.5, 0.08), Vector3(0, 1.5, 0.24), _mat_emissive(Color(0.4, 0.62, 1.0), 0.8), sholder)
+		_collision_box(sp + Vector3(0, 1.5, 0), Vector3(1.8, 3.0, 0.7))
+	# industrial greeble cluster: vent + barrels tucked beside the chamber edge
+	_mk("Prop_Vent_Big", Vector3(7.8, 0.0, -8.0), 0.6)
+	_mk("Prop_Barrel_Large", Vector3(9.0, 0.0, -7.0), 0.0)
+	_mk("Prop_Barrel_Large", Vector3(9.6, 0.0, -8.2), 1.1)
+	_collision_box(Vector3(8.9, 0.6, -7.6), Vector3(2.4, 1.4, 2.4))
+	_mk("Prop_AccessPoint", Vector3(-7.6, 0.0, 8.4), -0.8)
+	_collision_box(Vector3(-7.6, 0.6, 8.4), Vector3(1.2, 1.4, 1.2))
+
 	# cyan rim accent on the floor for cold contrast against the amber
 	var rim_ring := MeshInstance3D.new()
 	var rrm := TorusMesh.new()
@@ -1444,6 +1631,16 @@ func _build_bespin() -> void:
 	rim_ring.position.y = 0.02
 	rim_ring.scale.y = 0.1
 	add_child(rim_ring)
+
+	# recessed warm floor light studs ringing the freeze pit, reflecting in the deck
+	for i in 8:
+		var stud_ang := TAU * i / 8.0 + 0.39
+		var fl := _mk("Prop_Light_Floor", Vector3(cos(stud_ang) * 6.4, 0.16, sin(stud_ang) * 6.4), -stud_ang)
+		if fl != null:
+			fl.scale = Vector3.ONE * 1.4
+		var cap_col: StandardMaterial3D = amber if i % 2 == 0 else cold
+		var cap := _box(Vector3(0.5, 0.05, 0.5), Vector3(cos(stud_ang) * 6.4, 0.2, sin(stud_ang) * 6.4), cap_col)
+		cap.rotation.y = -stud_ang
 
 	# overhead cable conduits draping toward the pit
 	for i in 5:
@@ -1727,6 +1924,43 @@ func _build_control() -> void:
 	corelight.omni_range = 13.0
 	corelight.light_volumetric_fog_energy = 0.6
 	add_child(corelight)
+	# venting energy-steam plumes in the reactor chamber behind the viewport
+	for sx in [-1.4, 1.4]:
+		var vent := GPUParticles3D.new()
+		vent.amount = 36
+		vent.lifetime = 4.5
+		vent.preprocess = 3.0
+		vent.position = Vector3(sx, 0.4, 21.0)
+		vent.visibility_aabb = AABB(Vector3(-4, 0, 18), Vector3(8, 7, 6))
+		var vpm := ParticleProcessMaterial.new()
+		vpm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+		vpm.emission_sphere_radius = 0.3
+		vpm.direction = Vector3(0, 1, 0)
+		vpm.spread = 12.0
+		vpm.gravity = Vector3(0, 0.3, 0)
+		vpm.initial_velocity_min = 0.8
+		vpm.initial_velocity_max = 1.4
+		vpm.scale_min = 1.2
+		vpm.scale_max = 2.6
+		var vsc := Curve.new()
+		vsc.add_point(Vector2(0.0, 0.2))
+		vsc.add_point(Vector2(0.3, 1.0))
+		vsc.add_point(Vector2(1.0, 0.0))
+		var vct := CurveTexture.new()
+		vct.curve = vsc
+		vpm.scale_curve = vct
+		vent.process_material = vpm
+		var vmesh := QuadMesh.new()
+		vmesh.size = Vector2(0.9, 0.9)
+		var vmat := StandardMaterial3D.new()
+		vmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		vmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		vmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		vmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		vmat.albedo_color = Color(0.35, 0.62, 0.95, 0.16)
+		vmesh.material = vmat
+		vent.draw_pass_1 = vmesh
+		add_child(vent)
 	# console banks along the walls
 	for spec in [[Vector3(-13.0, 0, -6), PI / 2.0], [Vector3(13.0, 0, 6), -PI / 2.0],
 			[Vector3(-13.0, 0, 10), PI / 2.0], [Vector3(13.0, 0, -10), -PI / 2.0],
@@ -1734,6 +1968,54 @@ func _build_control() -> void:
 		_mk("Prop_Computer", spec[0], spec[1])
 	_mk("Prop_AccessPoint", Vector3(13.4, 0, 0), -PI / 2.0)
 	_mk("Prop_AccessPoint", Vector3(-13.4, 0, 4), PI / 2.0)
+	# holographic tactical display on a projector pad toward the space window,
+	# clear of the duel centre so it never blocks the fight
+	var holo := Node3D.new()
+	holo.position = Vector3(0, 1.4, -12.0)
+	add_child(holo)
+	var holo_mat := _mat_emissive(Color(0.45, 0.82, 1.0), 1.6)
+	holo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	holo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	holo_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	holo_mat.albedo_color = Color(0.45, 0.82, 1.0, 0.5)
+	for hr in [[0.95, 0.0], [0.7, 0.5], [0.45, 1.0]]:
+		var hring := MeshInstance3D.new()
+		var htm := TorusMesh.new()
+		htm.inner_radius = hr[0] - 0.02
+		htm.outer_radius = hr[0]
+		htm.rings = 20
+		htm.material = holo_mat
+		hring.mesh = htm
+		hring.position.y = hr[1]
+		hring.rotation.x = PI / 2.0
+		holo.add_child(hring)
+	var holo_core := MeshInstance3D.new()
+	var hsm := SphereMesh.new()
+	hsm.radius = 0.18
+	hsm.height = 0.36
+	hsm.material = holo_mat
+	holo_core.mesh = hsm
+	holo_core.position.y = 0.5
+	holo.add_child(holo_core)
+	var beam := MeshInstance3D.new()
+	var bcm := CylinderMesh.new()
+	bcm.top_radius = 1.0
+	bcm.bottom_radius = 0.12
+	bcm.height = 1.5
+	bcm.radial_segments = 16
+	var beam_mat := _mat_emissive(Color(0.4, 0.78, 1.0), 0.5)
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	beam_mat.albedo_color = Color(0.4, 0.78, 1.0, 0.12)
+	beam_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	bcm.material = beam_mat
+	beam.mesh = bcm
+	beam.position.y = -0.75
+	holo.add_child(beam)
+	_mk("Prop_AccessPoint", Vector3(0, 0, -12.0), 0)
+	var holo_tw := create_tween().set_loops()
+	holo_tw.tween_property(holo, "rotation:y", TAU, 18.0).from(0.0)
 
 	# overhead ribs + ceiling + conduits
 	for z in [-16, -8, 0, 8, 16]:
@@ -1761,6 +2043,14 @@ func _build_control() -> void:
 	for z in zcols:
 		_mm_add("Prop_Light_Floor", Vector3(-13.4, 0, z), PI / 2.0)
 		_mm_add("Prop_Light_Floor", Vector3(13.4, 0, z), -PI / 2.0)
+
+	# glowing conduit lines running the side walls at mid-height
+	var conduit_mat := _mat_emissive(Color(0.45, 0.72, 1.0), 1.3)
+	for side in [-13.5, 13.5]:
+		for cy in [2.0, 3.3]:
+			_box(Vector3(0.08, 0.08, 33.0), Vector3(side, cy, 0), conduit_mat)
+		for cz in [-14.0, -7.0, 0.0, 7.0, 14.0]:
+			_box(Vector3(0.12, 1.5, 0.18), Vector3(side, 2.65, cz), conduit_mat)
 
 	# a lean set of wall lights (big range; high ambient carries the rest)
 	for p in [Vector3(-13.6, 3.2, -8), Vector3(13.6, 3.2, 8), Vector3(-13.6, 3.2, 8), Vector3(13.6, 3.2, -8)]:
@@ -1801,6 +2091,36 @@ func _build_control() -> void:
 	probe.position = Vector3(0, 3, 0)
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
+
+	# slow drifting dust motes catching the cool key light
+	var dust := GPUParticles3D.new()
+	dust.amount = 200
+	dust.lifetime = 14.0
+	dust.preprocess = 7.0
+	dust.position = Vector3(0, 2.6, 0)
+	dust.visibility_aabb = AABB(Vector3(-15, -1, -19), Vector3(30, 8, 38))
+	var dpm := ParticleProcessMaterial.new()
+	dpm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	dpm.emission_box_extents = Vector3(13, 2.4, 17)
+	dpm.gravity = Vector3(0.0, -0.02, 0.0)
+	dpm.initial_velocity_min = 0.04
+	dpm.initial_velocity_max = 0.14
+	dpm.direction = Vector3(0.2, 0, 0.1)
+	dpm.spread = 180.0
+	dpm.scale_min = 0.5
+	dpm.scale_max = 1.6
+	dust.process_material = dpm
+	var dmesh := QuadMesh.new()
+	dmesh.size = Vector2(0.035, 0.035)
+	var dmat := StandardMaterial3D.new()
+	dmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dmat.albedo_color = Color(0.6, 0.72, 0.95, 0.5)
+	dmesh.material = dmat
+	dust.draw_pass_1 = dmesh
+	add_child(dust)
 
 	_mm_flush()   # batch the ~120 queued deck/wall modules into a few draw calls
 
@@ -2017,6 +2337,13 @@ func _build_imperial() -> void:
 		pipe.mesh = pm
 		pipe.position = Vector3(cx2, 4.55, 0)
 		add_child(pipe)
+	# cross catwalk rails + amber hazard strobes spanning the ceiling ribs,
+	# adding industrial greeble and a warm counter-accent up high
+	for z in [-16, -8, 0, 8, 16]:
+		_mk("Prop_Rail_Round_Small", Vector3(-4.4, 4.5, z), 0)
+		_mk("Prop_Rail_Round_Small", Vector3(4.4, 4.5, z), PI)
+		var strobe := _box(Vector3(0.18, 0.10, 0.18), Vector3(0, 4.78, z), _mat_emissive(Color(1.0, 0.55, 0.12), 2.0))
+		strobe.name = "hazardstrobe"
 
 	# floor light-lines down both edges → strong leading lines into the depth
 	for z in zs:
@@ -2054,6 +2381,38 @@ func _build_imperial() -> void:
 	# greeble: computer banks, vents, access consoles, crates, barrels
 	_mk("Prop_Computer", Vector3(-5.7, 0, -9), PI / 2.0)
 	_mk("Prop_Computer", Vector3(-5.7, 0, 9), PI / 2.0)
+	# holo-projector table beside the port computer bank: a faint cyan tactical
+	# schematic floating above an emissive pad — Imperial command-deck flavour
+	var holo_base := _box(Vector3(1.1, 0.12, 1.1), Vector3(-4.6, 0.06, 9.0), _mat_emissive(Color(0.3, 0.55, 1.0), 1.2))
+	holo_base.name = "holopad"
+	var holo_mat := _mat_emissive(Color(0.4, 0.75, 1.0), 2.2)
+	holo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	holo_mat.albedo_color = Color(0.4, 0.75, 1.0, 0.18)
+	holo_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	holo_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var holo_root := Node3D.new()
+	holo_root.position = Vector3(-4.6, 1.05, 9.0)
+	add_child(holo_root)
+	for i in 4:
+		var r := 0.18 + 0.12 * float(i)
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = r - 0.012
+		tm.outer_radius = r
+		tm.material = holo_mat
+		ring.mesh = tm
+		ring.position = Vector3(0, 0.45 - 0.1 * float(i), 0)
+		ring.rotation = Vector3(deg_to_rad(8.0 * float(i)), 0, deg_to_rad(6.0 * float(i)))
+		holo_root.add_child(ring)
+	var cone := MeshInstance3D.new()
+	var cnm := CylinderMesh.new()
+	cnm.top_radius = 0.45
+	cnm.bottom_radius = 0.5
+	cnm.height = 0.95
+	cnm.material = holo_mat
+	cone.mesh = cnm
+	cone.position = Vector3(-4.6, 0.6, 9.0)
+	add_child(cone)
 	_mk("Prop_Computer", Vector3(5.7, 0, -1), -PI / 2.0)
 	_mk("Prop_AccessPoint", Vector3(-5.9, 0, -1), 0)
 	_mk("Prop_AccessPoint", Vector3(5.9, 0, 7), PI)
@@ -2085,6 +2444,37 @@ func _build_imperial() -> void:
 	dg.light_energy = 2.6
 	dg.omni_range = 10.0
 	add_child(dg)
+	# cool steam venting at the foot of the blast-door, lit by its glow — adds
+	# motion and depth to the corridor's bright vanishing point
+	var bd_vent := GPUParticles3D.new()
+	var bd_vmat := ParticleProcessMaterial.new()
+	bd_vmat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	bd_vmat.emission_box_extents = Vector3(2.6, 0.1, 0.2)
+	bd_vmat.direction = Vector3(0, 1, 0)
+	bd_vmat.spread = 8.0
+	bd_vmat.gravity = Vector3(0, 0.5, 0)
+	bd_vmat.initial_velocity_min = 0.5
+	bd_vmat.initial_velocity_max = 1.1
+	bd_vmat.scale_min = 0.8
+	bd_vmat.scale_max = 1.8
+	bd_vmat.color = Color(0.55, 0.7, 1.0, 0.05)
+	var bd_vq := QuadMesh.new()
+	bd_vq.size = Vector2(1.6, 1.6)
+	var bd_vqm := StandardMaterial3D.new()
+	bd_vqm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bd_vqm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bd_vqm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	bd_vqm.albedo_color = Color(0.5, 0.68, 1.0, 0.03)
+	bd_vqm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	bd_vq.material = bd_vqm
+	bd_vent.draw_pass_1 = bd_vq
+	bd_vent.process_material = bd_vmat
+	bd_vent.amount = 40
+	bd_vent.lifetime = 3.0
+	bd_vent.preprocess = 2.5
+	bd_vent.position = Vector3(0, 0.1, -21.3)
+	bd_vent.visibility_aabb = AABB(Vector3(-4, -1, -3), Vector3(8, 6, 6))
+	add_child(bd_vent)
 
 	# collisions: floor, the two side walls, two end caps
 	_collision_box(Vector3(0, -0.5, 0), Vector3(16, 1.0, 52))
@@ -2103,6 +2493,36 @@ func _build_imperial() -> void:
 	probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	add_child(probe)
 
+	# slow-drifting dust motes filling the hall — pure atmosphere, no extra light
+	var dust := GPUParticles3D.new()
+	var dmat := ParticleProcessMaterial.new()
+	dmat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	dmat.emission_box_extents = Vector3(5.5, 2.4, 22.0)
+	dmat.direction = Vector3(0, -1, 0)
+	dmat.spread = 30.0
+	dmat.gravity = Vector3(0, -0.05, 0)
+	dmat.initial_velocity_min = 0.05
+	dmat.initial_velocity_max = 0.18
+	dmat.scale_min = 0.018
+	dmat.scale_max = 0.05
+	dmat.color = Color(0.7, 0.78, 0.95, 0.5)
+	var dq := QuadMesh.new()
+	dq.size = Vector2(1.0, 1.0)
+	var dqm := StandardMaterial3D.new()
+	dqm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dqm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dqm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dqm.albedo_color = Color(0.6, 0.7, 0.95, 0.5)
+	dqm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dq.material = dqm
+	dust.draw_pass_1 = dq
+	dust.process_material = dmat
+	dust.amount = 120
+	dust.lifetime = 14.0
+	dust.preprocess = 12.0
+	dust.position = Vector3(0, 2.6, 0)
+	dust.visibility_aabb = AABB(Vector3(-6, -1, -24), Vector3(12, 7, 48))
+	add_child(dust)
 	_mm_flush()   # collapse the ~110 queued modules into a few MultiMesh draws
 
 # A viewport onto space behind a window bay: an emissive starfield panel just
