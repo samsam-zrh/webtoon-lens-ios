@@ -20,6 +20,7 @@
 | Arènes « Couloir impérial » et « Centre de contrôle » (décors PBR façon Étoile de la Mort : plaques métalliques, bandes rouges, porte blindée, hublots, colonnes, réacteur, props physiques — assemblés depuis le kit modulaire texturé) | Quaternius « Modular SciFi MegaKit » | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [quaternius.com](https://quaternius.com/packs/modularscifimegakit.html) |
 | Générateur, turbine (machinerie d'arène) | divers auteurs poly.pizza | CC-BY | [poly.pizza](https://poly.pizza) |
 | Sabre laser (menu) | Martin Calviello | CC-BY | [Poly Pizza](https://poly.pizza/m/bsFV-B_VG17) |
+| Droïde de combat animé (combattant 1v1, ennemi du mode survie, droïdes de maintenance du hangar) | Quaternius | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) | [Poly Pizza](https://poly.pizza/m/QCm7qe9uNJ) |
 
 ## Textures planétaires et ciel
 

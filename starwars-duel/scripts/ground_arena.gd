@@ -98,6 +98,24 @@ const ROSTER := {
 			"block": "20_FightIdle", "hit": "26_HitStanding", "death": "27_DeathShot",
 		},
 	},
+	"droid": {
+		"name": "Droïde de Combat", "type": "jedi", "melee": true,
+		"model": "res://assets/models/cc0/droid.glb",
+		"model_yaw": PI, "model_scale": 0.37,
+		"saber_color": Color(1.0, 0.55, 0.15),
+		"hp": 110.0, "speed": 4.2, "dmg": 13.0, "reach": 2.1, "lunge": 4.0, "turn_speed": 11.0,
+		"attack_time": 0.6, "attack_anim_speed": 1.1, "attack_move_factor": 0.5,
+		"ai_skill": 0.5, "ai_block_chance": 0.0,
+		"quote": "RÉSISTANCE FUTILE. ÉLIMINATION EN COURS.",
+		"anims": {
+			"idle": "RobotArmature|Robot_Idle", "run_f": "RobotArmature|Robot_Running",
+			"run_b": "RobotArmature|Robot_Walking",
+			"run_l": "RobotArmature|Robot_Walking", "run_r": "RobotArmature|Robot_Walking",
+			"attack": ["RobotArmature|Robot_Punch"],
+			"block": "RobotArmature|Robot_Idle", "hit": "RobotArmature|Robot_No",
+			"death": "RobotArmature|Robot_Death",
+		},
+	},
 }
 
 var player: GroundFighter
@@ -994,6 +1012,21 @@ func _build_hangar() -> void:
 			ap.play("01_Idle")
 			ap.seek(randf() * 2.0)
 		_collision_box(t.position + Vector3(0, 1.0, 0), Vector3(0.8, 2.0, 0.8))
+
+	# CC0 maintenance droids (Quaternius, via Poly Pizza) standing watch beside
+	# the honor guard — set dressing reusing the combat-droid model
+	var droid_scn: PackedScene = load("res://assets/models/cc0/droid.glb")
+	for dpos in [Vector3(-10.5, 0, HG_D - 1.9), Vector3(10.5, 0, HG_D - 1.9)]:
+		var dr: Node3D = droid_scn.instantiate()
+		dr.position = dpos
+		dr.scale = Vector3.ONE * 0.37
+		dr.rotation.y = PI
+		add_child(dr)
+		var dap: AnimationPlayer = dr.find_child("AnimationPlayer", true, false)
+		if dap != null and dap.has_animation("RobotArmature|Robot_Idle"):
+			dap.play("RobotArmature|Robot_Idle")
+			dap.seek(randf() * 3.0)
+		_collision_box(dpos + Vector3(0, 0.8, 0), Vector3(0.9, 1.6, 0.9))
 
 	# real downloaded machinery along the hangar side walls (CC0 props)
 	for spec in [["console", 2.0, Vector3(-HG_W + 1.6, 0, -6.0), 1.57],
@@ -3309,9 +3342,9 @@ func _spawn_wave() -> void:
 			if wave <= 2:
 				pick = "sith" if i == 0 else "trooper"
 			elif wave <= 4:
-				pick = ["sith", "trooper", "trooper", "sith"][i % 4]
+				pick = ["sith", "trooper", "droid", "sith"][i % 4]
 			else:
-				pick = ["sith", "trooper", "sith", "sith", "trooper"][i % 5]
+				pick = ["droid", "sith", "trooper", "sith", "droid"][i % 5]
 			roster.append([pick, {"mul": {"hp": hpmul, "dmg": dmgmul}}])
 	var cnt := roster.size()
 	for i in cnt:

@@ -22,7 +22,10 @@ var _fps_label: Label
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	if "--ground" in args:
+	if "--grounddroid" in args:
+		_mode = "ground"
+		start_game("luke", "droid", {"theme": "imperial"})
+	elif "--ground" in args:
 		_mode = "ground"
 		start_game("luke", "vader")
 	elif "--ground2" in args:
@@ -352,7 +355,7 @@ func _build_menu_ui() -> void:
 	row.position.y = -64
 	root.add_child(row)
 
-	for id in (ORDER if _mode == "ships" else ["luke", "kenobi", "vader", "trooper", "sith"]):
+	for id in (ORDER if _mode == "ships" else ["luke", "kenobi", "vader", "trooper", "sith", "droid"]):
 		row.add_child(_make_card(id))
 
 	# arena selection row (1v1 phase 2), hidden until the opponent is picked
@@ -364,7 +367,7 @@ func _build_menu_ui() -> void:
 	_arena_row.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_arena_row.visible = false
 	root.add_child(_arena_row)
-	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CITÉ DES NUAGES", "bespin"], ["CENTRE DE CONTRÔLE", "control"], ["COULOIR IMPÉRIAL", "imperial"]]:
+	for spec in [["SALLE DU TRÔNE", "throne"], ["HANGAR IMPÉRIAL", "hangar"], ["CENTRE DE CONTRÔLE", "control"], ["COULOIR IMPÉRIAL", "imperial"]]:
 		var ab := UiKit.button(spec[0], 18)
 		ab.custom_minimum_size = Vector2(230, 110)
 		ab.pressed.connect(func() -> void:
