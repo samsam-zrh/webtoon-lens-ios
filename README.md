@@ -58,6 +58,12 @@ iOS does not allow a third-party App Store app to continuously read and draw ove
 
 For the closest direct-reading experience on iPhone, use the `Webtoon` tab in the app. It loads the webtoon page inside `WKWebView`, detects visible images, runs OCR/translation in native Swift, then injects translated bubbles back into the page at the OCR coordinates.
 
+## MCP servers
+
+The repository ships a project-scoped [`.mcp.json`](.mcp.json) that registers the [Higgsfield](https://higgsfield.ai) MCP server (`https://mcp.higgsfield.ai/mcp`) for AI image/video generation. Claude Code picks it up automatically when working in this repository.
+
+The server requires OAuth sign-in: on first use, run `/mcp` in an interactive Claude Code session and authenticate the `higgsfield` server in the browser. Remote (web) Claude Code sessions cannot complete the OAuth flow themselves, so authenticate once from a local interactive session, or add Higgsfield as a connector in claude.ai settings.
+
 ## Suggested validation on macOS
 
 ```sh
