@@ -1,17 +1,29 @@
-# Webtoon Lens iOS
+# Webtoon Lens
 
-Webtoon Lens is an iOS 18+ prototype for fast webtoon image translation that stays inside App Store rules:
+Lecteur de webtoons avec **OCR et traduction locale en français**, accompagné d’un prototype iOS 18+ respectant les contraintes de l’App Store.
 
-- In-app webtoon browser for direct overlays while reading inside Webtoon Lens.
-- Safari Web Extension for one-tap overlays while reading webtoons in Safari.
-- App Intent/Shortcuts handoff for screenshots from other apps.
-- Local OCR with Vision.
-- Text-only translation calls to a configurable backend.
-- Series glossary memory for stable names, powers, places, and concepts.
+## Lire sur Mac sans compiler iOS
 
-## Generate the Xcode project
+```sh
+bash ci/Install-PhonePreview.sh
+bash ci/Start-PhonePreview.sh
+```
 
-This repository uses XcodeGen so the project file can be generated reproducibly on macOS:
+Ouvrez **http://127.0.0.1:8787**. Import de pages anglaises/chinoises ou URL de chapitre, OCR Apple Vision, Qwen 4B **Instruct** local, glossaire de 188 concepts et corrections par série. Les traductions sont ajustées dans les intérieurs de bulles détectés ; les zones non fiables gardent leur original avec une traduction lisible séparément.
+
+Installation, limites du rendu, confidentialité, réseau et tests : **[guide du lecteur macOS](PhonePreview/README.md)**. Les modèles et le serveur s’exécutent sur votre ordinateur, pas sur GitHub Pages.
+
+## Prototype iOS
+
+- Navigateur webtoon intégré et superpositions de traduction.
+- Extension Safari avec superpositions à la demande.
+- App Intent / Raccourcis pour importer des captures d’autres applications.
+- OCR Vision local et requêtes de traduction textuelles vers un backend configurable.
+- Mémoire de glossaire par série pour les noms, pouvoirs, lieux et concepts.
+
+## Générer le projet Xcode
+
+Le dépôt utilise XcodeGen pour générer le projet sur macOS :
 
 ```sh
 brew install xcodegen
@@ -20,49 +32,49 @@ xcodegen generate
 open WebtoonLens.xcodeproj
 ```
 
-No Mac? Use [WINDOWS_NO_MAC.md](WINDOWS_NO_MAC.md). The repository includes GitHub Actions workflows that run on macOS cloud runners.
+Sans Mac : [WINDOWS_NO_MAC.md](WINDOWS_NO_MAC.md). Les workflows GitHub Actions utilisent des runners macOS.
 
-If GitHub billing blocks Actions, use the local phone preview:
+Le lecteur portable Windows historique se lance avec :
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ci\Install-PhonePreviewAI.ps1
 powershell -ExecutionPolicy Bypass -File .\ci\Start-PhonePreview.ps1
 ```
 
-The preview serves the mobile UI and a local OCR/translation backend on the same local URL. It uses tiled Tesseract plus RapidOCR/EasyOCR for OCR, Ollama `qwen3:14b-q4_K_M` when available, then a local EN -> FR transformer and Argos Translate as fallbacks. It no longer returns fake `[fr]` translations.
+L’interface et le backend local utilisent la même URL. Le mode portable conserve Tesseract, RapidOCR/EasyOCR et Argos ; le lecteur macOS recommande Vision et `qwen3:4b-instruct-2507-q4_K_M`. Aucun faux préfixe `[fr]` ne remplace une traduction manquante.
 
-Before running on a real device, replace the sample bundle identifiers and App Group in:
+Avant d’utiliser l’application iOS sur un appareil réel, remplacez les identifiants d’exemple dans :
 
 - `project.yml`
 - `App/Resources/WebtoonLens.entitlements`
 - `SafariExtension/Native/WebtoonLensSafariExtension.entitlements`
 - `Core/Sources/SharedAppGroupStore.swift`
 
-The placeholder App Group is `group.com.example.webtoonlens`.
+L’App Group d’exemple est `group.com.example.webtoonlens`.
 
-## Backend contract
+## Contrat du backend
 
-Configure the backend URL in the Settings tab. The app posts text-only payloads to:
+Configurez l’URL du backend dans les réglages iOS. L’application envoie des requêtes textuelles à :
 
 ```http
 POST /v1/webtoon/translate
 ```
 
-The payload includes source language `auto`, target language `fr`, OCR segments, reading boxes, series id, style prompt, and locked glossary terms. The response returns translated segments and optional glossary updates.
+La requête contient la langue source `auto`, la cible `fr`, les segments OCR, les coordonnées, l’identifiant de série, les consignes de style et les termes verrouillés. La réponse fournit les segments traduits et d’éventuelles propositions de glossaire.
 
-If no backend URL is configured, the native app now shows a clear setup error instead of generating fake translations. For local testing from Windows, run the phone preview server and use its LAN URL as the backend.
+Sans URL de backend, l’application native affiche une erreur explicite. Pour un test sur téléphone, l’exposition LAN du lecteur local doit être activée volontairement ; voir le guide.
 
-## What is intentionally not implemented
+## Limites iOS
 
-iOS does not allow a third-party App Store app to continuously read and draw over other apps. Outside Safari, the supported flow is: user triggers a Shortcut that captures a screenshot, Webtoon Lens receives the image, then opens the app with the translated result.
+iOS n’autorise pas une application tierce de l’App Store à lire et dessiner en permanence au-dessus des autres applications. Hors Safari, l’utilisateur déclenche un Raccourci de capture ; Webtoon Lens reçoit l’image et ouvre le résultat dans l’application.
 
-For the closest direct-reading experience on iPhone, use the `Webtoon` tab in the app. It loads the webtoon page inside `WKWebView`, detects visible images, runs OCR/translation in native Swift, then injects translated bubbles back into the page at the OCR coordinates.
+L’onglet `Webtoon` charge la page dans une `WKWebView`, détecte les images visibles et utilise la chaîne native Swift. Le lecteur web macOS ne remplace pas cette implémentation.
 
-## Suggested validation on macOS
+## Validation iOS sur macOS
 
 ```sh
 xcodegen generate
 xcodebuild test -scheme WebtoonLens -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-Safari Web Extension and Shortcut behavior must also be tested on a physical iPhone.
+L’extension Safari et les Raccourcis doivent également être vérifiés sur un iPhone physique.

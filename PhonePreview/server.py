@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import base64
@@ -22,10 +23,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import native_ocr
+from bubble_geometry import fit_dialogue
+from glossary import entries as glossary_entries
+from local_translation import translate as translate_locally, check_model
 
 ROOT = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("WEBTOON_LENS_CACHE", Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "WebtoonLens" / "cache"))
-OCR_CACHE_VERSION = "ocr-v4"
+OCR_CACHE_VERSION = "ocr-vision-alpha-v2"
 TRANSLATION_CACHE_VERSION = "translation-v5"
 OCR_MEMORY_CACHE: dict[str, list[dict[str, Any]]] = {}
 TRANSLATION_MEMORY_CACHE: dict[str, dict[str, str]] = {}
@@ -35,7 +40,7 @@ OLLAMA_WARMUP_READY = False
 TESSDATA_DIR = Path(os.environ.get("WEBTOON_LENS_TESSDATA", Path(os.environ.get("LOCALAPPDATA", "")) / "WebtoonLens" / "tessdata"))
 OCR_LANGUAGES = ["jpn", "kor", "chi_sim", "chi_tra", "eng"]
 OLLAMA_URL = os.environ.get("WEBTOON_LENS_OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("WEBTOON_LENS_OLLAMA_MODEL", "qwen3:14b-q4_K_M")
+OLLAMA_MODEL = os.environ.get("WEBTOON_LENS_OLLAMA_MODEL", "qwen3:4b-instruct-2507-q4_K_M")
 WEBTOON_PHRASE_TRANSLATIONS = {
     "beast taming sect": "la Secte du Dressage des B\u00eates",
     "beast-taming sect": "la Secte du Dressage des B\u00eates",
@@ -74,7 +79,10 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def end_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin", "")
+        if origin and urllib.parse.urlparse(origin).hostname in {"localhost", "127.0.0.1", self.headers.get("Host", "").split(":")[0]}:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         super().end_headers()
@@ -85,6 +93,9 @@ class PreviewHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/v1/webtoon/glossary":
+            self.write_json(200, {"entries": glossary_entries()})
+            return
         if parsed.path == "/v1/webtoon/capabilities":
             self.handle_capabilities()
             return
@@ -100,6 +111,10 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
+        origin = self.headers.get("Origin", "")
+        if origin and urllib.parse.urlparse(origin).hostname not in {"localhost", "127.0.0.1", self.headers.get("Host", "").split(":")[0]}:
+            self.write_json(403, {"error": "Origine refusée. Ouvrez le lecteur local."})
+            return
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/v1/webtoon/ocr":
             self.handle_ocr()
@@ -108,13 +123,10 @@ class PreviewHandler(SimpleHTTPRequestHandler):
             self.send_error(404, "Unknown endpoint")
             return
 
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-
         try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
+            payload = self.read_payload()
+        except ValueError as exc:
+            self.write_json(400, {"error": str(exc)})
             return
 
         self.handle_translate_payload(payload)
@@ -124,20 +136,28 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         languages = available_tesseract_languages()
         translation_pairs = available_translation_pairs()
         has_ollama = ollama_model_available()
+        model_error = ""
+        if has_ollama:
+            try:
+                check_model(OLLAMA_MODEL, OLLAMA_URL)
+            except (RuntimeError, urllib.error.URLError) as exc:
+                model_error = str(exc)
+                has_ollama = False
         has_translation = has_ollama or bool(translation_pairs)
         self.write_json(
             200,
             {
                 "imageExtraction": True,
                 "imageProxy": True,
-                "ocr": bool(easyocr_available() or (tesseract_command and languages)),
+                "ocr": bool(native_ocr.available() or easyocr_available() or (tesseract_command and languages)),
                 "translation": has_translation,
                 "ocrEngine": ocr_engine_name(tesseract_command),
-                "ocrLanguages": languages,
+                "ocrLanguages": ["en", "zh", "ja", "ko"] if native_ocr.available() else languages,
                 "translationEngine": translation_engine_name(translation_pairs),
                 "ollamaModel": OLLAMA_MODEL if has_ollama else None,
                 "translationPairs": translation_pairs,
-                "message": "Local OCR and offline translation are available." if (easyocr_available() or tesseract_command) and has_translation else "OCR/translation dependencies are not fully installed.",
+                "message": model_error or ("OCR et traduction locale disponibles." if (native_ocr.available() or easyocr_available() or tesseract_command) and has_translation else "OCR ou modèle local manquant. Consultez le guide macOS."),
+                "glossaryEntries": len(glossary_entries()),
             },
         )
 
@@ -146,26 +166,43 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         self.write_json(200, {"started": started, "ready": OLLAMA_WARMUP_READY, "model": OLLAMA_MODEL})
 
     def handle_ocr(self) -> None:
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-
+        started = time.perf_counter()
         try:
-            payload = json.loads(body.decode("utf-8"))
+            payload = self.read_payload()
             data = image_bytes_from_payload(payload)
             language = str(payload.get("language", "auto"))
+            if language not in {"auto", "en", "zh", "ja", "ko"}:
+                raise ValueError("Langue OCR non reconnue.")
             cache_key = ocr_cache_key(data, language, str(payload.get("cacheKey", "")))
             segments = read_ocr_cache(cache_key)
+            cached = segments is not None
             if segments is None:
                 segments = ocr_image(data, requested_language=language)
                 write_ocr_cache(cache_key, segments)
-        except json.JSONDecodeError:
-            self.write_json(400, {"error": "Invalid JSON"})
+        except ValueError as exc:
+            self.write_json(400, {"error": str(exc)})
             return
         except Exception as exc:
-            self.write_json(500, {"error": str(exc), "segments": []})
+            logging.exception("Échec OCR")
+            self.write_json(503, {"error": str(exc)})
             return
 
-        self.write_json(200, {"segments": segments})
+        self.write_json(200, {"segments": segments, "timing": {"totalMs": round((time.perf_counter()-started)*1000, 1), "cached": cached}})
+
+    def read_payload(self) -> dict[str, Any]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("Taille de requête invalide.") from exc
+        if length <= 0 or length > 30_000_000:
+            raise ValueError("Requête vide ou trop volumineuse (30 Mo maximum).")
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("JSON invalide.") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("La requête doit être un objet JSON.")
+        return payload
 
     def handle_extract(self, parsed: urllib.parse.ParseResult) -> None:
         query = urllib.parse.parse_qs(parsed.query)
@@ -215,8 +252,12 @@ class PreviewHandler(SimpleHTTPRequestHandler):
     def handle_translate_payload(self, payload: dict[str, Any]) -> None:
         try:
             response = translate_payload(payload)
+        except ValueError as exc:
+            self.write_json(400, {"error": str(exc)})
+            return
         except Exception as exc:
-            self.write_json(501, translation_unavailable_payload(payload, reason=str(exc)))
+            logging.exception("Échec de traduction locale")
+            self.write_json(503, {"error": str(exc)})
             return
 
         self.write_json(200, response)
@@ -240,7 +281,10 @@ def image_bytes_from_payload(payload: dict[str, Any]) -> bytes:
     if image_data:
         if "," in image_data and image_data.startswith("data:"):
             image_data = image_data.split(",", 1)[1]
-        return base64.b64decode(image_data)
+        try:
+            return base64.b64decode(image_data, validate=True)
+        except ValueError as exc:
+            raise ValueError("Image base64 invalide.") from exc
 
     image_url = str(payload.get("imageUrl", ""))
     if not image_url:
@@ -297,6 +341,8 @@ def clone_json(value: Any) -> Any:
 
 
 def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, Any]]:
+    if native_ocr.available():
+        return fit_dialogue(data, native_ocr.recognize(data, requested_language))
     candidates: list[tuple[str, list[dict[str, Any]]]] = []
     is_tall_image = image_is_tall_webtoon(data)
 
@@ -345,9 +391,7 @@ def ocr_image(data: bytes, requested_language: str = "auto") -> list[dict[str, A
             pass
 
     if candidates:
-        grouped = group_ocr_segments(choose_ocr_candidate(candidates, requested_language))
-        grouped = filter_dialogue_segments(grouped, requested_language)
-        return fit_segments_to_speech_bubbles(data, grouped)
+        return fit_dialogue(data, choose_ocr_candidate(candidates, requested_language))
 
     command = find_tesseract_command()
     if not command:
@@ -1283,79 +1327,10 @@ def clamp(value: float) -> float:
 
 
 def translate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    glossary = [
-        item
-        for item in payload.get("glossary", [])
-        if item.get("isLocked") and item.get("source") and item.get("translation")
-    ]
-    context_segments = compact_context_segments(payload.get("contextSegments", []))
-    previous_translations = compact_previous_translations(payload.get("previousTranslations", []))
-
-    prepared_segments: list[dict[str, Any]] = []
-    detected_language: str | None = None
-    for index, segment in enumerate(payload.get("segments", [])):
-        source = str(segment.get("text") or segment.get("sourceText") or "")
-        source_language = normalize_language_code(str(payload.get("sourceLanguage") or "auto"), source)
-        if detected_language is None and source_language != "auto":
-            detected_language = source_language
-        prepared_text, protected_terms = prepare_text_for_translation(source, source_language)
-        quick_translation = quick_webtoon_translation(source, source_language)
-        prepared_segments.append(
-            {
-                "index": index,
-                "segment": segment,
-                "id": str(segment.get("id", f"segment-{index}")),
-                "source": source,
-                "sourceLanguage": source_language,
-                "preparedText": prepared_text,
-                "protectedTerms": protected_terms,
-                "quickTranslation": quick_translation,
-            }
-        )
-
-    ollama_translations = translate_segments_with_ollama(
-        [item for item in prepared_segments if not item.get("quickTranslation")],
-        glossary,
-        context_segments,
-        previous_translations,
+    return translate_locally(
+        payload, model=OLLAMA_MODEL, url=OLLAMA_URL, cache_dir=CACHE_DIR,
+        fallback=translate_text_to_french if available_translation_pairs() else None,
     )
-
-    translated_segments = []
-    for item in prepared_segments:
-        index = int(item["index"])
-        segment = item["segment"]
-        source = item["source"]
-        source_language = item["sourceLanguage"]
-        translated = item.get("quickTranslation") or ollama_translations.get(item["id"])
-        if translated:
-            translated = restore_protected_terms(translated, item["protectedTerms"])
-        else:
-            translated = translate_text_to_french(source, source_language)
-        translated = enforce_phrase_translations(source, translated)
-        translated = apply_locked_glossary(source, translated, glossary)
-        translated_segments.append(
-            {
-                "id": item["id"],
-                "sourceText": source,
-                "translatedText": translated,
-                "boundingBox": segment.get(
-                    "boundingBox",
-                    {"x": 0.12, "y": 0.16 + index * 0.18, "width": 0.42, "height": 0.1},
-                ),
-                "rawBoundingBox": segment.get("rawBoundingBox"),
-                "shape": segment.get("shape", "rounded"),
-                "style": style_for_translated_segment(segment, source),
-                "confidence": float(segment.get("confidence", 0.75)),
-                "readingOrder": int(segment.get("readingOrder", index)),
-            }
-        )
-
-    return {
-        "detectedSourceLanguage": detected_language,
-        "segments": translated_segments,
-        "glossaryUpdates": [],
-        "confidence": 0.7,
-    }
 
 
 def style_for_translated_segment(segment: dict[str, Any], source: str) -> dict[str, str]:
@@ -1704,7 +1679,6 @@ def english_french_transformer_available() -> bool:
         return False
 
 
-@lru_cache(maxsize=1)
 def ollama_model_available() -> bool:
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL.rstrip('/')}/api/tags", timeout=3) as response:
@@ -1766,6 +1740,8 @@ def translation_engine_name(translation_pairs: list[str]) -> str | None:
 
 
 def ocr_engine_name(tesseract_command: str) -> str | None:
+    if native_ocr.available():
+        return "Apple Vision"
     engines: list[str] = []
     if rapidocr_available():
         engines.append("rapidocr")
@@ -2115,6 +2091,9 @@ def looks_like_image(url: str) -> bool:
 
 
 def request_for(url: str, *, referer: str = "", accept: str = "*/*") -> urllib.request.Request:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Seuls les liens HTTP(S) sans identifiants sont acceptés.")
     headers = {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
         "Accept": accept,
@@ -2153,8 +2132,9 @@ def fetch_binary(url: str, *, referer: str = "") -> tuple[bytes, str]:
 
 def main() -> None:
     port = int(os.environ.get("WEBTOON_LENS_PREVIEW_PORT", "8787"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), PreviewHandler)
-    print(f"Serving Webtoon Lens phone preview on http://0.0.0.0:{port}")
+    host = os.environ.get("WEBTOON_LENS_PREVIEW_HOST", "127.0.0.1")
+    server = ThreadingHTTPServer((host, port), PreviewHandler)
+    print(f"Lecteur Webtoon Lens : http://{host}:{port}", flush=True)
     server.serve_forever()
 
 

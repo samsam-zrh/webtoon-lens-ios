@@ -39,26 +39,36 @@ let autoTranslateEnabled = false;
 let translateScrollTimer = 0;
 let contentSessionId = 0;
 let chapterNavigation = { previousUrl: "", nextUrl: "", currentLabel: "" };
+let requests = new AbortController();
+let translationPassRunning = false;
+let importedUrls = [];
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  navigator.serviceWorker.register("./sw.js").catch(error => console.warn("Cache hors ligne indisponible", error));
 }
 
 loadCapabilities();
 updateChapterNavigation(webtoonUrl.value);
 window.addEventListener("scroll", scheduleAutoTranslate, { passive: true });
 window.addEventListener("resize", scheduleAutoTranslate);
+document.getElementById("showOriginal").addEventListener("change", event => {
+  stage.classList.toggle("show-original", event.target.checked);
+});
+document.getElementById("retryButton").addEventListener("click", restartTranslation);
+window.addEventListener("glossarychange", restartTranslation);
 
 if (imageInput) {
   imageInput.addEventListener("change", () => {
-    const file = imageInput.files && imageInput.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      prepareCapture(String(reader.result || ""));
-    };
-    reader.readAsDataURL(file);
+    const files = Array.from(imageInput.files || []);
+    if (!files.length) return;
+    if (files.some(file => !["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 20_000_000)) {
+      statusLine.textContent = "Utilisez des pages PNG, JPEG ou WebP de moins de 20 Mo.";
+      return;
+    }
+    currentPageUrl = "";
+    renderImageFeed(files.map(file => ({ url: URL.createObjectURL(file), alt: file.name, local: true })));
+    warmupLocalModel();
+    imageInput.value = "";
   });
 }
 
@@ -85,6 +95,7 @@ backendUrl.addEventListener("input", () => {
 
 ocrLanguage.addEventListener("change", () => {
   localStorage.setItem("webtoonLensOcrLanguage", ocrLanguage.value);
+  restartTranslation();
 });
 
 prevChapterButton.addEventListener("click", () => {
@@ -106,6 +117,7 @@ async function openWebtoonUrl(urlOverride = "") {
   }
 
   setOpenButtonBusy(true);
+  const sessionId = beginContentSession();
   readerSummary.textContent = "";
   statusLine.textContent = "Ouverture du chapitre, extraction des images et prechauffe de la traduction...";
 
@@ -123,6 +135,7 @@ async function openWebtoonUrl(urlOverride = "") {
       throw new Error(message || `Extraction impossible (${response.status})`);
     }
     const payload = await response.json();
+    if (isStaleSession(sessionId)) return;
     renderImageFeed(payload.images || []);
   } catch (error) {
     statusLine.textContent = error && error.message ? error.message : String(error);
@@ -139,6 +152,14 @@ function normalizedUrlValue(rawValue) {
 
 function beginContentSession() {
   contentSessionId += 1;
+  requests.abort();
+  requests = new AbortController();
+  for (const page of imageReader.querySelectorAll(".reader-page")) {
+    page.__imageObserver?.disconnect();
+    window.WebtoonLayout.clear(page.querySelector(".overlay"));
+  }
+  importedUrls.forEach(url => URL.revokeObjectURL(url));
+  importedUrls = [];
   window.clearTimeout(translateScrollTimer);
   return contentSessionId;
 }
@@ -204,22 +225,24 @@ function deriveChapterNavigation(rawValue) {
 
   try {
     const parsed = new URL(normalized);
-    const pathMatch = lastNumericMatch(parsed.pathname);
+    const pathMatch = /(?:chapter|chapitre|episode|ep|ch)[-_/]?(\d+)(?=[^\d]*$)/i.exec(parsed.pathname);
     if (pathMatch) {
-      const chapterNumber = Number(pathMatch[0]);
+      const digits = { 0: pathMatch[1], index: pathMatch.index + pathMatch[0].lastIndexOf(pathMatch[1]) };
+      const chapterNumber = Number(digits[0]);
       return {
-        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "pathname", pathMatch, chapterNumber - 1) : "",
-        nextUrl: buildSteppedUrl(parsed, "pathname", pathMatch, chapterNumber + 1),
+        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "pathname", digits, chapterNumber - 1) : "",
+        nextUrl: buildSteppedUrl(parsed, "pathname", digits, chapterNumber + 1),
         currentLabel: `Chapitre ${chapterNumber} detecte.`
       };
     }
 
-    const searchMatch = lastNumericMatch(parsed.search);
+    const searchMatch = /[?&](?:chapter|episode|chapitre)=(\d+)/i.exec(parsed.search);
     if (searchMatch) {
-      const chapterNumber = Number(searchMatch[0]);
+      const digits = { 0: searchMatch[1], index: searchMatch.index + searchMatch[0].lastIndexOf(searchMatch[1]) };
+      const chapterNumber = Number(digits[0]);
       return {
-        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "search", searchMatch, chapterNumber - 1) : "",
-        nextUrl: buildSteppedUrl(parsed, "search", searchMatch, chapterNumber + 1),
+        previousUrl: chapterNumber > 1 ? buildSteppedUrl(parsed, "search", digits, chapterNumber - 1) : "",
+        nextUrl: buildSteppedUrl(parsed, "search", digits, chapterNumber + 1),
         currentLabel: `Episode ${chapterNumber} detecte.`
       };
     }
@@ -279,6 +302,7 @@ function renderImageFeed(images) {
   previewImage.style.display = "none";
   overlay.innerHTML = "";
   imageReader.innerHTML = "";
+  importedUrls = images.filter(image => image.local).map(image => image.url);
 
   if (!images.length) {
     emptyState.style.display = "grid";
@@ -302,7 +326,7 @@ function renderImageFeed(images) {
     badge.textContent = `Image ${index + 1}`;
 
     const img = document.createElement("img");
-    img.src = proxyImageUrl(image.url);
+    img.src = image.local ? image.url : proxyImageUrl(image.url);
     img.alt = image.alt || `Image webtoon ${index + 1}`;
     img.loading = index < 3 ? "eager" : "lazy";
     img.decoding = "async";
@@ -325,6 +349,11 @@ function renderImageFeed(images) {
     pageOverlay.className = "overlay";
     pageOverlay.setAttribute("aria-live", "polite");
 
+    const imageObserver = new ResizeObserver(() => {
+      pageOverlay.style.height = `${img.clientHeight}px`;
+    });
+    imageObserver.observe(img);
+    page.__imageObserver = imageObserver;
     page.append(img, badge, pageOverlay);
     imageReader.appendChild(page);
   }
@@ -341,10 +370,14 @@ function proxyImageUrl(url) {
 }
 
 async function translateReaderImages() {
+  if (translationPassRunning) return;
+  translationPassRunning = true;
+  try {
   const sessionId = contentSessionId;
   autoTranslateEnabled = true;
   const pages = readerPagesForTranslation().filter((page) => pageNeedsTranslation(page)).slice(0, TRANSLATION_PAGES_PER_PASS);
   if (!pages.length) {
+    if (document.querySelector(".reader-page[data-translation-state='error']")) return;
     if (!loadedImages && !failedImages) {
       statusLine.textContent = "Chargement des premieres images...";
       return;
@@ -359,15 +392,20 @@ async function translateReaderImages() {
   let translatedPages = 0;
   for (const [index, page] of pages.entries()) {
     if (isStaleSession(sessionId)) return;
+    if (document.querySelector(".reader-page[data-translation-state='error']")) return;
     const translated = await translatePageProgressively(page, index + 1, pages.length, sessionId);
     if (translated) translatedPages += 1;
   }
 
   if (isStaleSession(sessionId)) return;
+  if (document.querySelector(".reader-page[data-translation-state='error']")) return;
   statusLine.textContent = translatedPages
     ? `OK: ${translatedPages} image(s) avancee(s). La traduction continue en fond.`
     : "Analyse en cours. La traduction avance zone par zone.";
   scheduleAutoTranslate();
+  } finally {
+    translationPassRunning = false;
+  }
 }
 
 async function translatePageProgressively(page, pageNumber, totalPages, sessionId = contentSessionId) {
@@ -400,7 +438,6 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
         cacheKey: `${imageUrl}:${crop.cacheKey}`
       });
       const ocr = mapCropSegmentsToPage(cropOcr, crop, page);
-      rememberProcessedWindow(page, crop.window);
       clearOverlayNotice(pageOverlay);
       processedWindows += 1;
 
@@ -417,6 +454,7 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
             const endIndex = segmentIndex + batch.length;
             statusLine.textContent = `Traduction bulle ${segmentIndex + 1}/${freshSegments.length} - image ${Number(page.dataset.index || "0") + 1}...`;
             const translated = await translateSegments(batch, contextSegments, previousTranslations);
+            if (isStaleSession(sessionId)) return false;
 
             for (const segment of translated) {
               renderSegmentIntoOverlay(pageOverlay, segment);
@@ -432,6 +470,7 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
         }
       }
 
+      rememberProcessedWindow(page, crop.window);
       crop = await visibleImageCrop(page);
     }
 
@@ -443,8 +482,10 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
     page.dataset.translationState = pageFullyCovered(page) ? "done" : "idle";
     return translatedCount > 0;
   } catch (error) {
+    if (isStaleSession(sessionId)) return false;
     page.dataset.translationState = "error";
     showOverlayNotice(pageOverlay, error && error.message ? error.message : String(error));
+    statusLine.textContent = `Traduction interrompue : ${error.message}. Utilisez « Relancer la traduction ».`;
     return false;
   } finally {
     scheduleAutoTranslate();
@@ -452,7 +493,7 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
 }
 
 function pageNeedsTranslation(page) {
-  if (page.dataset.loaded !== "true" || page.dataset.translationState === "running" || page.dataset.translationState === "done") {
+  if (page.dataset.loaded !== "true" || ["running", "done", "error"].includes(page.dataset.translationState)) {
     return false;
   }
 
@@ -559,8 +600,10 @@ async function visibleImageCrop(page) {
   const cropWindow = translationWindowCandidates(page)[0];
   if (!img || !cropWindow) return null;
 
-  const cropY = Math.max(0, Math.floor(cropWindow.y * img.naturalHeight));
-  const cropHeight = Math.max(1, Math.min(img.naturalHeight - cropY, Math.ceil(cropWindow.height * img.naturalHeight)));
+  const coreY = Math.max(0, Math.floor(cropWindow.y * img.naturalHeight));
+  const coreBottom = Math.min(img.naturalHeight, Math.ceil((cropWindow.y + cropWindow.height) * img.naturalHeight));
+  const cropY = Math.max(0, coreY - 400);
+  const cropHeight = Math.min(img.naturalHeight, coreBottom + 400) - cropY;
   const canvas = document.createElement("canvas");
   canvas.width = img.naturalWidth;
   canvas.height = cropHeight;
@@ -570,9 +613,13 @@ async function visibleImageCrop(page) {
   context.drawImage(img, 0, cropY, img.naturalWidth, cropHeight, 0, 0, img.naturalWidth, cropHeight);
 
   return {
-    dataUrl: canvas.toDataURL("image/jpeg", 0.88),
+    dataUrl: canvas.toDataURL("image/png"),
     cacheKey: `${Math.round(cropWindow.y * 10000)}-${Math.round((cropWindow.y + cropWindow.height) * 10000)}`,
     window: {
+      y: coreY / img.naturalHeight,
+      height: (coreBottom - coreY) / img.naturalHeight
+    },
+    mappingWindow: {
       y: cropY / img.naturalHeight,
       height: cropHeight / img.naturalHeight
     },
@@ -583,22 +630,34 @@ async function visibleImageCrop(page) {
 
 function mapCropSegmentsToPage(segments, crop, page) {
   const pageIndex = Number(page.dataset.index || "0");
+  const mapping = crop.mappingWindow || crop.window;
   return segments.map((segment, index) => {
     const box = segment.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
     const fullBox = {
       x: clamp01(Number(box.x || 0)),
-      y: clamp01(crop.window.y + Number(box.y || 0) * crop.window.height),
+      y: clamp01(mapping.y + Number(box.y || 0) * mapping.height),
       width: clamp01(Number(box.width || 0)),
-      height: clamp01(Number(box.height || 0) * crop.window.height)
+      height: clamp01(Number(box.height || 0) * mapping.height)
     };
+    const mapBox = input => input ? {
+      x: input.x, y: mapping.y + input.y * mapping.height,
+      width: input.width, height: input.height * mapping.height
+    } : undefined;
     return {
       ...segment,
       id: `p${pageIndex}-${crop.cacheKey}-${segment.id || index}`,
       boundingBox: fullBox,
-      rawBoundingBox: fullBox,
+      rawBoundingBox: mapBox(segment.rawBoundingBox) || fullBox,
+      textBox: mapBox(segment.textBox),
+      imageWidth: crop.imageWidth,
+      imageHeight: crop.imageHeight,
       readingOrder: Math.round(fullBox.y * 100000) + index,
       cropWindow: crop.window
     };
+  }).filter(segment => {
+    const raw = segment.rawBoundingBox;
+    const center = raw.y + raw.height / 2;
+    return center >= crop.window.y && center <= crop.window.y + crop.window.height;
   });
 }
 
@@ -673,11 +732,10 @@ function segmentSignature(segment) {
     .toLowerCase()
     .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+/g, "")
     .slice(0, 90);
-  if (source.length >= 18) return source;
   return [
     source,
     Math.round(Number(box.x || 0) * 40),
-    Math.round(Number(box.y || 0) * 20),
+    Math.round(Number(box.y || 0) * 200),
     Math.round(Number(box.width || 0) * 30)
   ].join(":");
 }
@@ -778,17 +836,20 @@ async function translateSegments(segments, contextSegments = [], previousTransla
   const payload = await postJSON("/v1/webtoon/translate", {
     sourceLanguage: ocrLanguage.value,
     targetLanguage: "fr",
-    seriesID: "phone-preview",
+    seriesID: window.WebtoonGlossary.series(),
     style: "Traduction naturelle en francais, adaptee aux webtoons. Garde les noms propres et les pouvoirs coherents.",
-    glossary: [
-      { id: "astra", source: "Astra", translation: "Astra", category: "power", isLocked: true },
-      { id: "north-blade", source: "Lame du nord", translation: "Lame du Nord", category: "power", isLocked: true }
-    ],
+    glossary: window.WebtoonGlossary.terms(),
     contextSegments,
     previousTranslations,
-    segments
+    segments: segments.map(segment => {
+      const { maskData, ...textOnly } = segment;
+      return textOnly;
+    })
   });
-  return payload.segments || [];
+  if (!Array.isArray(payload.segments) || payload.segments.length !== segments.length) {
+    throw new Error("Le moteur n’a pas renvoyé tous les dialogues.");
+  }
+  return payload.segments.map(translated => ({ ...segments.find(source => source.id === translated.id), ...translated }));
 }
 
 function contextForSegments(segments) {
@@ -808,7 +869,8 @@ async function postJSON(path, payload) {
   const response = await fetch(`${backendBaseUrl()}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: requests.signal
   });
   if (!response.ok) {
     const message = await readError(response);
@@ -818,7 +880,11 @@ async function postJSON(path, payload) {
 }
 
 function backendBaseUrl() {
-  return (backendUrl.value.trim() || window.location.origin).replace(/\/$/, "");
+  const url = new URL(backendUrl.value.trim() || window.location.origin);
+  if (!["localhost", "127.0.0.1", window.location.hostname].includes(url.hostname)) {
+    throw new Error("Choisissez un serveur local : les pages ne sont pas envoyées à une API externe.");
+  }
+  return url.origin;
 }
 
 function renderIntoOverlay(targetOverlay, segments) {
@@ -830,30 +896,24 @@ function renderIntoOverlay(targetOverlay, segments) {
 }
 
 function renderSegmentIntoOverlay(targetOverlay, segment) {
-  const existing = targetOverlay.querySelector(`[data-segment-id="${cssEscape(segment.id || "")}"]`);
-  if (existing) existing.remove();
-  removeOverlappingBubbles(targetOverlay, segment);
+  window.WebtoonLayout.render(targetOverlay, segment);
+}
 
-  const box = segment.boundingBox || { x: 0.12, y: 0.16, width: 0.52, height: 0.1 };
-  const translatedText = formatBubbleText(segment.translatedText || segment.text || "");
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.dataset.segmentId = segment.id || "";
-  bubble.dataset.shape = segment.shape || guessBubbleShape(box);
-  bubble.dataset.x = String(box.x);
-  bubble.dataset.y = String(box.y);
-  bubble.dataset.width = String(box.width);
-  bubble.dataset.height = String(box.height);
-  bubble.textContent = translatedText;
-  bubble.title = segment.sourceText || "";
-  bubble.style.left = `${box.x * 100}%`;
-  bubble.style.top = `${box.y * 100}%`;
-  bubble.style.width = `${Math.max(0.18, box.width) * 100}%`;
-  bubble.style.height = `${Math.max(44, box.height * targetOverlay.clientHeight)}px`;
-  bubble.style.fontSize = `${fontSizeForBox(box, targetOverlay, translatedText)}px`;
-  bubble.dataset.length = translatedText.length > 72 ? "long" : "short";
-  applyBubbleStyle(bubble, segment.style, segment.sourceText || "");
-  targetOverlay.appendChild(bubble);
+function restartTranslation() {
+  requests.abort();
+  requests = new AbortController();
+  contentSessionId += 1;
+  for (const page of imageReader.querySelectorAll(".reader-page")) {
+    page.dataset.sessionId = String(contentSessionId);
+    page.dataset.translationState = "idle";
+    page.__ocrWindows = [];
+    page.__translatedSegmentSignatures = new Set();
+    page.__ocrSegments = [];
+    page.__previousTranslations = [];
+    window.WebtoonLayout.clear(page.querySelector(".overlay"));
+  }
+  statusLine.textContent = "Nouvelle traduction avec la langue et le glossaire actuels…";
+  scheduleAutoTranslate();
 }
 
 function removeOverlappingBubbles(targetOverlay, segment) {
@@ -976,6 +1036,7 @@ function updateReaderStatus(total) {
   if (pending) chunks.push(`${pending} en attente`);
   if (failedImages) chunks.push(`${failedImages} bloquees`);
   readerSummary.textContent = chunks.join(" - ");
+  if (document.querySelector(".reader-page[data-translation-state='error']")) return;
 
   if (failedImages && loadedImages === 0) {
     statusLine.textContent = "Toutes les images sont bloquees par le site ou le reseau. Essaie un autre lien ou une capture.";
@@ -1018,14 +1079,11 @@ function warmupLocalModel() {
 }
 
 async function readError(response) {
+  const text = await response.text();
   try {
-    const payload = await response.json();
+    const payload = JSON.parse(text);
     return payload.error || payload.message || "";
   } catch {
-    try {
-      return await response.text();
-    } catch {
-      return "";
-    }
+    return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
   }
 }

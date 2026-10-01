@@ -27,14 +27,15 @@ foreach ($language in @("eng", "osd")) {
     }
 }
 
+python -m pip install --user -r "$PSScriptRoot\..\PhonePreview\requirements.txt"
 python -m pip install --user easyocr rapidocr-onnxruntime argostranslate transformers sentencepiece
 
 $ollama = Get-Command ollama -ErrorAction SilentlyContinue
 if ($ollama) {
-    Write-Host "Ollama detected. The preview will use qwen3:14b-q4_K_M if that model is installed."
+    Write-Host "Ollama détecté. Modèle recommandé : qwen3:4b-instruct-2507-q4_K_M."
     & $ollama.Source list
 } else {
-    Write-Host "Optional: install Ollama and run 'ollama pull qwen3:14b-q4_K_M' for the best local translations."
+    Write-Host "Installez Ollama puis lancez 'ollama pull qwen3:4b-instruct-2507-q4_K_M'."
 }
 
 @'

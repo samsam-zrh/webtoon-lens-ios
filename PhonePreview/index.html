@@ -6,59 +6,81 @@
   <meta name="theme-color" content="#111111">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
-  <title>Webtoon Lens Preview</title>
+  <title>Webtoon Lens · Lecteur local</title>
 </head>
 <body>
   <main class="app-shell">
     <section class="workspace" aria-label="Lecteur Webtoon Lens">
       <header class="hero-block">
-        <p class="eyebrow">Preview mobile locale</p>
         <div class="hero-row">
           <div class="hero-copy">
             <h1>Webtoon Lens</h1>
-            <p>Ouvre un chapitre. La traduction demarre seule et continue pendant que tu lis.</p>
+            <p>Vos webtoons en français, sur votre Mac. Importez des pages ou ouvrez un chapitre : la traduction reste locale.</p>
           </div>
-          <p id="capabilityLine" class="capability-pill">Verification du backend...</p>
+          <p id="capabilityLine" class="capability-pill" role="status">Vérification du moteur local…</p>
         </div>
       </header>
 
       <div class="url-loader">
         <label class="url-field">
-          Lien du scan
-          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/episode-843/">
+          Lien du chapitre
+          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/chapitre-12/">
         </label>
         <button id="openUrlButton" type="button">Ouvrir</button>
       </div>
+      <div class="import-row">
+        <label class="file-button">Importer des pages
+          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+        </label>
+        <p>PNG, JPEG ou WebP · plusieurs pages, dans l’ordre choisi · 20 Mo par page.</p>
+      </div>
 
       <div class="chapter-nav" aria-label="Navigation chapitre">
-        <button id="prevChapterButton" type="button" class="ghost-button" disabled>Scan precedent</button>
+        <button id="prevChapterButton" type="button" class="ghost-button" disabled>Chapitre précédent</button>
         <p id="chapterHint" class="status-line">Colle un lien de chapitre pour activer la navigation rapide.</p>
-        <button id="nextChapterButton" type="button" class="ghost-button" disabled>Scan suivant</button>
+        <button id="nextChapterButton" type="button" class="ghost-button" disabled>Chapitre suivant</button>
       </div>
 
       <div class="quick-controls">
         <label class="compact-field">
-          Langue OCR
+          Langue des pages
           <select id="ocrLanguage">
-            <option value="auto">Auto</option>
+            <option value="auto">Détection automatique</option>
             <option value="ja">Japonais</option>
-            <option value="ko">Coreen</option>
+            <option value="ko">Coréen</option>
             <option value="zh">Chinois</option>
             <option value="en">Anglais</option>
           </select>
         </label>
+        <label class="toggle-control"><input id="showOriginal" type="checkbox"> Voir l’original</label>
+        <button id="retryButton" class="ghost-button" type="button">Relancer la traduction</button>
       </div>
 
+      <details class="advanced-panel glossary-panel">
+        <summary>Glossaire de la série <span id="glossaryCount"></span></summary>
+        <div class="panel-content">
+          <p>Lexique de départ pour cultivation, arts martiaux, fantasy, jeux, romance et école. Les noms propres varient : vos corrections sont prioritaires et restent dans ce navigateur.</p>
+          <label>Série <input id="seriesName" type="text" maxlength="80" value="Mes pages"></label>
+          <form id="glossaryForm" class="glossary-form">
+            <label>Terme anglais ou chinois <input id="termSource" maxlength="120" required placeholder="Azure Moon"></label>
+            <label>Traduction française <input id="termFrench" maxlength="200" required placeholder="Lune d’azur"></label>
+            <button type="submit">Enregistrer</button>
+          </form>
+          <div id="glossaryOverrides" aria-live="polite"></div>
+          <label>Explorer le lexique <input id="glossarySearch" type="search" placeholder="Terme, catégorie ou sens…"></label>
+          <div id="glossaryResults" class="glossary-results"></div>
+        </div>
+      </details>
       <details class="advanced-panel">
-        <summary>Reglages avances</summary>
+        <summary>Réglages avancés</summary>
         <label>
-          Backend OCR/IA optionnel
-          <input id="backendUrl" type="url" placeholder="https://api.example.com">
+          Serveur local OCR / IA
+          <input id="backendUrl" type="url" placeholder="http://127.0.0.1:8787">
         </label>
       </details>
 
       <div class="meta-strip">
-        <p id="statusLine" class="status-line primary-status">Colle un lien d'episode pour lancer la lecture.</p>
+        <p id="statusLine" class="status-line primary-status" role="status" aria-live="polite">Importez des pages ou collez un lien de chapitre.</p>
         <p id="readerSummary" class="status-line"></p>
       </div>
 
@@ -66,14 +88,16 @@
         <div id="imageReader" class="image-reader"></div>
         <img id="previewImage" alt="Capture webtoon importee">
         <div id="emptyState" class="empty-state">
-          <strong>Colle un lien</strong>
-          <span>Ouvre un episode webtoon ici. La traduction commencera sans bouton.</span>
+          <strong>Un chapitre à lire ?</strong>
+          <span>Importez vos pages anglaises ou chinoises, ou collez un lien. Les premiers dialogues seront traduits pendant le chargement de la suite.</span>
         </div>
         <div id="overlay" class="overlay" aria-live="polite"></div>
       </div>
     </section>
   </main>
 
+  <script src="layout.js"></script>
+  <script src="glossary-ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

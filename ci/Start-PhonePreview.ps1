@@ -1,5 +1,6 @@
 param(
-    [int]$Port = 8787
+    [int]$Port = 8787,
+    [switch]$Lan
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,16 +31,17 @@ if (-not $ip) {
 }
 
 Write-Host ""
-Write-Host "Webtoon Lens phone preview"
+Write-Host "Lecteur local Webtoon Lens"
 Write-Host "PC:    http://localhost:$Port"
-Write-Host "Phone: http://$ip`:$Port"
+if ($Lan) { Write-Host "Téléphone : http://$ip`:$Port" }
 Write-Host ""
-Write-Host "Keep this window open. Put your phone on the same Wi-Fi."
+Write-Host "Gardez cette fenêtre ouverte. Ajoutez -Lan pour un réseau privé de confiance."
 Write-Host ""
 
 Push-Location $previewPath
 try {
     $env:WEBTOON_LENS_PREVIEW_PORT = "$Port"
+    $env:WEBTOON_LENS_PREVIEW_HOST = if ($Lan) { "0.0.0.0" } else { "127.0.0.1" }
     python .\server.py
 }
 finally {
