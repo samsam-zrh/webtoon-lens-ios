@@ -63,12 +63,15 @@ def protect(text: str, overrides: list[dict]) -> tuple[str, dict[str, str], list
 
 
 def restore(text: str, protected: dict[str, str]) -> str:
+    tokens = Counter(re.findall(r"__G\d+__", text, re.IGNORECASE))
+    if any(token not in protected for token in tokens):
+        raise RuntimeError("Le modèle a inventé un terme de glossaire.")
+    if any(count > 1 for count in tokens.values()):
+        raise RuntimeError("Le modèle a répété un terme verrouillé.")
     missing = Counter(target for token, target in protected.items() if token not in text)
     for target, count in missing.items():
         if len(re.findall(re.escape(target), text, re.IGNORECASE)) < count:
             raise RuntimeError(f"Le modèle a omis le terme verrouillé « {target} ». Relancez la traduction.")
     for token, target in protected.items():
         text = text.replace(token, target)
-    if re.search(r"__G\d+__", text):
-        raise RuntimeError("Le modèle a inventé un terme de glossaire.")
     return text

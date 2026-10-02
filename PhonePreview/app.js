@@ -59,7 +59,7 @@ window.addEventListener("resize", scheduleAutoTranslate);
 document.getElementById("showOriginal").addEventListener("change", event => {
   stage.classList.toggle("show-original", event.target.checked);
 });
-document.getElementById("retryButton").addEventListener("click", restartTranslation);
+document.getElementById("retryButton").addEventListener("click", retryFailedTranslations);
 window.addEventListener("glossarychange", restartTranslation);
 
 if (imageInput) {
@@ -372,13 +372,13 @@ function renderImageFeed(images) {
     img.decoding = "async";
     img.fetchPriority = index < 2 ? "high" : "auto";
     img.addEventListener("load", () => {
-      if (isStaleSession(sessionId)) return;
+      if (isStaleSession(Number(page.dataset.sessionId)) || !page.isConnected) return;
       loadedImages += 1;
       page.dataset.loaded = "true";
       updateReaderStatus(images.length);
     });
     img.addEventListener("error", () => {
-      if (isStaleSession(sessionId)) return;
+      if (isStaleSession(Number(page.dataset.sessionId)) || !page.isConnected) return;
       failedImages += 1;
       page.classList.add("load-error");
       badge.textContent = `Image ${index + 1} bloquee`;
@@ -417,31 +417,34 @@ async function translateReaderImages() {
   autoTranslateEnabled = true;
   const pages = readerPagesForTranslation().filter((page) => pageNeedsTranslation(page)).slice(0, TRANSLATION_PAGES_PER_PASS);
   if (!pages.length) {
-    if (document.querySelector(".reader-page[data-translation-state='error']")) return;
+    if (showTranslationErrors()) return;
     if (!loadedImages && !failedImages) {
       statusLine.textContent = "Chargement des premieres images...";
       return;
     }
     const running = document.querySelector(".reader-page[data-translation-state='running']");
+    const dialogueCount = document.querySelectorAll(".dialogue-entry").length;
     statusLine.textContent = running
       ? "Traduction en cours..."
-      : "Les premieres zones sont pretes. Continue a lire, la suite partira toute seule.";
+      : dialogueCount
+        ? `${dialogueCount} dialogue(s) traduit(s). La traduction des zones non fiables est affichée sous l’image. La suite se traduit pendant la lecture.`
+        : "Aucun dialogue traduit ici pour le moment. Continuez à lire pour analyser la suite.";
     return;
   }
 
   let translatedPages = 0;
   for (const [index, page] of pages.entries()) {
     if (isStaleSession(sessionId)) return;
-    if (document.querySelector(".reader-page[data-translation-state='error']")) return;
     const translated = await translatePageProgressively(page, index + 1, pages.length, sessionId);
     if (translated) translatedPages += 1;
   }
 
   if (isStaleSession(sessionId)) return;
-  if (document.querySelector(".reader-page[data-translation-state='error']")) return;
-  statusLine.textContent = translatedPages
-    ? `OK: ${translatedPages} image(s) avancee(s). La traduction continue en fond.`
-    : "Analyse en cours. La traduction avance zone par zone.";
+  if (!showTranslationErrors()) {
+    statusLine.textContent = translatedPages
+      ? `OK: ${translatedPages} image(s) avancee(s). La traduction continue en fond.`
+      : "Analyse en cours. La traduction avance zone par zone.";
+  }
   scheduleAutoTranslate();
   } finally {
     translationPassRunning = false;
@@ -505,6 +508,7 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
               });
               translatedCount += 1;
             }
+            page.__previousTranslations = previousTranslations.slice(-14);
             segmentIndex = endIndex;
           }
         }
@@ -524,12 +528,20 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
   } catch (error) {
     if (isStaleSession(sessionId)) return false;
     page.dataset.translationState = "error";
+    page.dataset.translationError = error.message || String(error);
     showOverlayNotice(pageOverlay, error && error.message ? error.message : String(error));
-    statusLine.textContent = `Traduction interrompue : ${error.message}. Utilisez « Relancer la traduction ».`;
+    showTranslationErrors();
     return false;
   } finally {
     scheduleAutoTranslate();
   }
+}
+
+function showTranslationErrors() {
+  const failed = imageReader.querySelectorAll(".reader-page[data-translation-state='error']");
+  if (!failed.length) return false;
+  statusLine.textContent = `${failed.length} image(s) en erreur : ${failed[0].dataset.translationError}. Les autres pages continuent. « Relancer la traduction » réessaie les échecs sans effacer les traductions affichées.`;
+  return true;
 }
 
 function pageNeedsTranslation(page) {
@@ -939,6 +951,26 @@ function renderSegmentIntoOverlay(targetOverlay, segment) {
   window.WebtoonLayout.render(targetOverlay, segment);
 }
 
+function retryFailedTranslations() {
+  if (!imageReader.querySelector(".reader-page[data-translation-state='error']")) {
+    restartTranslation();
+    return;
+  }
+  requests.abort();
+  requests = new AbortController();
+  contentSessionId += 1;
+  for (const page of imageReader.querySelectorAll(".reader-page")) {
+    page.dataset.sessionId = String(contentSessionId);
+    if (["error", "running"].includes(page.dataset.translationState)) {
+      page.dataset.translationState = "idle";
+      delete page.dataset.translationError;
+      clearOverlayNotice(page.querySelector(".overlay"));
+    }
+  }
+  statusLine.textContent = "Nouvelle tentative sur les pages en erreur. Les traductions affichées sont conservées…";
+  scheduleAutoTranslate();
+}
+
 function restartTranslation() {
   requests.abort();
   requests = new AbortController();
@@ -946,6 +978,7 @@ function restartTranslation() {
   for (const page of imageReader.querySelectorAll(".reader-page")) {
     page.dataset.sessionId = String(contentSessionId);
     page.dataset.translationState = "idle";
+    delete page.dataset.translationError;
     page.__ocrWindows = [];
     page.__translatedSegmentSignatures = new Set();
     page.__ocrSegments = [];
@@ -1076,7 +1109,10 @@ function updateReaderStatus(total) {
   if (pending) chunks.push(`${pending} en attente`);
   if (failedImages) chunks.push(`${failedImages} bloquees`);
   readerSummary.textContent = chunks.join(" - ");
-  if (document.querySelector(".reader-page[data-translation-state='error']")) return;
+  if (showTranslationErrors()) {
+    scheduleAutoTranslate();
+    return;
+  }
 
   if (failedImages && loadedImages === 0) {
     statusLine.textContent = "Toutes les images sont bloquees par le site ou le reseau. Essaie un autre lien ou une capture.";

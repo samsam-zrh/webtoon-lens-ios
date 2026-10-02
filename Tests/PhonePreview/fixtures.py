@@ -79,6 +79,20 @@ def create(directory: Path):
     draw.text((125, 102), "Wait!", font=font("en", 20), fill="black")
     draw.text((10, 200), "Text on the drawing", font=font("en", 16), fill="white")
     small.save(directory / "small.png")
+    announcement = Image.new("RGB", (800, 1000), "#384e5a")
+    draw = ImageDraw.Draw(announcement)
+    for index, text in enumerate((
+        "WORKSHOP ANNOUNCEMENT",
+        "THE SCHOOL CLUBS HAVE JOINED FORCES.",
+        "COME TO DISCOVER OUR NEW PROJECTS.",
+        "READ WITH US, CELEBRATE WITH US!",
+        "ALBA. COM",
+        "workshop.example.org",
+    )):
+        typeface = font("en", 30)
+        for number, line in enumerate(lines_for(draw, text, typeface, 670, "en")):
+            draw.text((60, 80 + index * 145 + number * 40), line, font=typeface, fill="white")
+    announcement.save(directory / "announcement.png")
 
 
 if __name__ == "__main__":

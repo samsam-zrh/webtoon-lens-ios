@@ -166,6 +166,7 @@ def run():
             assert page.locator(".reader-page").count() == 1
             page.locator("#nextChapterButton").click()
             page.wait_for_function("document.getElementById('webtoonUrl').value.includes('chapter-002')")
+            page.wait_for_function("!document.getElementById('openUrlButton').disabled")
             wait_ready(page, 3)
             assert "énergie spirituelle" in page.locator(".dialogue-list").text_content()
             measurements["chapterExtractionAndNavigation"] = "OK"

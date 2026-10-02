@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PhonePreview"))
 from PIL import Image, ImageDraw
 from bubble_geometry import fit_dialogue
 from glossary import entries, protect, restore
-from local_translation import parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement
+from local_translation import generate_dialogue, parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement
 import server
 
 
@@ -56,8 +56,73 @@ class GlossaryTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             restore("Lune", {"__G0__": "Lune", "__G1__": "Lune"})
 
+    def test_invented_or_repeated_tokens_are_rejected(self):
+        for text, protected, message in (
+            ("Bonjour __G0__", {}, "inventé"),
+            ("Bonjour __g0__", {}, "inventé"),
+            ("Bonjour __G1__", {"__G0__": "Lune"}, "inventé"),
+            ("__G0__ et __G0__", {"__G0__": "Lune"}, "répété"),
+        ):
+            with self.subTest(text=text), self.assertRaisesRegex(RuntimeError, message):
+                restore(text, protected)
+        self.assertEqual(restore("__G0__ et __G1__", {"__G0__": "Lune", "__G1__": "Lune"}), "Lune et Lune")
+
 
 class ModelTests(unittest.TestCase):
+    def dialogue(self, source):
+        text, protected, terms = protect(source, [])
+        return dict(text=text, source=source, protected=protected, terms=terms, language="en")
+
+    def test_no_placeholder_examples_when_no_term_is_locked(self):
+        requests = []
+        def request(req, timeout):
+            payload = json.loads(req.data)
+            requests.append(payload)
+            self.assertNotIn("__G", json.dumps(payload["messages"]))
+            self.assertNotIn("Locked tokens in", payload["messages"][1]["content"])
+            return io.BytesIO(json.dumps({"message": {"content": "Annonce d’un atelier."}}).encode())
+        with patch("local_translation.urllib.request.urlopen", request):
+            translated = generate_dialogue(self.dialogue("WORKSHOP ANNOUNCEMENT"), [],
+                model="test", url="http://127.0.0.1")
+        self.assertEqual(translated, "Annonce d’un atelier.")
+        self.assertEqual(len(requests), 1)
+
+    def test_invalid_generation_is_retried_and_validated(self):
+        for source, invalid, valid, expected in (
+            ("WORKSHOP ANNOUNCEMENT", "__G0__", "Annonce d’un atelier.", "Annonce d’un atelier."),
+            ("Your cultivation is strong.", "__G0__ __G0__", "Ta __G0__ est puissante.", "Ta cultivation est puissante."),
+            ("Your cultivation is strong.", "Ta force est puissante.", "Ta __G0__ est puissante.", "Ta cultivation est puissante."),
+            ("We are waiting at school.", "我们 attendons.", "Nous attendons à l’école.", "Nous attendons à l’école."),
+        ):
+            requests = []
+            def request(req, timeout):
+                requests.append(json.loads(req.data))
+                text = invalid if len(requests) == 1 else valid
+                return io.BytesIO(json.dumps({"message": {"content": text}}).encode())
+            with self.subTest(source=source, invalid=invalid), patch("local_translation.urllib.request.urlopen", request):
+                result = generate_dialogue(self.dialogue(source), [], model="test", url="http://127.0.0.1")
+                self.assertEqual(result, expected)
+                self.assertEqual(len(requests), 2)
+                self.assertIn("previous response failed validation", requests[1]["messages"][1]["content"])
+
+    def test_repeated_invalid_generation_is_not_cached(self):
+        calls = []
+        def request(req, timeout):
+            calls.append(req)
+            return io.BytesIO(json.dumps({"message": {"content": "__G9__"}}).encode())
+        with tempfile.TemporaryDirectory() as directory, patch("local_translation.urllib.request.urlopen", request), patch("local_translation.check_model"):
+            with self.assertRaisesRegex(RuntimeError, "inventé"):
+                translate(dict(segments=[dict(id="bad", text="Workshop announcement")]),
+                    model="test", url="http://127.0.0.1", cache_dir=Path(directory))
+            self.assertEqual(len(calls), 2)
+            self.assertFalse(list(Path(directory).rglob("*.json")))
+
+    def test_connection_failures_are_not_generation_retries(self):
+        with patch("local_translation.urllib.request.urlopen", side_effect=urllib.error.URLError("offline")) as request:
+            with self.assertRaises(urllib.error.URLError):
+                generate_dialogue(self.dialogue("Workshop announcement"), [], model="test", url="http://127.0.0.1")
+            self.assertEqual(request.call_count, 1)
+
     def test_valid(self):
         self.assertEqual(parse_translations('{"translations":[{"id":"a","text":"Bonjour."}]}', ["a"]), {"a": "Bonjour."})
 
@@ -103,6 +168,13 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "recopiée"):
             validate_french("NE PAS ATTACK YET WE NEED TO KNOW", "Don't attack yet we need to know")
         validate_french("Ton énergie spirituelle est épuisée !", "你的灵气已经耗尽了！")
+
+    def test_web_address_can_be_preserved_but_not_a_source_sentence(self):
+        for address in ("workshop.example.org", "https://workshop.example.org/join-us", "ALBA. COM"):
+            with self.subTest(address=address):
+                validate_french(address, address)
+        with self.assertRaises(RuntimeError):
+            validate_french("Visit workshop.example.org now.", "Visit workshop.example.org now.")
 
     def test_restored_possessive_before_vowel(self):
         self.assertEqual(normalize_french_agreement("Ta énergie et ma amie."), "Ton énergie et mon amie.")

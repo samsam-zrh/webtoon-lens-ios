@@ -135,6 +135,7 @@ window.WebtoonLayout = (() => {
       observers.set(target, observer);
     }
     update();
+    if (bubble.dataset.fit === "false") details.open = true;
     return bubble;
   }
 
