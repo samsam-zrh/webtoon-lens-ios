@@ -24,7 +24,7 @@ const OCR_WINDOW_MARGIN_BEFORE = 0.12;
 const OCR_WINDOW_MARGIN_AFTER = 0.42;
 const OCR_WINDOW_MAX_NATURAL_HEIGHT = 2500;
 const OCR_WINDOW_COVERAGE_THRESHOLD = 1 - 1e-8;
-const OCR_WINDOWS_PER_PASS = 4;
+const OCR_WINDOWS_PER_PASS = 1;
 const OCR_VIEWPORT_FOCI = [0.48, 0.72, 0.96, 1.14];
 const OCR_WINDOW_DEDUPE_THRESHOLD = 0.66;
 const AUTO_TRANSLATE_DELAY_MS = 90;
@@ -399,7 +399,7 @@ function renderImageFeed(images) {
 
   readerSummary.textContent = `${images.length} images trouvees. Chargement en cours...`;
   statusLine.textContent = "Le lecteur charge le chapitre. La traduction se lance et continuera automatiquement.";
-  scheduleAutoTranslate();
+  scheduleAutoTranslate(true);
 }
 
 function proxyImageUrl(url) {
@@ -852,6 +852,12 @@ function readerPagesForTranslation() {
     const rect = page.getBoundingClientRect();
     return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
   });
+  const distanceFromReading = page => {
+    const rect = page.getBoundingClientRect();
+    if (rect.top < window.innerHeight && rect.bottom > 0) return 0;
+    return rect.top >= window.innerHeight ? rect.top-window.innerHeight : -rect.bottom+window.innerHeight;
+  };
+  visiblePages.sort((a, b) => distanceFromReading(a)-distanceFromReading(b));
   const backgroundPages = pages.filter((page) => !visiblePages.includes(page) && pageEligibleForBackgroundTranslation(page));
 
   return uniquePageList([...visiblePages, ...backgroundPages]);
@@ -866,14 +872,14 @@ function uniquePageList(pages) {
   });
 }
 
-function scheduleAutoTranslate() {
+function scheduleAutoTranslate(immediate = false) {
   if (!autoTranslateEnabled || !stage.classList.contains("feed-mode")) return;
   window.clearTimeout(translateScrollTimer);
   translateScrollTimer = window.setTimeout(() => {
     translateReaderImages().catch((error) => {
       statusLine.textContent = error && error.message ? error.message : String(error);
     });
-  }, AUTO_TRANSLATE_DELAY_MS);
+  }, immediate === true ? 0 : AUTO_TRANSLATE_DELAY_MS);
 }
 
 async function translateCapture(sessionId = contentSessionId) {
@@ -1202,11 +1208,11 @@ function updateReaderStatus(total) {
   if (failedImages) chunks.push(`${failedImages} bloquees`);
   readerSummary.textContent = chunks.join(" - ");
   if (showTranslationErrors()) {
-    scheduleAutoTranslate();
+    scheduleAutoTranslate(true);
     return;
   }
 
-  if (failedImages && loadedImages === 0) {
+  if (failedImages && loadedImages === 0 && !pending) {
     statusLine.textContent = "Toutes les images sont bloquees par le site ou le reseau. Essaie un autre lien ou une capture.";
     return;
   }
@@ -1214,7 +1220,7 @@ function updateReaderStatus(total) {
   statusLine.textContent = loadedImages
     ? "Images visibles dans le lecteur. La traduction continue en arriere-plan."
     : "Chargement des premieres images...";
-  scheduleAutoTranslate();
+  scheduleAutoTranslate(true);
 }
 
 function resetReaderCounters() {

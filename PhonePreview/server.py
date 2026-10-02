@@ -32,13 +32,14 @@ from local_translation import translate as translate_locally, check_model, Dialo
 
 ROOT = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("WEBTOON_LENS_CACHE", Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "WebtoonLens" / "cache"))
-OCR_CACHE_VERSION = "ocr-vision-ink-paragraphs-v13"
+OCR_CACHE_VERSION = "ocr-vision-lobes-v15"
 TRANSLATION_CACHE_VERSION = "translation-v5"
 OCR_MEMORY_CACHE: dict[str, list[dict[str, Any]]] = {}
 TRANSLATION_MEMORY_CACHE: dict[str, dict[str, str]] = {}
 OLLAMA_WARMUP_LOCK = threading.Lock()
 OLLAMA_WARMUP_STARTED = False
 OLLAMA_WARMUP_READY = False
+OLLAMA_WARMUP_COMPLETED_AT = 0.0
 TESSDATA_DIR = Path(os.environ.get("WEBTOON_LENS_TESSDATA", Path(os.environ.get("LOCALAPPDATA", "")) / "WebtoonLens" / "tessdata"))
 OCR_LANGUAGES = ["jpn", "kor", "chi_sim", "chi_tra", "eng"]
 OLLAMA_URL = os.environ.get("WEBTOON_LENS_OLLAMA_URL", "http://localhost:11434")
@@ -1748,7 +1749,7 @@ def start_ollama_warmup() -> bool:
         return False
 
     with OLLAMA_WARMUP_LOCK:
-        if OLLAMA_WARMUP_STARTED:
+        if OLLAMA_WARMUP_STARTED or time.monotonic()-OLLAMA_WARMUP_COMPLETED_AT < 30:
             return False
         OLLAMA_WARMUP_STARTED = True
 
@@ -1758,20 +1759,19 @@ def start_ollama_warmup() -> bool:
 
 
 def warm_ollama_model() -> None:
-    global OLLAMA_WARMUP_READY
+    global OLLAMA_WARMUP_READY, OLLAMA_WARMUP_STARTED, OLLAMA_WARMUP_COMPLETED_AT
     request_payload = {
         "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "user", "content": "Reponds seulement OK. /no_think"},
-        ],
+        "prompt": "",
         "stream": False,
         "think": False,
-        "options": {"temperature": 0, "num_predict": 4},
+        "keep_alive": "10m",
+        "options": {"num_ctx": 4096, "num_predict": 0},
     }
     try:
         data = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
-            f"{OLLAMA_URL.rstrip('/')}/api/chat",
+            f"{OLLAMA_URL.rstrip('/')}/api/generate",
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -1780,7 +1780,12 @@ def warm_ollama_model() -> None:
             response.read()
         OLLAMA_WARMUP_READY = True
     except Exception as exc:
-        print(f"Ollama warmup skipped: {exc}")
+        OLLAMA_WARMUP_READY = False
+        logging.warning("Préchauffage Ollama impossible : %s", exc)
+    finally:
+        with OLLAMA_WARMUP_LOCK:
+            OLLAMA_WARMUP_COMPLETED_AT = time.monotonic()
+            OLLAMA_WARMUP_STARTED = False
 
 
 def translation_engine_name(translation_pairs: list[str]) -> str | None:

@@ -167,7 +167,8 @@ def paragraph_groups(lines: list[dict], height: int, distance: np.ndarray | None
                     samples = [distance[min(height-1, max(0, round(first[1]*t+second[1]*(1-t)))),
                                         min(width-1, max(0, round(first[0]*t+second[0]*(1-t))))]
                                for t in np.linspace(0, 1, 9)]
-                    nearby = min(samples) >= min(samples[0], samples[-1])*.55
+                    nearby = (gap <= max(line_height(line, height), line_height(previous, height))*4
+                              and min(samples) >= min(samples[0], samples[-1])*.55)
                 if nearby and overlap >= min(box["width"], other["width"])*.2:
                     related.append(index)
                     break
@@ -178,6 +179,38 @@ def paragraph_groups(lines: list[dict], height: int, distance: np.ndarray | None
             for index in reversed(related[1:]):
                 groups[related[0]].extend(groups.pop(index))
     return groups
+
+
+def component_parts(component: np.ndarray) -> list[np.ndarray]:
+    x, y, w, h = cv2.boundingRect(component)
+    outline = component[y:y+h, x:x+w].copy()
+    contours, _ = cv2.findContours(outline, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(outline, contours, -1, 255, cv2.FILLED)
+    distance = cv2.distanceTransform(np.pad(outline, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
+    cores = (distance >= distance.max()*.55).astype(np.uint8)
+    count, seeds, stats, _ = cv2.connectedComponentsWithStats(cores, connectivity=8)
+    candidates = [index for index in range(1, count)
+                  if stats[index, cv2.CC_STAT_AREA] >= max(150, np.count_nonzero(outline)*.015)]
+    if len(candidates) < 2:
+        return [component]
+    distances = [cv2.distanceTransform((seeds != index).astype(np.uint8), cv2.DIST_L2, 5)
+                 for index in candidates]
+    nearest = np.argmin(distances, axis=0)
+    parts = []
+    for index in range(len(candidates)):
+        part = np.zeros_like(component)
+        part[y:y+h, x:x+w] = component[y:y+h, x:x+w] & ((nearest == index).astype(np.uint8)*255)
+        parts.append(part)
+    return parts
+
+
+def bounded_component(component: np.ndarray) -> bool:
+    height, width = component.shape
+    x, y, w, h = cv2.boundingRect(component)
+    edges = sum((x == 0, y == 0, x+w == width, y+h == height))
+    return (edges <= 1 and np.count_nonzero(component) >= 150
+            and (not edges or (np.count_nonzero(component) <= width*height*.65
+                               and w < width*.96 and h < height*.96)))
 
 
 def text_regions(image: np.ndarray, matching: np.ndarray, group: list[dict],
@@ -276,19 +309,28 @@ def fit_dialogue(data: bytes, lines: list[dict]) -> list[dict]:
     output = []
     paragraphs = []
     for key, lines in groups.items():
-        distance = None
-        if key.startswith("component-") and len(lines) > 1:
+        if key.startswith("component-"):
             _, pool, label = key.split("-")
             component_labels, component_stats, _ = pools[int(pool)]
-            if component_for_line(component_labels, component_stats,
-                    pixels(lines[0].get("rawBoundingBox") or lines[0]["boundingBox"], width, height),
-                    width, height) == int(label):
-                outline = (component_labels == int(label)).astype(np.uint8)*255
-                contours, _ = cv2.findContours(outline, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                cv2.drawContours(outline, contours, -1, 255, cv2.FILLED)
-                distance = cv2.distanceTransform(outline, cv2.DIST_L2, 5)
-        paragraphs.extend((key, group) for group in paragraph_groups(lines, height, distance))
-    for key, group in paragraphs:
+            parts = component_parts((component_labels == int(label)).astype(np.uint8)*255)
+            assigned = [[] for _ in parts]
+            for line in lines:
+                a, b, c, d = pixels(line.get("rawBoundingBox") or line["boundingBox"], width, height)
+                index = int(np.argmax([np.count_nonzero(part[b:d, a:c]) for part in parts]))
+                assigned[index].append(line)
+            for part, observations in zip(parts, assigned):
+                if not observations:
+                    continue
+                distance = None
+                if bounded_component(part):
+                    outline = part.copy()
+                    contours, _ = cv2.findContours(outline, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(outline, contours, -1, 255, cv2.FILLED)
+                    distance = cv2.distanceTransform(np.pad(outline, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
+                paragraphs.extend((key, part, group) for group in paragraph_groups(observations, height, distance))
+        else:
+            paragraphs.extend((key, None, group) for group in paragraph_groups(lines, height))
+    for key, component, group in paragraphs:
         group.sort(key=lambda line: (line["boundingBox"]["y"], line["boundingBox"]["x"]))
         raw = union([line.get("rawBoundingBox") or line["boundingBox"] for line in group])
         source = " ".join(line.get("sourceText") or line.get("text", "") for line in group)
@@ -305,21 +347,19 @@ def fit_dialogue(data: bytes, lines: list[dict]) -> list[dict]:
             labels, stats, matching = pools[int(pool)]
             label = int(label)
             # Remplit seulement les trous de lettres du composant, puis érode la bordure.
-            component = (labels == label).astype(np.uint8) * 255
             contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             filled = np.zeros_like(component)
             cv2.drawContours(filled, contours, -1, 255, cv2.FILLED)
             fill = np.median(image[(component & matching) > 0], axis=0)
             inks = ink_colors(image, group, fill)
-            strict = any(component_for_line(labels, stats, pixels(line.get("rawBoundingBox") or line["boundingBox"],
-                              width, height), width, height) == label for line in group)
+            strict = bounded_component(component)
             if not strict and not inks:
                 output.append(segment)
                 continue
             letters = text_regions(image, matching, group, fill, inks)
             filled = (component & matching) | (filled & letters)
             safe = cv2.erode(filled, np.ones((5, 5), np.uint8))
-            x, y, w, h, _ = (int(v) for v in stats[label])
+            x, y, w, h = cv2.boundingRect(component)
             # Rectangle inscrit conservateur, sans hypothèse d'ellipse.
             rx0, ry0, rx1, ry1 = pixels(raw, width, height)
             tx0, ty0, tx1, ty1 = rx0, ry0, rx1, ry1
@@ -332,19 +372,31 @@ def fit_dialogue(data: bytes, lines: list[dict]) -> list[dict]:
                     return True
                 foreground = np.max(np.abs(image[b:d, a:c].astype(float)-fill), axis=2) > 65
                 return bool(inks and np.any(foreground) and np.all(safe[b:d, a:c][foreground]))
-            if all(line_is_safe(rect) for rect in line_rects):
+            def observation_is_safe(line, rect):
+                if line_is_safe(rect):
+                    return True
+                glyph_rects = {pixels(glyph["boundingBox"], width, height)
+                               for glyph in line.get("glyphs", []) if glyph["text"].strip()}
+                return bool(glyph_rects and all(line_is_safe(box) for box in glyph_rects))
+            if all(observation_is_safe(line, rect) for line, rect in zip(group, line_rects)):
                 # L'union de lignes de longueurs différentes peut dépasser une courbe.
                 while tx1 > tx0 and ty1 > ty0 and not np.all(safe[ty0:ty1, tx0:tx1]):
                     tx0, ty0, tx1, ty1 = tx0+1, ty0+1, tx1-1, ty1-1
                 if tx1 <= tx0 or ty1 <= ty0:
                     output.append(segment)
                     continue
-                for _ in range(max(w, h)):
-                    proposed = (max(x, tx0-1), max(y, ty0-1), min(x+w, tx1+1), min(y+h, ty1+1))
-                    a, b, c, d = proposed
-                    if proposed == (tx0, ty0, tx1, ty1) or not np.all(safe[b:d, a:c]):
-                        break
-                    tx0, ty0, tx1, ty1 = proposed
+                base = (tx0, ty0, tx1, ty1)
+                low, high = 0, max(w, h)
+                while low < high:
+                    expansion = (low+high+1)//2
+                    a, b, c, d = (max(x, base[0]-expansion), max(y, base[1]-expansion),
+                                  min(x+w, base[2]+expansion), min(y+h, base[3]+expansion))
+                    if np.all(safe[b:d, a:c]):
+                        low = expansion
+                    else:
+                        high = expansion-1
+                tx0, ty0, tx1, ty1 = (max(x, base[0]-low), max(y, base[1]-low),
+                                      min(x+w, base[2]+low), min(y+h, base[3]+low))
                 tx0 += margin
                 ty0 += margin
                 tx1 -= margin

@@ -31,7 +31,7 @@ def run():
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(URL)
         page.wait_for_function("document.getElementById('capabilityLine').textContent.includes('Qwen')")
-        for name, count in (("joined", 2), ("styled", 1), ("tail", 4)):
+        for name, count in (("joined", 2), ("joined-clipped", 2), ("styled", 1), ("tail", 4)):
             page.set_viewport_size({"width": 1280, "height": 1000})
             page.evaluate("scrollTo(0, 0)")
             page.locator("#imageInput").set_input_files(str(ROOT / "fixtures" / f"{name}.png"))
@@ -41,7 +41,7 @@ def run():
             if name == "tail":
                 assert page.evaluate("scrollY") == 0, "Le bas de page doit se traduire sans défilement"
             painting = paint_assertions(page)
-            if name == "joined":
+            if name.startswith("joined"):
                 boxes = page.locator(".reader-page").evaluate("p => p.__translatedSegments.map(s => s.textBox)")
                 assert boxes[0]["y"]+boxes[0]["height"] < .5 and boxes[1]["y"] > .5, boxes
             if name == "styled":

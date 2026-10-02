@@ -147,6 +147,20 @@ def create(directory: Path):
             draw.text((400-draw.textlength(line, font=typeface)/2, top+index*48),
                       line, font=typeface, fill="#111")
     joined.save(directory / "joined.png")
+    clipped = Image.new("RGB", (800, 850), "#384e5a")
+    draw = ImageDraw.Draw(clipped)
+    draw.ellipse((45, -80, 660, 455), fill="white", outline="black", width=2)
+    draw.ellipse((170, 480, 765, 1020), fill="white", outline="black", width=2)
+    draw.rectangle((335, 430, 465, 520), fill="white")
+    for center, top, text in (
+        (350, 120, "We should wait for the others before we leave."),
+        (470, 640, "The school festival will begin tomorrow morning."),
+    ):
+        typeface = font("en", 32)
+        for index, line in enumerate(lines_for(draw, text, typeface, 410, "en")):
+            draw.text((center-draw.textlength(line, font=typeface)/2, top+index*43),
+                      line, font=typeface, fill="#111")
+    clipped.save(directory / "joined-clipped.png")
     styled = Image.new("RGB", (800, 850), "#384e5a")
     draw = ImageDraw.Draw(styled)
     draw.ellipse((35, 40, 765, 650), fill="white", outline="black", width=4)

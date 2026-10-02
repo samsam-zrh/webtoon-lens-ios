@@ -93,6 +93,9 @@ def run():
             {"name": f"page-{index}.png", "mimeType": "image/png", "buffer": data}
             for index in range(5)
         ])
+        page.wait_for_selector(".bubble[data-fit='true']", state="attached", timeout=180000)
+        assert page.locator('.reader-page[data-translation-state="done"]').count() < 5, \
+            "La première traduction doit être visible avant la fin du chapitre"
         page.wait_for_function("""() =>
           document.querySelectorAll('.reader-page[data-translation-state="done"]').length === 5
         """, timeout=180000)
@@ -101,6 +104,18 @@ def run():
         assert all(count == 3 for count in page.locator(".reader-page").evaluate_all(
             "pages => pages.map(page => page.querySelectorAll('.dialogue-entry').length)"))
         assert fit_assertions(page) == {"adjusted": 15, "preserved": 0}
+        page.locator("#imageInput").set_input_files([
+            {"name": f"blocked-{index}.png", "mimeType": "image/png", "buffer": b"not an image"}
+            for index in range(3)
+        ] + [
+            {"name": f"valid-{index}.png", "mimeType": "image/png", "buffer": data}
+            for index in range(2)
+        ])
+        page.wait_for_function("""() =>
+          document.querySelectorAll('.reader-page.load-error').length === 3 &&
+          document.querySelectorAll('.reader-page[data-translation-state="done"]').length === 2
+        """, timeout=180000)
+        assert page.locator(".dialogue-entry").count() == 6
         page.locator("#imageInput").set_input_files(str(ROOT / "fixtures/thin-white.png"))
         wait_ready(page, 1)
         desktop = fit_assertions(page)
@@ -117,6 +132,7 @@ def run():
         result = dict(allFivePagesWithoutScrolling=True, dialogues=15, exactCoverage=True,
                       repeatedDialoguesPreserved=True, improvedMasksReuseTranslation=True,
                       boundedPrefetchPastErrors=True,
+                      firstBubbleBeforeChapterCompletion=True, loadedPastThreeFailedImages=True,
                       thinWhite=dict(desktop=desktop, mobile=mobile, painting=painting),
                       javascriptErrors=errors)
         (ROOT / "coverage-results.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))

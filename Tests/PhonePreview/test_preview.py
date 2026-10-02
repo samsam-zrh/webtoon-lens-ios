@@ -15,7 +15,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PhonePreview"))
 from PIL import Image, ImageDraw
-from bubble_geometry import fit_dialogue, text_color, letter_pixels
+from bubble_geometry import fit_dialogue, text_color, letter_pixels, paragraph_groups
 import numpy as np
 from glossary import entries, protect, restore
 from local_translation import generate_dialogue, parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement, nearby_context, DialogueTranslationError
@@ -203,6 +203,20 @@ class ModelTests(unittest.TestCase):
             item["id"] = f"other-{index}"
         self.assertEqual(nearby_context(context, "other-2"), [dict(text=f"Nearby {index}") for index in range(5)])
 
+    def test_warmup_only_loads_same_context_without_generating_dialogue(self):
+        calls = []
+        def request(req, timeout):
+            calls.append((req.full_url, json.loads(req.data)))
+            return io.BytesIO(b'{"done":true,"done_reason":"load"}')
+        with patch("server.urllib.request.urlopen", request), patch("server.OLLAMA_WARMUP_STARTED", True), \
+                patch("server.OLLAMA_WARMUP_COMPLETED_AT", 0):
+            server.warm_ollama_model()
+            self.assertFalse(server.OLLAMA_WARMUP_STARTED)
+            self.assertTrue(server.OLLAMA_WARMUP_READY)
+        self.assertTrue(calls[0][0].endswith("/api/generate"))
+        self.assertEqual(calls[0][1]["prompt"], "")
+        self.assertEqual(calls[0][1]["options"], dict(num_ctx=4096, num_predict=0))
+
     def test_error_identifies_dialogue_without_fake_translation(self):
         with tempfile.TemporaryDirectory() as directory, patch("local_translation.check_model"), \
                 patch("local_translation.generate_dialogue", side_effect=RuntimeError("Réponse invalide")):
@@ -314,6 +328,34 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(all(s["renderMode"] == "replace" for s in results))
         self.assertLess(results[0]["textBox"]["y"]+results[0]["textBox"]["height"], .5)
         self.assertGreater(results[1]["textBox"]["y"], .5)
+
+    def test_double_bubble_clipped_on_opposite_edges(self):
+        image = Image.new("RGB", (400, 650), "#345566")
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((20, -80, 320, 340), fill="white", outline="black", width=2)
+        draw.ellipse((110, 310, 380, 730), fill="white", outline="black", width=2)
+        draw.rectangle((185, 260, 225, 390), fill="white")
+        lines = [
+            dict(text="We must leave together.", boundingBox=dict(x=.2, y=130/650, width=.45, height=22/650)),
+            dict(text="Wait for the others.", boundingBox=dict(x=.37, y=480/650, width=.48, height=22/650)),
+        ]
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        results = fit_dialogue(data.getvalue(), lines)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result["renderMode"] == "replace" for result in results))
+        self.assertLess(results[0]["textBox"]["y"]+results[0]["textBox"]["height"], .5)
+        self.assertGreater(results[1]["textBox"]["y"], .5)
+
+    def test_cropped_fragment_does_not_swallow_distant_dialogue(self):
+        distance = np.full((1000, 300), 100, dtype=np.float32)
+        distance[:50] = 2
+        lines = [
+            dict(text="Last few words.", boundingBox=dict(x=.2, y=.01, width=.5, height=.03)),
+            dict(text="A complete later dialogue.", boundingBox=dict(x=.2, y=.6, width=.5, height=.03)),
+        ]
+        groups = paragraph_groups(lines, 1000, distance)
+        self.assertEqual(len(groups), 2)
 
     def test_glyph_rows_preserve_every_character_and_space(self):
         glyphs = [dict(text=char, spaceBefore=False,
