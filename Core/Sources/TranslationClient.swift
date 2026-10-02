@@ -76,12 +76,14 @@ public extension TranslationClientProtocol {
 public final class WebtoonTranslationClient: TranslationClientProtocol {
     private let baseURL: URL
     private let session: URLSession
+    private let ownsSession: Bool
     public var cacheNamespace: String { baseURL.absoluteString }
 
     public init(baseURL: URL, session: URLSession? = nil) {
         self.baseURL = baseURL
         if let session {
             self.session = session
+            self.ownsSession = false
         } else {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.httpShouldSetCookies = false
@@ -90,7 +92,12 @@ public final class WebtoonTranslationClient: TranslationClientProtocol {
             configuration.timeoutIntervalForRequest = 180
             configuration.timeoutIntervalForResource = 240
             self.session = URLSession(configuration: configuration, delegate: NoBackendRedirects(), delegateQueue: nil)
+            self.ownsSession = true
         }
+    }
+
+    deinit {
+        if ownsSession { session.invalidateAndCancel() }
     }
 
     public func translate(_ request: TranslationRequest) async throws -> TranslationResponse {

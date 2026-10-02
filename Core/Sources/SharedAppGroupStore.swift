@@ -2,14 +2,20 @@ import Foundation
 
 public enum SharedAppGroupStore {
     public static var defaults: UserDefaults {
+        #if WEBTOON_LENS_PERSONAL
+        .standard
+        #else
         UserDefaults(suiteName: WebtoonLensConstants.appGroupIdentifier) ?? .standard
+        #endif
     }
 
     public static var containerURL: URL {
         let fileManager = FileManager.default
+        #if !WEBTOON_LENS_PERSONAL
         if let url = fileManager.containerURL(forSecurityApplicationGroupIdentifier: WebtoonLensConstants.appGroupIdentifier) {
             return url
         }
+        #endif
 
         let fallback = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("WebtoonLensV2", isDirectory: true)

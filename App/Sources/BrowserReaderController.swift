@@ -92,6 +92,7 @@ final class BrowserReaderController: NSObject {
                 }
             }
         ]
+        if let currentURL { webView.load(URLRequest(url: currentURL)) }
     }
 
     func detach(_ surface: BrowserSurfaceView) {
@@ -318,7 +319,9 @@ final class BrowserReaderController: NSObject {
         guard let surface else { throw BrowserCaptureError.unavailablePage }
         let configuration = WKSnapshotConfiguration()
         configuration.rect = surface.webView.bounds
-        configuration.snapshotWidth = NSNumber(value: try surface.geometry.snapshotWidth())
+        configuration.snapshotWidth = NSNumber(value: try surface.geometry.snapshotWidth(
+            pixelScale: Double(surface.webView.traitCollection.displayScale)
+        ))
         configuration.afterScreenUpdates = true
         let image = try await WebKitViewportCapture.snapshot(in: surface.webView, configuration: configuration)
         try Task.checkCancellation()

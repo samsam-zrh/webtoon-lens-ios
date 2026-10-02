@@ -56,6 +56,9 @@ private final class Checks {
         settings.setTextTranslationConsent(false)
         try rejects("Revoked consent") { _ = try settings.translationBackend() }
         try require(WebtoonLensConstants.appGroupIdentifier == "group.com.example.webtoonlens.v2", "Separate V2 namespace")
+        #if WEBTOON_LENS_PERSONAL
+        try require(SharedAppGroupStore.defaults === UserDefaults.standard, "Personal variant never opens an App Group preference domain")
+        #endif
         try require(BrowserBridgeScript.mainFrameOnly, "Bridge is main-frame-only")
         for forbidden in ["fetch(", "XMLHttpRequest", "document.cookie", ".value", "innerHTML"] {
             try require(!BrowserBridgeScript.source.contains(forbidden), "Bridge does not use \(forbidden)")
@@ -89,8 +92,10 @@ private final class Checks {
         lifecycle.finish(current)
         for (width, height) in [(390.0, 844.0), (1024.0, 1366.0), (4096.0, 8192.0)] {
             let size = BrowserViewportGeometry(width: width, height: height, offsetX: 0, offsetY: 0, zoomScale: 1)
-            let pixels = try size.snapshotWidth()
-            try require(pixels <= 1600 && pixels * pixels * height / width <= 4_000_000, "Exact snapshot pixel budget")
+            for retinaScale in [1.0, 2.0, 3.0] {
+                let pixels = try size.snapshotWidth(pixelScale: retinaScale) * retinaScale
+                try require(pixels <= 1600 && pixels * pixels * height / width <= 4_000_000, "Exact Retina snapshot pixel budget")
+            }
         }
         let white = [UInt8](repeating: 255, count: 64)
         let black = Array(repeating: [UInt8](arrayLiteral: 0, 0, 0, 255), count: 16).flatMap { $0 }
@@ -388,9 +393,13 @@ private final class BrowserHarness: NSObject, WKNavigationDelegate, WKScriptMess
     func snapshot() async throws -> (hash: String, pixelsAreUsable: Bool) {
         let configuration = WKSnapshotConfiguration()
         configuration.rect = webView.bounds
-        configuration.snapshotWidth = 780
+        let geometry = BrowserViewportGeometry(
+            width: Double(webView.bounds.width), height: Double(webView.bounds.height), offsetX: 0, offsetY: 0, zoomScale: 1
+        )
+        configuration.snapshotWidth = NSNumber(value: try geometry.snapshotWidth(pixelScale: Double(window.backingScaleFactor)))
         let image = try await WebKitViewportCapture.snapshot(in: webView, configuration: configuration)
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              cgImage.width <= 1600, cgImage.width * cgImage.height <= 4_000_000,
               let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:]) else {
             throw CheckFailure(description: "macOS WKWebView snapshot unavailable")
         }

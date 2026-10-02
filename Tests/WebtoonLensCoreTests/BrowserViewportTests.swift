@@ -115,9 +115,11 @@ final class BrowserViewportTests: XCTestCase {
     func testSnapshotBudgetIsMeasuredInPixelsNotPoints() throws {
         for (width, height) in [(390.0, 844.0), (1024.0, 1366.0), (4096.0, 8192.0)] {
             let value = BrowserViewportGeometry(width: width, height: height, offsetX: 0, offsetY: 0, zoomScale: 2)
-            let snapshotWidth = try value.snapshotWidth()
-            XCTAssertLessThanOrEqual(snapshotWidth, 1600)
-            XCTAssertLessThanOrEqual(snapshotWidth * snapshotWidth * height / width, 4_000_000)
+            for retinaScale in [1.0, 2.0, 3.0] {
+                let snapshotPixels = try value.snapshotWidth(pixelScale: retinaScale) * retinaScale
+                XCTAssertLessThanOrEqual(snapshotPixels, 1600)
+                XCTAssertLessThanOrEqual(snapshotPixels * snapshotPixels * height / width, 4_000_000)
+            }
         }
         var invalid = geometry
         invalid.width = .nan

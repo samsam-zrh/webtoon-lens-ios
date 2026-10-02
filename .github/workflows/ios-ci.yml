@@ -33,7 +33,7 @@ jobs:
           xcodebuild -version
           xcrun simctl list runtimes
 
-      - name: Core and synthetic browser regressions on macOS
+      - name: Core and bridge contract regressions on macOS
         run: swift test
 
       - name: Install XcodeGen

@@ -135,11 +135,14 @@ public struct BrowserViewportGeometry: Hashable, Sendable {
             abs(zoomScale - other.zoomScale) < 0.0001
     }
 
-    public func snapshotWidth() throws -> Double {
-        guard isValid else { throw BrowserCaptureError.invalidViewport }
+    public func snapshotWidth(pixelScale: Double = 1) throws -> Double {
+        guard isValid, pixelScale.isFinite, pixelScale > 0 else { throw BrowserCaptureError.invalidViewport }
         let scale = min(2, 1600 / width, sqrt(4_000_000 / (width * height)))
         guard scale.isFinite, scale > 0 else { throw BrowserCaptureError.invalidViewport }
-        return floor(width * scale)
+        // WKSnapshotConfiguration uses points, not pixels, including on Retina.
+        let points = floor(width * scale / pixelScale)
+        guard points >= 1 else { throw BrowserCaptureError.invalidViewport }
+        return points
     }
 }
 
