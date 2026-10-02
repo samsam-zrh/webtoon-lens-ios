@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Original synthetic V2 chapter</title>
+<style>
+body { margin: 0; background: #31465b; font-family: system-ui; }
+section { padding: 28px; height: 600px; }
+.bubble { background: white; color: black; padding: 24px; border-radius: 32px; }
+canvas, img { display: block; width: 300px; height: 140px; margin: 12px; }
+#nested { height: 80px; overflow: auto; background: white; }
+</style>
+<section>
+  <div class="bubble">ASTRA, WAIT! THE DEMON KING IS HERE.</div>
+  <canvas id="art" width="300" height="140"></canvas>
+  <img id="protected" src="/protected.svg" alt="Original synthetic artwork">
+  <div id="nested"><div style="height:400px">A scrollable synthetic panel</div></div>
+</section>
+<section id="later"><div class="bubble">YOU CAN READ THE NEXT PAGE.</div></section>
+<script>
+document.cookie = "reader_session=legitimate; SameSite=Lax; path=/";
+const canvas = document.querySelector("#art");
+const context = canvas.getContext("2d");
+context.fillStyle = "#f7fbff";
+context.fillRect(0, 0, 300, 140);
+context.fillStyle = "#141414";
+context.font = "bold 20px sans-serif";
+context.fillText("CANVAS: A REAL VISIBLE PAGE", 12, 75);
+const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="140"><rect width="300" height="140" fill="white"/><text x="12" y="75" font-size="20">BLOB: WE CAN READ THIS</text></svg>';
+const blob = document.createElement("img");
+blob.id = "blob";
+blob.src = URL.createObjectURL(new Blob([svg], {type:"image/svg+xml"}));
+document.querySelector("#later").append(blob);
+const lazy = document.createElement("img");
+lazy.id = "lazy";
+lazy.loading = "lazy";
+lazy.src = "/lazy.svg";
+document.querySelector("#later").append(lazy);
+const javascriptPanel = document.createElement("p");
+javascriptPanel.id = "javascript";
+javascriptPanel.textContent = "JS-RENDERED DIALOGUE: KEEP THE ORIGINAL SAFE.";
+document.querySelector("#later").append(javascriptPanel);
+</script>
+</html>

@@ -47,6 +47,7 @@ public struct TranslationResponse: Codable, Hashable, Sendable {
 public enum TranslationClientError: Error, LocalizedError {
     case invalidResponse
     case serverError(Int)
+    case backendError(Int, String)
     case missingBackend
 
     public var errorDescription: String? {
@@ -55,49 +56,111 @@ public enum TranslationClientError: Error, LocalizedError {
             return "Le serveur de traduction a renvoye une reponse invalide."
         case .serverError(let statusCode):
             return "Le serveur de traduction a renvoye le statut \(statusCode)."
+        case .backendError(let statusCode, let message):
+            return "Backend local (\(statusCode)) : \(message)"
         case .missingBackend:
             return "Configure un backend de traduction dans les reglages. L'app ne genere plus de fausses traductions locales."
         }
     }
 }
 
-public protocol TranslationClientProtocol {
+public protocol TranslationClientProtocol: Sendable {
+    var cacheNamespace: String { get }
     func translate(_ request: TranslationRequest) async throws -> TranslationResponse
+}
+
+public extension TranslationClientProtocol {
+    var cacheNamespace: String { String(reflecting: Self.self) }
 }
 
 public final class WebtoonTranslationClient: TranslationClientProtocol {
     private let baseURL: URL
     private let session: URLSession
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    public var cacheNamespace: String { baseURL.absoluteString }
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    public init(baseURL: URL, session: URLSession? = nil) {
         self.baseURL = baseURL
-        self.session = session
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-        self.decoder.dateDecodingStrategy = .iso8601
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpShouldSetCookies = false
+            configuration.httpCookieStorage = nil
+            configuration.urlCredentialStorage = nil
+            configuration.timeoutIntervalForRequest = 180
+            configuration.timeoutIntervalForResource = 240
+            self.session = URLSession(configuration: configuration, delegate: NoBackendRedirects(), delegateQueue: nil)
+        }
     }
 
     public func translate(_ request: TranslationRequest) async throws -> TranslationResponse {
+        try Task.checkCancellation()
+        _ = try LocalBackendAddress.parse(baseURL.absoluteString)
         let endpoint = baseURL.appendingPathComponent("v1/webtoon/translate")
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        urlRequest.timeoutInterval = 12
-        urlRequest.httpBody = try encoder.encode(request)
+        urlRequest.timeoutInterval = 180
+        urlRequest.httpShouldHandleCookies = false
+        urlRequest.httpBody = try JSONEncoder().encode(request)
 
         let (data, response) = try await session.data(for: urlRequest)
+        try Task.checkCancellation()
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TranslationClientError.invalidResponse
         }
         guard 200..<300 ~= httpResponse.statusCode else {
+            if let error = try? JSONDecoder().decode(BackendFailure.self, from: data), !error.error.isEmpty {
+                throw TranslationClientError.backendError(httpResponse.statusCode, String(error.error.prefix(500)))
+            }
             throw TranslationClientError.serverError(httpResponse.statusCode)
         }
 
-        return try decoder.decode(TranslationResponse.self, from: data)
+        let result = try JSONDecoder().decode(TranslationResponse.self, from: data)
+        return try result.validated(against: request)
+    }
+}
+
+private struct BackendFailure: Decodable {
+    let error: String
+}
+
+private final class NoBackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
+public extension TranslationResponse {
+    func validated(against request: TranslationRequest) throws -> TranslationResponse {
+        let sources = Dictionary(request.segments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard !sources.isEmpty, sources.count == request.segments.count,
+              segments.count == sources.count, Set(segments.map(\.id)).count == sources.count,
+              confidence.isFinite, (0...1).contains(confidence) else {
+            throw TranslationClientError.invalidResponse
+        }
+        var response = self
+        response.segments = try segments.map { segment in
+            guard let source = sources[segment.id], source.boundingBox.isInsideImage,
+                  source.confidence.isFinite, (0...1).contains(source.confidence),
+                  segment.boundingBox.isInsideImage, segment.confidence.isFinite,
+                  (0...1).contains(segment.confidence),
+                  !segment.translatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw TranslationClientError.invalidResponse
+            }
+            var copy = segment
+            // Geometry and ordering belong to the captured source, never the model.
+            copy.boundingBox = source.boundingBox
+            copy.sourceText = source.text
+            copy.readingOrder = source.readingOrder
+            copy.confidence = min(source.confidence, segment.confidence)
+            return copy
+        }
+        return response
     }
 }
 

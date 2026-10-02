@@ -30,7 +30,7 @@ struct WebtoonLensApp: App {
 @MainActor
 @Observable
 final class AppModel {
-    var selectedTab: AppTab = .home
+    var selectedTab: AppTab = .webtoon
     var handoffRefreshToken = UUID()
 
     func routeForPendingHandoffs() {

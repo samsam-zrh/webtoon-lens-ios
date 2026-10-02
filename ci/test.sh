@@ -14,7 +14,7 @@ fi
 echo "Using simulator: ${SIMULATOR_NAME}"
 
 xcodebuild test \
-  -scheme WebtoonLens \
+  -scheme WebtoonLensV2 \
   -destination "platform=iOS Simulator,name=${SIMULATOR_NAME},OS=latest" \
-  -resultBundlePath build/TestResults/WebtoonLens.xcresult \
+  -resultBundlePath build/TestResults/WebtoonLensV2.xcresult \
   CODE_SIGNING_ALLOWED=NO

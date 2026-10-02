@@ -13,8 +13,8 @@ fi
 
 mkdir -p build/Archive build/Export
 
-APP_BUNDLE_ID="${WEBTOON_LENS_APP_BUNDLE_ID:-com.example.webtoonlens}"
-SAFARI_BUNDLE_ID="${WEBTOON_LENS_SAFARI_BUNDLE_ID:-com.example.webtoonlens.SafariExtension}"
+APP_BUNDLE_ID="${WEBTOON_LENS_V2_APP_BUNDLE_ID:-com.example.webtoonlens.v2}"
+SAFARI_BUNDLE_ID="${WEBTOON_LENS_V2_SAFARI_BUNDLE_ID:-com.example.webtoonlens.v2.SafariExtension}"
 
 cat > build/exportOptions.generated.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,10 +43,10 @@ cat > build/exportOptions.generated.plist <<EOF
 EOF
 
 xcodebuild archive \
-  -scheme WebtoonLens \
+  -scheme WebtoonLensV2 \
   -configuration Release \
   -destination "generic/platform=iOS" \
-  -archivePath build/Archive/WebtoonLens.xcarchive \
+  -archivePath build/Archive/WebtoonLensV2.xcarchive \
   DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
   WEBTOON_LENS_APP_PROFILE_NAME="${WEBTOON_LENS_APP_PROFILE_NAME}" \
   WEBTOON_LENS_SAFARI_PROFILE_NAME="${WEBTOON_LENS_SAFARI_PROFILE_NAME}" \
@@ -54,6 +54,6 @@ xcodebuild archive \
   CODE_SIGNING_ALLOWED=YES
 
 xcodebuild -exportArchive \
-  -archivePath build/Archive/WebtoonLens.xcarchive \
+  -archivePath build/Archive/WebtoonLensV2.xcarchive \
   -exportPath build/Export \
   -exportOptionsPlist build/exportOptions.generated.plist

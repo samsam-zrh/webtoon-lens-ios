@@ -5,9 +5,9 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Lis le webtoon dans Lens")
+                    Text("Lis dans Webtoon Lens V2")
                         .font(.title.bold())
-                    Text("Colle l'URL dans l'onglet Webtoon. L'app pose les bulles traduites directement sur les images pendant la lecture.")
+                    Text("Ouvre normalement le site dans Webtoon, puis traduis une capture de la zone visible. L'original reste intact, sans telechargement parallele des images.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -15,22 +15,22 @@ struct OnboardingView: View {
                 OnboardingStep(
                     number: "1",
                     title: "Ouvre le site dans l'app",
-                    body: "Utilise l'onglet Webtoon pour charger l'episode. C'est le flux le plus rapide et le plus proche d'un remplacement direct sur iPhone."
+                    body: "Colle un lien HTTP ou HTTPS. Connexion, abonnement et verifications du site restent manuels. La compatibilite depend du site ; aucun contournement n'est effectue."
                 )
 
                 OnboardingStep(
                     number: "2",
                     title: "Configure le backend",
-                    body: "Ajoute l'URL de ton serveur LLM dans Reglages. Sans URL, l'app garde un mode preview local pour tester OCR et overlays."
+                    body: "Ajoute l'URL de ton backend local dans Reglages et autorise l'envoi du texte OCR. Sans backend reel, aucune traduction n'est inventee. Les captures restent sur l'iPhone."
                 )
 
                 OnboardingStep(
                     number: "3",
-                    title: "Garde le raccourci en secours",
-                    body: "Pour les apps qui refusent le web ou bloquent les images, le raccourci de capture reste le plan B."
+                    title: "Compare et continue a lire",
+                    body: "Traduit montre une capture stable, pas des masques de bulles de qualite Mac. Defiler ou zoomer remet l'original ; Auto est facultatif. Texte donne les traductions qui ne tiennent pas dans leurs zones."
                 )
 
-                Text("Important: iOS interdit a une app App Store de lire l'ecran des autres apps en arriere-plan ou de dessiner par-dessus elles. Webtoon Lens remplace le texte dans son propre lecteur et via Safari Extension.")
+                Text("En cas de page incompatible, utilise Safari ou importe une capture autorisee dans Lecteur. iOS ne permet pas de dessiner librement par-dessus les autres apps. V2 est une version personnelle distincte de V1, pas une promesse de compatibilite universelle ni de publication App Store.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)

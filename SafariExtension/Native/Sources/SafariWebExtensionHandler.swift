@@ -34,11 +34,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
 
         let settings = SharedSettingsStore.shared
-        let client: TranslationClientProtocol = if let backendURL = settings.backendBaseURL {
-            WebtoonTranslationClient(baseURL: backendURL)
-        } else {
-            LocalPreviewTranslationClient()
-        }
+        let client = WebtoonTranslationClient(baseURL: try settings.translationBackend())
 
         let pipeline = WebtoonTranslationPipeline(client: client)
         let result = try await pipeline.translate(

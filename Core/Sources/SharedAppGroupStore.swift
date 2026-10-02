@@ -12,7 +12,7 @@ public enum SharedAppGroupStore {
         }
 
         let fallback = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("WebtoonLens", isDirectory: true)
+            .appendingPathComponent("WebtoonLensV2", isDirectory: true)
         try? fileManager.createDirectory(at: fallback, withIntermediateDirectories: true)
         return fallback
     }
@@ -25,6 +25,7 @@ public final class SharedSettingsStore {
         static let backendBaseURL = "backendBaseURL"
         static let allowImageFallback = "allowImageFallback"
         static let defaultStylePrompt = "defaultStylePrompt"
+        static let consentedTextBackend = "v2.consentedTextBackend"
     }
 
     private let defaults: UserDefaults
@@ -39,16 +40,21 @@ public final class SharedSettingsStore {
     public var backendBaseURL: URL? {
         get {
             guard let value = defaults.string(forKey: Key.backendBaseURL), !value.isEmpty else { return nil }
-            return URL(string: value)
+            return try? LocalBackendAddress.parse(value)
         }
         set {
-            defaults.set(newValue?.absoluteString ?? "", forKey: Key.backendBaseURL)
+            backendBaseURLString = newValue?.absoluteString ?? ""
         }
     }
 
     public var backendBaseURLString: String {
         get { defaults.string(forKey: Key.backendBaseURL) ?? "" }
-        set { defaults.set(newValue, forKey: Key.backendBaseURL) }
+        set {
+            if newValue != backendBaseURLString {
+                defaults.removeObject(forKey: Key.consentedTextBackend)
+            }
+            defaults.set(newValue, forKey: Key.backendBaseURL)
+        }
     }
 
     public var allowImageFallback: Bool {
@@ -59,6 +65,26 @@ public final class SharedSettingsStore {
     public var defaultStylePrompt: String {
         get { defaults.string(forKey: Key.defaultStylePrompt) ?? WebtoonLensConstants.defaultStylePrompt }
         set { defaults.set(newValue, forKey: Key.defaultStylePrompt) }
+    }
+
+    public var hasTextTranslationConsent: Bool {
+        guard let url = backendBaseURL else { return false }
+        return defaults.string(forKey: Key.consentedTextBackend) == url.absoluteString
+    }
+
+    public func setTextTranslationConsent(_ allowed: Bool) {
+        if allowed, let url = backendBaseURL {
+            defaults.set(url.absoluteString, forKey: Key.consentedTextBackend)
+        } else {
+            defaults.removeObject(forKey: Key.consentedTextBackend)
+        }
+    }
+
+    public func translationBackend() throws -> URL {
+        guard !backendBaseURLString.isEmpty else { throw TranslationClientError.missingBackend }
+        let url = try LocalBackendAddress.parse(backendBaseURLString)
+        guard hasTextTranslationConsent else { throw BrowserCaptureError.textConsentRequired }
+        return url
     }
 }
 

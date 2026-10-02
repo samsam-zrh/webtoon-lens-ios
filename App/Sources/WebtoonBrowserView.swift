@@ -1,465 +1,231 @@
 import SwiftData
 import SwiftUI
 import UIKit
-import WebKit
 import WebtoonLensCore
 
+@MainActor
 struct WebtoonBrowserView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \SeriesProfile.updatedAt, order: .reverse) private var profiles: [SeriesProfile]
     @Query(sort: \TermMemoryEntry.updatedAt, order: .reverse) private var terms: [TermMemoryEntry]
 
-    @State private var address = "https://"
-    @State private var loadedURL: URL?
+    @State private var browser = BrowserReaderController()
+    @State private var address = ""
     @State private var selectedSeriesID = ""
-    @State private var isAutoTranslateEnabled = true
-    @State private var isTranslating = false
-    @State private var status = "Colle une URL webtoon, puis lis directement ici."
+    @State private var settingsRevision = 0
+    @State private var showsConsent = false
+    @State private var showsTranscript = false
+    @FocusState private var addressIsFocused: Bool
+    @ScaledMetric(relativeTo: .caption) private var statusHeight = 52.0
 
     var body: some View {
+        @Bindable var browser = browser
+
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
+            VStack(spacing: 8) {
+                HStack {
                     TextField("https://site-webtoon.com/episode", text: $address)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
                         .submitLabel(.go)
+                        .focused($addressIsFocused)
                         .onSubmit(loadAddress)
-
+                        .accessibilityIdentifier("v2.address")
                     Button("Ouvrir", action: loadAddress)
                         .buttonStyle(.borderedProminent)
                 }
 
-                HStack(spacing: 10) {
-                    if !profiles.isEmpty {
-                        Picker("Serie", selection: $selectedSeriesID) {
-                            Text("Aucune").tag("")
-                            ForEach(profiles) { profile in
-                                Text(profile.title).tag(profile.id)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
+                HStack(spacing: 12) {
+                    Button(action: browser.goBack) { Image(systemName: "chevron.left") }
+                        .disabled(!browser.canGoBack)
+                        .accessibilityLabel("Page precedente")
+                    Button(action: browser.goForward) { Image(systemName: "chevron.right") }
+                        .disabled(!browser.canGoForward)
+                        .accessibilityLabel("Page suivante")
+                    Button(action: browser.reload) { Image(systemName: "arrow.clockwise") }
+                        .disabled(browser.currentURL == nil)
+                        .accessibilityLabel("Recharger la page")
 
-                    Toggle("Auto", isOn: $isAutoTranslateEnabled)
-                        .labelsHidden()
-
-                    Button {
-                        NotificationCenter.default.post(name: .webtoonLensTranslateVisibleImages, object: nil)
-                    } label: {
-                        if isTranslating {
-                            ProgressView()
-                        } else {
-                            Label("Traduire", systemImage: "text.viewfinder")
-                        }
+                    Picker("Affichage", selection: Binding(
+                        get: { browser.wantsTranslation },
+                        set: { $0 ? requestTranslation() : browser.showOriginal() }
+                    )) {
+                        Text("Original").tag(false)
+                        Text("Traduit").tag(true)
                     }
-                    .buttonStyle(.bordered)
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("v2.presentation")
+                }
+                .buttonStyle(.bordered)
+
+                HStack {
+                    Button(action: requestTranslation) {
+                        Label(browser.isTranslating ? "Annuler" : "Traduire", systemImage: "text.viewfinder")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(browser.currentURL == nil || browser.isLoading)
+                    .accessibilityIdentifier("v2.translate")
+
+                    Toggle("Auto", isOn: Binding(
+                        get: { browser.autoTranslate },
+                        set: {
+                            browser.setAutoTranslation($0)
+                            if $0 { requestTranslation() }
+                        }
+                    ))
+                    .fixedSize()
+                    .accessibilityLabel("Traduire apres le defilement")
+
+                    Spacer(minLength: 0)
+                    Button("Texte") { showsTranscript = true }
+                        .disabled(browser.result == nil)
+                    if let url = browser.currentURL {
+                        Link(destination: url) { Image(systemName: "safari") }
+                            .accessibilityLabel("Ouvrir cette page dans Safari")
+                    }
                 }
 
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !profiles.isEmpty {
+                    Picker("Serie", selection: $selectedSeriesID) {
+                        Text("Aucune serie").tag("")
+                        ForEach(profiles) { profile in Text(profile.title).tag(profile.id) }
+                    }
+                    .pickerStyle(.menu)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding()
-            .background(.thinMaterial)
+                }
 
-            WebtoonWebView(
-                url: loadedURL,
-                autoTranslate: isAutoTranslateEnabled,
-                translateRequest: makeTranslateRequest,
-                onStatusChange: { status = $0 },
-                onTranslatingChange: { isTranslating = $0 }
-            )
+                HStack(alignment: .top, spacing: 6) {
+                    if browser.isLoading || browser.isTranslating {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(browser.status)
+                        .font(.caption)
+                        .lineLimit(3)
+                        .foregroundStyle(browser.hasError ? Color.red : Color.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(browser.status)
+                        .accessibilityIdentifier("v2.status")
+                }
+                .frame(height: statusHeight, alignment: .top)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(uiColor: .secondarySystemBackground))
+
+            NativeWebtoonBrowser(controller: browser)
+                .overlay {
+                    if browser.currentURL == nil {
+                        ContentUnavailableView(
+                            "Ouvre ton chapitre",
+                            systemImage: "safari",
+                            description: Text("Navigue normalement sur le site, puis touche Traduire. Seule la zone visible sera capturee, sans telecharger ses images une seconde fois.")
+                        )
+                        .allowsHitTesting(false)
+                    }
+                }
+        }
+        .confirmationDialog("Envoyer le texte OCR a ton Mac ?", isPresented: $showsConsent, titleVisibility: .visible) {
+            Button("Autoriser ce backend local") {
+                SharedSettingsStore.shared.setTextTranslationConsent(true)
+                settingsRevision += 1
+                configureTranslation()
+                browser.translateVisible()
+            }
+            Button("Garder l'original", role: .cancel) {
+                browser.setAutoTranslation(false)
+                browser.showOriginal()
+            }
+        } message: {
+            Text("Destination : \(SharedSettingsStore.shared.backendBaseURLString). Seuls le texte reconnu, ses coordonnees, le style et le glossaire sont envoyes. Les captures restent ici ; ni cookies, ni formulaires, ni identifiants ne sont transmis.")
+        }
+        .sheet(isPresented: $showsTranscript) {
+            NavigationStack {
+                List(browser.result?.segments ?? []) { segment in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(segment.translatedText).font(.body)
+                        Text(segment.sourceText).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .textSelection(.enabled)
+                }
+                .navigationTitle("Texte de la capture")
+                .toolbar { Button("Fermer") { showsTranscript = false } }
+            }
         }
         .onAppear {
-            if selectedSeriesID.isEmpty, let first = profiles.first {
-                selectedSeriesID = first.id
-            }
+            settingsRevision += 1
+            configureTranslation()
+            browser.setActive(scenePhase == .active)
+        }
+        .onDisappear { browser.setActive(false) }
+        .onChange(of: scenePhase) { _, phase in browser.setActive(phase == .active) }
+        .onChange(of: translationContext) { _, _ in configureTranslation() }
+        .onChange(of: browser.currentURL) { _, url in
+            if !addressIsFocused, let url { address = url.absoluteString }
+        }
+    }
+
+    private var translationContext: String {
+        let profile = profiles.first { $0.id == selectedSeriesID }
+        let activeTerms = selectedSeriesID.isEmpty ? terms : terms.filter { $0.seriesID == selectedSeriesID }
+        let settings = SharedSettingsStore.shared
+        return [
+            selectedSeriesID, profile?.sourceLanguage ?? "auto", profile?.targetLanguage ?? "fr",
+            profile?.stylePrompt ?? settings.defaultStylePrompt,
+            GlossaryResolver.checksum(for: GlossaryResolver.instructions(from: activeTerms)),
+            settings.backendBaseURLString, String(settings.hasTextTranslationConsent), String(settingsRevision)
+        ].joined(separator: "\u{1F}")
+    }
+
+    private func configureTranslation() {
+        let profile = profiles.first { $0.id == selectedSeriesID }
+        let activeTerms = selectedSeriesID.isEmpty ? terms : terms.filter { $0.seriesID == selectedSeriesID }
+        let seriesID = profile?.id
+        let source = profile?.sourceLanguage ?? WebtoonLensConstants.autoSourceLanguage
+        let target = profile?.targetLanguage ?? WebtoonLensConstants.defaultTargetLanguage
+        let style = profile?.stylePrompt ?? SharedSettingsStore.shared.defaultStylePrompt
+        let glossary = GlossaryResolver.instructions(from: activeTerms)
+
+        browser.configure(context: translationContext) { capture in
+            let backend = try SharedSettingsStore.shared.translationBackend()
+            let pipeline = WebtoonTranslationPipeline(client: WebtoonTranslationClient(baseURL: backend))
+            return try await pipeline.translate(
+                image: capture.image, imageData: capture.data, seriesID: seriesID,
+                sourceLanguage: source, targetLanguage: target, glossary: glossary, style: style
+            )
         }
     }
 
     private func loadAddress() {
-        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let value = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let url = URL(string: value) else {
-            status = "URL invalide."
+        do {
+            let url = try BrowserAddress.parse(address)
+            addressIsFocused = false
+            address = url.absoluteString
+            browser.open(url)
+        } catch {
+            browser.report(error)
+        }
+    }
+
+    private func requestTranslation() {
+        if browser.isTranslating {
+            browser.showOriginal()
             return
         }
-        loadedURL = url
-        address = value
-        status = "Page chargee. Traduction des images visibles activee."
-    }
-
-    private func makeTranslateRequest(_ imageRequest: WebImageRequest) async throws -> WebImageTranslationPayload {
-        let data = try await WebImageLoader.loadData(from: imageRequest.imageURL)
-        guard let image = UIImage(data: data) else {
-            throw WebtoonBrowserError.invalidImage
-        }
-
         let settings = SharedSettingsStore.shared
-        let client: TranslationClientProtocol = if let backendURL = settings.backendBaseURL {
-            WebtoonTranslationClient(baseURL: backendURL)
-        } else {
-            LocalPreviewTranslationClient()
-        }
-
-        let activeProfile = profiles.first { $0.id == selectedSeriesID }
-        let activeTerms = selectedSeriesID.isEmpty ? terms : terms.filter { $0.seriesID == selectedSeriesID }
-        let pipeline = WebtoonTranslationPipeline(client: client)
-        let result = try await pipeline.translate(
-            image: image,
-            imageData: data,
-            seriesID: activeProfile?.id,
-            sourceLanguage: activeProfile?.sourceLanguage ?? WebtoonLensConstants.autoSourceLanguage,
-            targetLanguage: activeProfile?.targetLanguage ?? WebtoonLensConstants.defaultTargetLanguage,
-            glossary: GlossaryResolver.instructions(from: activeTerms),
-            style: activeProfile?.stylePrompt ?? settings.defaultStylePrompt
-        )
-
-        return WebImageTranslationPayload(imageID: imageRequest.imageID, result: result)
-    }
-}
-
-private struct WebtoonWebView: UIViewRepresentable {
-    let url: URL?
-    let autoTranslate: Bool
-    let translateRequest: (WebImageRequest) async throws -> WebImageTranslationPayload
-    let onStatusChange: (String) -> Void
-    let onTranslatingChange: (Bool) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.userContentController.addUserScript(WKUserScript(
-            source: Self.bridgeScript,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: false
-        ))
-        configuration.userContentController.add(context.coordinator, name: "webtoonLensImage")
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
-        context.coordinator.webView = webView
-        context.coordinator.installTranslateObserver()
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        context.coordinator.parent = self
-        if let url, webView.url != url {
-            webView.load(URLRequest(url: url))
-        }
-        webView.evaluateJavaScript("window.WebtoonLensNative && window.WebtoonLensNative.setAutoTranslate(\(autoTranslate ? "true" : "false"));")
-    }
-
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        var parent: WebtoonWebView
-        weak var webView: WKWebView?
-        private var activeTasks: [String: Task<Void, Never>] = [:]
-        private var observer: NSObjectProtocol?
-
-        init(_ parent: WebtoonWebView) {
-            self.parent = parent
-        }
-
-        deinit {
-            if let observer {
-                NotificationCenter.default.removeObserver(observer)
-            }
-        }
-
-        func installTranslateObserver() {
-            guard observer == nil else { return }
-            observer = NotificationCenter.default.addObserver(
-                forName: .webtoonLensTranslateVisibleImages,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.webView?.evaluateJavaScript("window.WebtoonLensNative && window.WebtoonLensNative.scan();")
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            parent.onStatusChange("Page prete. Les images visibles seront traduites dans la page.")
-            webView.evaluateJavaScript("window.WebtoonLensNative && window.WebtoonLensNative.setAutoTranslate(\(parent.autoTranslate ? "true" : "false"));")
-        }
-
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "webtoonLensImage",
-                  let body = message.body as? [String: Any],
-                  let request = WebImageRequest(body: body),
-                  activeTasks[request.imageID] == nil else {
+        do {
+            guard !settings.backendBaseURLString.isEmpty else { throw TranslationClientError.missingBackend }
+            _ = try LocalBackendAddress.parse(settings.backendBaseURLString)
+            if !settings.hasTextTranslationConsent {
+                showsConsent = true
                 return
             }
-
-            activeTasks[request.imageID] = Task { [weak self] in
-                await self?.translate(request)
-            }
-        }
-
-        @MainActor
-        private func translate(_ request: WebImageRequest) async {
-            parent.onTranslatingChange(true)
-            parent.onStatusChange("Traduction d'une image visible...")
-            defer {
-                activeTasks[request.imageID] = nil
-                parent.onTranslatingChange(!activeTasks.isEmpty)
-            }
-
-            do {
-                let payload = try await parent.translateRequest(request)
-                try await render(payload)
-                parent.onStatusChange("\(payload.result.segments.count) bulles posees sur la page.")
-            } catch {
-                parent.onStatusChange(error.localizedDescription)
-                await markFailed(imageID: request.imageID, message: error.localizedDescription)
-            }
-        }
-
-        @MainActor
-        private func render(_ payload: WebImageTranslationPayload) async throws {
-            guard let webView else { return }
-            let data = try JSONEncoder().encode(payload)
-            guard let json = String(data: data, encoding: .utf8) else { return }
-            _ = try await webView.evaluateJavaScript("window.WebtoonLensNative.renderTranslation(\(json));")
-        }
-
-        @MainActor
-        private func markFailed(imageID: String, message: String) async {
-            let escaped = message
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-                .replacingOccurrences(of: "\n", with: " ")
-            _ = try? await webView?.evaluateJavaScript("window.WebtoonLensNative.markFailed('\(imageID)', '\(escaped)');")
+            configureTranslation()
+            browser.translateVisible()
+        } catch {
+            browser.setAutoTranslation(false)
+            browser.report(error)
         }
     }
-}
-
-private struct WebImageRequest: Sendable {
-    let imageID: String
-    let imageURL: String
-    let pageURL: String
-
-    init?(body: [String: Any]) {
-        guard let imageID = body["imageID"] as? String,
-              let imageURL = body["imageURL"] as? String else {
-            return nil
-        }
-        self.imageID = imageID
-        self.imageURL = imageURL
-        self.pageURL = body["pageURL"] as? String ?? ""
-    }
-}
-
-private struct WebImageTranslationPayload: Encodable {
-    let imageID: String
-    let result: TranslationResult
-}
-
-private enum WebImageLoader {
-    static func loadData(from value: String) async throws -> Data {
-        if value.hasPrefix("data:"), let commaIndex = value.firstIndex(of: ",") {
-            let encoded = String(value[value.index(after: commaIndex)...])
-            guard let data = Data(base64Encoded: encoded) else {
-                throw WebtoonBrowserError.invalidImage
-            }
-            return data
-        }
-
-        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()) else {
-            throw WebtoonBrowserError.unsupportedImageURL
-        }
-
-        var request = URLRequest(url: url)
-        request.cachePolicy = .returnCacheDataElseLoad
-        request.timeoutInterval = 12
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
-            throw WebtoonBrowserError.imageDownloadFailed
-        }
-        return data
-    }
-}
-
-private enum WebtoonBrowserError: Error, LocalizedError {
-    case invalidImage
-    case unsupportedImageURL
-    case imageDownloadFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidImage:
-            return "Image webtoon illisible."
-        case .unsupportedImageURL:
-            return "Image non accessible par l'app."
-        case .imageDownloadFailed:
-            return "Telechargement de l'image impossible."
-        }
-    }
-}
-
-extension Notification.Name {
-    static let webtoonLensTranslateVisibleImages = Notification.Name("webtoonLensTranslateVisibleImages")
-}
-
-private extension WebtoonWebView {
-    static let bridgeScript = """
-    (() => {
-      if (window.WebtoonLensNative) return;
-
-      const states = new WeakMap();
-      let autoTranslate = true;
-      let timer = null;
-
-      function stableId(image) {
-        if (!image.dataset.webtoonLensId) {
-          image.dataset.webtoonLensId = 'wl-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-        }
-        return image.dataset.webtoonLensId;
-      }
-
-      function imageURL(image) {
-        return image.currentSrc || image.src || '';
-      }
-
-      function isCandidate(image) {
-        const rect = image.getBoundingClientRect();
-        const height = window.innerHeight || document.documentElement.clientHeight;
-        const width = window.innerWidth || document.documentElement.clientWidth;
-        return rect.bottom > -height && rect.top < height * 2 &&
-          rect.right > 0 && rect.left < width &&
-          rect.width >= 140 && rect.height >= 120 &&
-          imageURL(image).length > 0;
-      }
-
-      function ensureOverlay(image) {
-        let state = states.get(image);
-        if (state && state.overlay) return state.overlay;
-
-        const overlay = document.createElement('div');
-        overlay.className = 'webtoon-lens-native-overlay';
-        overlay.style.position = 'absolute';
-        overlay.style.zIndex = '2147483647';
-        overlay.style.pointerEvents = 'none';
-        overlay.style.boxSizing = 'border-box';
-        document.documentElement.appendChild(overlay);
-
-        state = { status: 'new', overlay };
-        states.set(image, state);
-        return overlay;
-      }
-
-      function position(image, overlay) {
-        const rect = image.getBoundingClientRect();
-        overlay.style.left = `${rect.left + window.scrollX}px`;
-        overlay.style.top = `${rect.top + window.scrollY}px`;
-        overlay.style.width = `${rect.width}px`;
-        overlay.style.height = `${rect.height}px`;
-        overlay.style.display = rect.width > 0 && rect.height > 0 ? 'block' : 'none';
-      }
-
-      function scan() {
-        for (const image of Array.from(document.images)) {
-          if (!isCandidate(image)) continue;
-          const state = states.get(image);
-          if (state && (state.status === 'loading' || state.status === 'done')) {
-            position(image, state.overlay);
-            continue;
-          }
-
-          const overlay = ensureOverlay(image);
-          position(image, overlay);
-          overlay.innerHTML = '<div style="display:grid;place-items:center;width:100%;height:44px;border-radius:8px;background:rgba(255,255,255,.92);font:700 13px -apple-system;color:#111">Traduction...</div>';
-          states.set(image, { status: 'loading', overlay });
-
-          window.webkit.messageHandlers.webtoonLensImage.postMessage({
-            imageID: stableId(image),
-            imageURL: imageURL(image),
-            pageURL: location.href
-          });
-        }
-      }
-
-      function renderBubble(segment, overlay) {
-        const box = segment.boundingBox;
-        if (!box) return;
-        const bubble = document.createElement('div');
-        bubble.textContent = segment.translatedText || '';
-        bubble.style.position = 'absolute';
-        bubble.style.left = `${box.x * 100}%`;
-        bubble.style.top = `${box.y * 100}%`;
-        bubble.style.width = `${Math.max(14, box.width * 100)}%`;
-        bubble.style.minHeight = `${Math.max(32, box.height * overlay.clientHeight)}px`;
-        bubble.style.display = 'grid';
-        bubble.style.placeItems = 'center';
-        bubble.style.padding = '4px 6px';
-        bubble.style.border = '1px solid rgba(0,0,0,.28)';
-        bubble.style.borderRadius = '8px';
-        bubble.style.background = 'rgba(255,255,255,.95)';
-        bubble.style.color = '#111';
-        bubble.style.font = '800 12px -apple-system, BlinkMacSystemFont, sans-serif';
-        bubble.style.lineHeight = '1.12';
-        bubble.style.textAlign = 'center';
-        bubble.style.boxShadow = '0 6px 16px rgba(0,0,0,.16)';
-        overlay.appendChild(bubble);
-      }
-
-      function findImage(imageID) {
-        return Array.from(document.images).find((image) => image.dataset.webtoonLensId === imageID);
-      }
-
-      window.WebtoonLensNative = {
-        setAutoTranslate(enabled) {
-          autoTranslate = Boolean(enabled);
-          if (autoTranslate) scheduleScan();
-        },
-        renderTranslation(payload) {
-          const image = findImage(payload.imageID);
-          if (!image) return;
-          const overlay = ensureOverlay(image);
-          position(image, overlay);
-          overlay.innerHTML = '';
-          for (const segment of payload.result.segments || []) {
-            renderBubble(segment, overlay);
-          }
-          states.set(image, { status: 'done', overlay });
-        },
-        markFailed(imageID, message) {
-          const image = findImage(imageID);
-          if (!image) return;
-          const overlay = ensureOverlay(image);
-          position(image, overlay);
-          overlay.innerHTML = `<div style="display:grid;place-items:center;width:100%;min-height:44px;border-radius:8px;background:rgba(255,245,245,.95);font:700 12px -apple-system;color:#8a1111">${message}</div>`;
-          states.set(image, { status: 'failed', overlay });
-        },
-        scan
-      };
-
-      function scheduleScan() {
-        if (!autoTranslate) return;
-        clearTimeout(timer);
-        timer = setTimeout(scan, 220);
-      }
-
-      window.addEventListener('scroll', () => {
-        for (const image of Array.from(document.images)) {
-          const state = states.get(image);
-          if (state && state.overlay) position(image, state.overlay);
-        }
-        scheduleScan();
-      }, { passive: true });
-
-      window.addEventListener('resize', scheduleScan, { passive: true });
-      new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
-      document.addEventListener('visibilitychange', scheduleScan);
-      scheduleScan();
-    })();
-    """
 }

@@ -4,7 +4,7 @@
 <dict>
   <key>com.apple.security.application-groups</key>
   <array>
-    <string>group.com.example.webtoonlens</string>
+    <string>group.com.example.webtoonlens.v2</string>
   </array>
 </dict>
 </plist>

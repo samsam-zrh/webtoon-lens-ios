@@ -1,5 +1,5 @@
-name: Webtoon Lens iOS CI
-run-name: Webtoon Lens iOS CI
+name: Webtoon Lens V2 CI
+run-name: Webtoon Lens V2 CI
 
 on:
   workflow_dispatch: {}
@@ -7,6 +7,7 @@ on:
     branches:
       - master
       - main
+      - samsam-zrh-webtoon-lens-v2
   pull_request:
     branches:
       - master
@@ -32,6 +33,9 @@ jobs:
           xcodebuild -version
           xcrun simctl list runtimes
 
+      - name: Core and synthetic browser regressions on macOS
+        run: swift test
+
       - name: Install XcodeGen
         run: |
           brew update
@@ -47,6 +51,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: WebtoonLens.xcresult
-          path: build/TestResults/WebtoonLens.xcresult
+          name: WebtoonLensV2.xcresult
+          path: build/TestResults/WebtoonLensV2.xcresult
           if-no-files-found: ignore

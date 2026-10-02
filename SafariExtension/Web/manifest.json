@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Webtoon Lens",
-  "version": "0.1.0",
-  "description": "Traduit les images de webtoon visibles dans Safari.",
+  "name": "Webtoon Lens V2",
+  "version": "0.2.0",
+  "description": "Extension historique V2 a la demande. Le navigateur de l'app utilise la capture locale.",
   "permissions": [
     "activeTab",
     "nativeMessaging",
@@ -16,7 +16,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Webtoon Lens",
+    "default_title": "Webtoon Lens V2",
     "default_popup": "popup.html"
   },
   "content_scripts": [

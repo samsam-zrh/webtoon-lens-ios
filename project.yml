@@ -1,4 +1,4 @@
-name: WebtoonLens
+name: WebtoonLensV2
 options:
   bundleIdPrefix: com.example
   deploymentTarget:
@@ -6,7 +6,7 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: 0.1.0
+    MARKETING_VERSION: 0.2.0
     CURRENT_PROJECT_VERSION: 1
     SWIFT_VERSION: 5.10
     IPHONEOS_DEPLOYMENT_TARGET: 18.0
@@ -19,11 +19,11 @@ targets:
       - Core/Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.core
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.core
         GENERATE_INFOPLIST_FILE: YES
         APPLICATION_EXTENSION_API_ONLY: YES
 
-  WebtoonLens:
+  WebtoonLensV2:
     type: application
     platform: iOS
     sources:
@@ -33,20 +33,19 @@ targets:
       - App/Resources
     dependencies:
       - target: WebtoonLensCore
-      - target: WebtoonLensSafariExtension
+      - target: WebtoonLensV2SafariExtension
         embed: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2
         INFOPLIST_FILE: App/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Resources/WebtoonLens.entitlements
         TARGETED_DEVICE_FAMILY: 1,2
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         DEVELOPMENT_TEAM: $(APPLE_TEAM_ID)
-        CODE_SIGN_STYLE: Manual
-        PROVISIONING_PROFILE_SPECIFIER: $(WEBTOON_LENS_APP_PROFILE_NAME)
+        CODE_SIGN_STYLE: Automatic
 
-  WebtoonLensSafariExtension:
+  WebtoonLensV2SafariExtension:
     type: app-extension
     platform: iOS
     sources:
@@ -57,14 +56,13 @@ targets:
       - target: WebtoonLensCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.SafariExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.SafariExtension
         INFOPLIST_FILE: SafariExtension/Native/Info.plist
         CODE_SIGN_ENTITLEMENTS: SafariExtension/Native/WebtoonLensSafariExtension.entitlements
         TARGETED_DEVICE_FAMILY: 1,2
         APPLICATION_EXTENSION_API_ONLY: YES
         DEVELOPMENT_TEAM: $(APPLE_TEAM_ID)
-        CODE_SIGN_STYLE: Manual
-        PROVISIONING_PROFILE_SPECIFIER: $(WEBTOON_LENS_SAFARI_PROFILE_NAME)
+        CODE_SIGN_STYLE: Automatic
 
   WebtoonLensCoreTests:
     type: bundle.unit-test
@@ -75,7 +73,7 @@ targets:
       - target: WebtoonLensCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.coretests
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.coretests
 
   WebtoonLensUITests:
     type: bundle.ui-testing
@@ -83,16 +81,16 @@ targets:
     sources:
       - Tests/WebtoonLensUITests
     dependencies:
-      - target: WebtoonLens
+      - target: WebtoonLensV2
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.uitests
-        TEST_TARGET_NAME: WebtoonLens
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.uitests
+        TEST_TARGET_NAME: WebtoonLensV2
 schemes:
-  WebtoonLens:
+  WebtoonLensV2:
     build:
       targets:
-        WebtoonLens: all
+        WebtoonLensV2: all
         WebtoonLensCoreTests: [test]
         WebtoonLensUITests: [test]
     test:

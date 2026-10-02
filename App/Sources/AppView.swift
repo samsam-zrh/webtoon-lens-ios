@@ -41,14 +41,15 @@ struct AppView: View {
         TabView(selection: $appModel.selectedTab) {
             NavigationStack {
                 OnboardingView()
-                    .navigationTitle("Webtoon Lens")
+                    .navigationTitle(WebtoonLensConstants.displayName)
             }
             .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.systemImage) }
             .tag(AppTab.home)
 
             NavigationStack {
                 WebtoonBrowserView()
-                    .navigationTitle("Webtoon")
+                    .navigationTitle("Webtoon V2")
+                    .navigationBarTitleDisplayMode(.inline)
             }
             .tabItem { Label(AppTab.webtoon.title, systemImage: AppTab.webtoon.systemImage) }
             .tag(AppTab.webtoon)

@@ -133,11 +133,7 @@ struct ReaderView: View {
 
         do {
             let settings = SharedSettingsStore.shared
-            let client: TranslationClientProtocol = if let backendURL = settings.backendBaseURL {
-                WebtoonTranslationClient(baseURL: backendURL)
-            } else {
-                LocalPreviewTranslationClient()
-            }
+            let client = WebtoonTranslationClient(baseURL: try settings.translationBackend())
             let activeProfile = profiles.first { $0.id == selectedSeriesID }
             let activeTerms = selectedSeriesID.isEmpty ? terms : terms.filter { $0.seriesID == selectedSeriesID }
 

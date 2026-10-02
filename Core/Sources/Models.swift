@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
-import SwiftData
 
 public enum WebtoonLensConstants {
-    public static let appGroupIdentifier = "group.com.example.webtoonlens"
+    public static let appGroupIdentifier = "group.com.example.webtoonlens.v2"
+    public static let displayName = "Webtoon Lens V2"
     public static let defaultTargetLanguage = "fr"
     public static let autoSourceLanguage = "auto"
     public static let supportedRecognitionLanguages = ["ja-JP", "ko-KR", "zh-Hans", "zh-Hant", "en-US"]
@@ -215,10 +215,22 @@ public struct TranslationCacheKey: Codable, Hashable, Sendable {
     public var imageHash: String
     public var targetLanguage: String
     public var glossaryChecksum: String
+    public var sourceLanguage: String
+    public var seriesID: String?
+    public var styleChecksum: String
+    public var clientNamespace: String
 
-    public init(imageHash: String, targetLanguage: String, glossaryChecksum: String) {
+    public init(
+        imageHash: String, targetLanguage: String, glossaryChecksum: String,
+        sourceLanguage: String = "auto", seriesID: String? = nil,
+        styleChecksum: String = "", clientNamespace: String = ""
+    ) {
         self.imageHash = imageHash
         self.targetLanguage = targetLanguage
         self.glossaryChecksum = glossaryChecksum
+        self.sourceLanguage = sourceLanguage
+        self.seriesID = seriesID
+        self.styleChecksum = styleChecksum
+        self.clientNamespace = clientNamespace
     }
 }

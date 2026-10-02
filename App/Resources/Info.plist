@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Webtoon Lens</string>
+  <string>Webtoon Lens V2</string>
   <key>CFBundleShortVersionString</key>
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>
@@ -13,10 +13,14 @@
   <key>UIApplicationSupportsIndirectInputEvents</key>
   <true/>
   <key>NSPhotoLibraryUsageDescription</key>
-  <string>Webtoon Lens utilise les images selectionnees pour traduire les captures que vous choisissez.</string>
+  <string>Webtoon Lens V2 utilise uniquement les images que vous choisissez d'importer.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Uniquement pour joindre votre backend local configure et lui envoyer le texte OCR apres votre consentement. Les captures et cookies ne sont pas envoyes.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+    <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
   <key>UILaunchScreen</key>

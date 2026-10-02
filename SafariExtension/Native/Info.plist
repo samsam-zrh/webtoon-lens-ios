@@ -3,7 +3,14 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Webtoon Lens Safari</string>
+  <string>Webtoon Lens V2 Safari</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Connexion a votre backend local configure pour traduire le texte OCR apres consentement.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <key>CFBundleShortVersionString</key>
   <string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key>

@@ -154,17 +154,26 @@ public actor WebtoonTranslationPipeline {
         glossary: [GlossaryTermInstruction],
         style: String
     ) async throws -> TranslationResult {
+        try Task.checkCancellation()
         let startedAt = Date()
-        let data = imageData ?? image.pngData() ?? Data()
+        guard let data = imageData ?? image.pngData(), !data.isEmpty else {
+            throw TranslationPipelineError.invalidImage
+        }
         let imageHash = ImageHasher.sha256Hex(data)
         let glossaryChecksum = GlossaryResolver.checksum(for: glossary)
-        let cacheKey = TranslationCacheKey(imageHash: imageHash, targetLanguage: targetLanguage, glossaryChecksum: glossaryChecksum)
+        let cacheKey = TranslationCacheKey(
+            imageHash: imageHash, targetLanguage: targetLanguage, glossaryChecksum: glossaryChecksum,
+            sourceLanguage: sourceLanguage, seriesID: seriesID,
+            styleChecksum: ImageHasher.sha256Hex(Data(style.utf8)), clientNamespace: client.cacheNamespace
+        )
 
         if let cached = await cache.value(for: cacheKey) {
+            try Task.checkCancellation()
             return cached
         }
 
         let ocrSegments = try await ocr.recognizeText(in: image, mode: .accurate)
+        try Task.checkCancellation()
         guard !ocrSegments.isEmpty else {
             throw TranslationPipelineError.noTextRecognized
         }
@@ -188,7 +197,8 @@ public actor WebtoonTranslationPipeline {
             segments: sourceSegments,
             glossary: glossary
         )
-        let response = try await client.translate(request)
+        let response = try await client.translate(request).validated(against: request)
+        try Task.checkCancellation()
 
         let duration = Int(Date().timeIntervalSince(startedAt) * 1000)
         let result = TranslationResult(
@@ -201,6 +211,7 @@ public actor WebtoonTranslationPipeline {
         )
 
         await cache.store(result, for: cacheKey)
+        try Task.checkCancellation()
         return result
     }
 }

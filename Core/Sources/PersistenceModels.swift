@@ -1,7 +1,11 @@
 import Foundation
+#if canImport(UIKit)
 import SwiftData
+#endif
 
+#if canImport(UIKit)
 @Model
+#endif
 public final class SeriesProfile: Identifiable {
     public var id: String
     public var title: String
@@ -30,7 +34,9 @@ public final class SeriesProfile: Identifiable {
     }
 }
 
+#if canImport(UIKit)
 @Model
+#endif
 public final class TermMemoryEntry: Identifiable {
     public var id: String
     public var seriesID: String
@@ -77,7 +83,9 @@ public final class TermMemoryEntry: Identifiable {
     }
 }
 
+#if canImport(UIKit)
 @Model
+#endif
 public final class TranslationJob: Identifiable {
     public var id: String
     public var seriesID: String?
@@ -109,7 +117,9 @@ public final class TranslationJob: Identifiable {
     }
 }
 
+#if canImport(UIKit)
 @Model
+#endif
 public final class TranslatedSegment: Identifiable {
     public var id: String
     public var jobID: String
@@ -147,7 +157,9 @@ public final class TranslatedSegment: Identifiable {
     }
 }
 
+#if canImport(UIKit)
 @Model
+#endif
 public final class GlossaryVersion: Identifiable {
     public var id: String
     public var seriesID: String

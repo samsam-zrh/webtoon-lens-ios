@@ -1,8 +1,11 @@
-import UIKit
 import XCTest
 @testable import WebtoonLensCore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 final class TranslationPipelineTests: XCTestCase {
+    #if canImport(UIKit)
     func testPipelineUsesOCRGroupsAndClientResponse() async throws {
         let ocr = MockOCRService(segments: [
             OCRSegment(
@@ -26,9 +29,11 @@ final class TranslationPipelineTests: XCTestCase {
 
         XCTAssertEqual(result.segments.count, 1)
         XCTAssertEqual(result.segments[0].translatedText, "Astra")
-        XCTAssertEqual(client.lastRequest?.seriesID, "series")
-        XCTAssertEqual(client.lastRequest?.glossary.first?.source, "Astra")
+        let request = await client.lastRequest
+        XCTAssertEqual(request?.seriesID, "series")
+        XCTAssertEqual(request?.glossary.first?.source, "Astra")
     }
+    #endif
 
     func testCacheStoresAndReturnsResult() async {
         let cache = TranslationCache()
@@ -46,9 +51,11 @@ final class TranslationPipelineTests: XCTestCase {
         let cached = await cache.value(for: key)
 
         XCTAssertEqual(cached?.imageHash, "a")
-        XCTAssertNil(await cache.value(for: TranslationCacheKey(imageHash: "b", targetLanguage: "fr", glossaryChecksum: "g")))
+        let missing = await cache.value(for: TranslationCacheKey(imageHash: "b", targetLanguage: "fr", glossaryChecksum: "g"))
+        XCTAssertNil(missing)
     }
 
+    #if canImport(UIKit)
     private static func fixtureImage() -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
         return renderer.image { context in
@@ -56,8 +63,10 @@ final class TranslationPipelineTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
         }
     }
+    #endif
 }
 
+#if canImport(UIKit)
 private final class MockOCRService: OCRRecognizing {
     let segments: [OCRSegment]
 
@@ -70,7 +79,7 @@ private final class MockOCRService: OCRRecognizing {
     }
 }
 
-private final class MockTranslationClient: TranslationClientProtocol {
+private actor MockTranslationClient: TranslationClientProtocol {
     var lastRequest: TranslationRequest?
 
     func translate(_ request: TranslationRequest) async throws -> TranslationResponse {
@@ -92,3 +101,4 @@ private final class MockTranslationClient: TranslationClientProtocol {
         )
     }
 }
+#endif
