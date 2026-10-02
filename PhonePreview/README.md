@@ -21,13 +21,14 @@ Le lecteur sérialise ses inférences, avec un contexte de 4 096 tokens et une r
 
 ## Lecture, glossaire et rendu
 
-- Les imports sont limités à **20 Mo par page**. L’API limite les requêtes à 30 Mo et à 32 dialogues par traduction. Les pages longues sont analysées par fenêtres, avec un chevauchement pour ne pas couper les bulles ordinaires. Les premiers dialogues arrivent avant la fin du chapitre.
+- Les imports sont limités à **20 Mo par page**. L’API limite les requêtes à 30 Mo et à 32 dialogues par traduction. Les pages longues sont analysées par fenêtres, avec un chevauchement pour ne pas couper les bulles ordinaires. Les premiers dialogues arrivent avant la fin du chapitre. Les zones visibles restent prioritaires, puis **tout le chapitre continue en arrière-plan sans devoir défiler** : un préchargement progressif vise trois pages en attente/en cours au lieu de forcer immédiatement toutes les images. Les petits trous entre fenêtres et la fin des pages ne sont plus considérés comme déjà analysés.
 - **Voir l’original** masque les remplacements. **Lire les dialogues et leur original**, sous chaque image, donne la traduction intégrale et permet de comparer l’OCR.
 - Sans zone de bulle fiable (par exemple une annonce sur une illustration), le panneau de traduction sous l’image s’ouvre automatiquement : le français reste visible sans effacer le dessin. Une erreur sur une page ne bloque pas les autres. **Relancer la traduction** réessaie les pages en erreur en conservant les dialogues déjà affichés ; changer la langue ou le glossaire relance en revanche l’ensemble.
 - Le glossaire contient **188 concepts originaux** anglais/chinois, catégories et indications de sens. OpenCC fournit les variantes traditionnelles. Les termes ordinaires sont des indications contextualisées, avec accords possibles ; quelques concepts non ambigus sont littéraux. Les corrections par série sont prioritaires et vérifiées littéralement. Ajoutez les noms de personnages, lieux ou techniques propres à votre série : ce lexique n’est pas un dictionnaire de tous les webtoons.
 - Les corrections restent dans le stockage local de ce navigateur, séparées par le champ **Série**. Leur modification relance la traduction. Le cache tient compte du modèle, du dialogue, du contexte et des termes réellement utilisés : une correction pertinente ne réutilise pas l’ancienne traduction.
 - Le prompt ne présente des marqueurs de glossaire que lorsque le dialogue contient réellement des termes verrouillés. Une réponse invalide peut déclencher une seule nouvelle génération contrôlée ; si elle reste invalide, l’erreur est affichée, jamais remplacée par une fausse traduction.
-- Le masque alpha accepte les **intérieurs uniformes blancs, noirs ou colorés**, y compris les contours irréguliers. Le fond est échantillonné ; le texte devient clair ou sombre pour garder un contraste d’au moins 4,5:1. Sur les fonds noirs/colorés, les trous hors des lignes OCR ne sont pas effacés, sauf une petite ponctuation monochrome voisine que Vision aurait omise. Une bulle colorée coupée sur un seul bord par une fenêtre d’analyse peut être remplacée si son rectangle de texte reste entièrement dans une zone sûre.
+- Le masque alpha accepte les **intérieurs uniformes blancs, noirs ou colorés**, y compris les contours irréguliers et les traits fins séparant une bulle d’un fond de même couleur. Lorsque les lignes ont des longueurs différentes, le lecteur cherche un rectangle de texte réellement inscrit plutôt que de rejeter toute la bulle. Le fond est échantillonné ; le texte devient clair ou sombre pour garder un contraste d’au moins 4,5:1. Les trous hors des lignes OCR ne sont pas effacés, sauf une petite ponctuation monochrome voisine que Vision aurait omise. Une bulle coupée sur un seul bord par une fenêtre d’analyse peut être remplacée si son rectangle de texte reste entièrement dans une zone sûre.
+- Deux dialogues identiques à des positions différentes sont conservés. Les observations qui se chevauchent sont rapprochées par leur texte complet et leur position réelle ; un meilleur masque trouvé ensuite réutilise le français déjà produit, y compris dans le chevauchement entre fenêtres.
 - Les textures, dégradés importants, aplats ouverts sur plusieurs bords, zones trop petites ou incertaines gardent **leur original**, avec la traduction complète sous la page. Ce n’est pas une détection universelle : le lecteur ne masque pas l’illustration avec un rectangle arbitraire et ne tronque pas discrètement le texte.
 - Le texte français est mesuré avec Canvas, réparti en lignes et réduit si nécessaire, puis recalculé au redimensionnement. La police, la graisse et la taille source sont des **approximations**, pas une identification exacte de police scannée. Après une mise à jour du détecteur, rechargez le chapitre ou réimportez vos pages : les anciens résultats OCR ne sont pas réutilisés.
 
@@ -61,6 +62,7 @@ Le lecteur et Ollama doivent fonctionner pour les tests réels :
 .runtime/venv/bin/python Tests/PhonePreview/browser_check.py .runtime/evidence
 .runtime/venv/bin/python Tests/PhonePreview/access_check.py .runtime/evidence
 .runtime/venv/bin/python Tests/PhonePreview/translation_recovery_check.py .runtime/evidence
+.runtime/venv/bin/python Tests/PhonePreview/coverage_check.py .runtime/evidence
 .runtime/venv/bin/python Tests/PhonePreview/benchmark.py .runtime/evidence
 ```
 
@@ -71,6 +73,8 @@ Les fixtures sont générées par `Tests/PhonePreview/fixtures.py`. Sur un autre
 `access_check.py` fait recevoir un vrai refus HTTP 403 au backend depuis un serveur local de test : message et actions accessibles, ancien chapitre intact, reprise par import et traduction chinoise réelle. Il couvre aussi l’absence d’images, les erreurs HTML anciennes, les URL invalides et l’annulation d’une ouverture pendant un import ou un changement de langue.
 
 `translation_recovery_check.py` traduit une annonce originale sans bulle fermée, vérifie que son français est visible sous l’image, puis force une erreur sur la première page d’un import. La seconde doit continuer à se traduire, et la reprise doit conserver les dialogues déjà affichés.
+
+`coverage_check.py` vérifie les petites zones restantes, la fin des pages, les dialogues répétés et la réutilisation des meilleurs masques. Il importe cinq pages et attend leurs quinze dialogues sans défiler, puis contrôle une bulle blanche à contour fin sur bureau et mobile, avec comparaison des pixels hors masque.
 
 ### Mesures effectuées sur le Mac M5 / 24 Go
 

@@ -218,6 +218,50 @@ class GeometryTests(unittest.TestCase):
         lines[1]["sourceText"] = "CORE"
         self.assertEqual(fit_dialogue(self.image(), lines)[0]["sourceText"], "GOLDEN CORE")
 
+    def test_thin_outlines_on_matching_background(self):
+        for color, outline in (("white", "black"), ("black", "white")):
+            for thickness in (1, 2, 3):
+                with self.subTest(color=color, thickness=thickness):
+                    image = Image.new("RGB", (400, 300), color)
+                    ImageDraw.Draw(image).ellipse((40, 30, 360, 270), fill=color,
+                                                 outline=outline, width=thickness)
+                    data = io.BytesIO()
+                    image.save(data, format="PNG")
+                    results = fit_dialogue(data.getvalue(), self.lines())
+                    self.assertEqual(len(results), 1)
+                    self.assertEqual(results[0]["renderMode"], "replace")
+
+    def test_large_closed_bubble_not_rejected_by_size(self):
+        image = Image.new("RGB", (400, 300), "#345566")
+        ImageDraw.Draw(image).ellipse((5, 5, 395, 295), fill="white", outline="black", width=2)
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        result = fit_dialogue(data.getvalue(), self.lines())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["renderMode"], "replace")
+
+    def test_closed_outline_on_image_border(self):
+        for color, outline in (("white", "black"), ("black", "white")):
+            with self.subTest(color=color):
+                image = Image.new("RGB", (400, 300), color)
+                ImageDraw.Draw(image).ellipse((0, 0, 399, 299), fill=color, outline=outline, width=1)
+                data = io.BytesIO()
+                image.save(data, format="PNG")
+                results = fit_dialogue(data.getvalue(), self.lines())
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0]["renderMode"], "replace")
+
+    def test_line_union_can_cross_curve_without_crossing_text(self):
+        lines = [
+            dict(text="Hello", boundingBox=dict(x=.44, y=.20, width=.12, height=.06)),
+            dict(text="A much longer sentence", boundingBox=dict(x=.21, y=.47, width=.58, height=.06)),
+        ]
+        results = fit_dialogue(self.image(), lines)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["renderMode"], "replace")
+        self.assertEqual(results[0]["sourceText"], "Hello A much longer sentence")
+        self.assertLess(results[0]["textBox"]["width"], results[0]["rawBoundingBox"]["width"])
+
     def test_unverified_preserves_art(self):
         results = fit_dialogue(self.image(True), self.lines())
         self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
@@ -254,6 +298,18 @@ class GeometryTests(unittest.TestCase):
         mask = Image.open(io.BytesIO(base64.b64decode(result["maskData"].split(",")[1])))
         x, y = round(result["boundingBox"]["x"]*400), round(result["boundingBox"]["y"]*300)
         self.assertEqual(mask.getpixel((200-x, 210-y))[3], 0)
+
+    def test_white_art_and_unused_background_not_painted(self):
+        image = Image.open(io.BytesIO(self.image()))
+        ImageDraw.Draw(image).rectangle((175, 210, 225, 230), fill="black")
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        result = fit_dialogue(data.getvalue(), self.lines())[0]
+        self.assertEqual(result["renderMode"], "replace")
+        mask = Image.open(io.BytesIO(base64.b64decode(result["maskData"].split(",")[1])))
+        x, y = round(result["boundingBox"]["x"]*400), round(result["boundingBox"]["y"]*300)
+        self.assertEqual(mask.getpixel((200-x, 220-y))[3], 0)
+        self.assertEqual(mask.getpixel((200-x, 50-y))[3], 0)
 
     def test_nearby_punctuation_in_mask(self):
         image = Image.open(io.BytesIO(self.image(color="#000000")))
@@ -304,13 +360,15 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
 
     def test_single_clipped_edge_has_safe_interior(self):
-        image = Image.new("RGB", (400, 300), "#345566")
-        ImageDraw.Draw(image).ellipse((40, 30, 360, 340), fill="black")
-        data = io.BytesIO()
-        image.save(data, format="PNG")
-        result = fit_dialogue(data.getvalue(), self.lines())
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["renderMode"], "replace")
+        for color in ("white", "black"):
+            with self.subTest(color=color):
+                image = Image.new("RGB", (400, 300), "#345566")
+                ImageDraw.Draw(image).ellipse((40, 30, 360, 340), fill=color)
+                data = io.BytesIO()
+                image.save(data, format="PNG")
+                result = fit_dialogue(data.getvalue(), self.lines())
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]["renderMode"], "replace")
 
     def test_invalid_image(self):
         with self.assertRaises(ValueError):

@@ -23,14 +23,13 @@ document.getElementById("importAfterError").addEventListener("click", () => imag
 const OCR_WINDOW_MARGIN_BEFORE = 0.12;
 const OCR_WINDOW_MARGIN_AFTER = 0.42;
 const OCR_WINDOW_MAX_NATURAL_HEIGHT = 2500;
-const OCR_WINDOW_COVERAGE_THRESHOLD = 0.72;
+const OCR_WINDOW_COVERAGE_THRESHOLD = 1 - 1e-8;
 const OCR_WINDOWS_PER_PASS = 4;
 const OCR_VIEWPORT_FOCI = [0.48, 0.72, 0.96, 1.14];
 const OCR_WINDOW_DEDUPE_THRESHOLD = 0.66;
 const AUTO_TRANSLATE_DELAY_MS = 90;
 const TRANSLATION_PAGES_PER_PASS = 1;
-const BACKGROUND_TRANSLATION_PAGE_LIMIT = 3;
-const BACKGROUND_TRANSLATION_VIEWPORTS = 5.5;
+const BACKGROUND_PREFETCH_PAGES = 3;
 
 backendUrl.value = localStorage.getItem("webtoonLensBackend") || window.location.origin;
 webtoonUrl.value = localStorage.getItem("webtoonLensUrl") || "";
@@ -415,6 +414,7 @@ async function translateReaderImages() {
   try {
   const sessionId = contentSessionId;
   autoTranslateEnabled = true;
+  preloadTranslationPages();
   const pages = readerPagesForTranslation().filter((page) => pageNeedsTranslation(page)).slice(0, TRANSLATION_PAGES_PER_PASS);
   if (!pages.length) {
     if (showTranslationErrors()) return;
@@ -424,11 +424,18 @@ async function translateReaderImages() {
     }
     const running = document.querySelector(".reader-page[data-translation-state='running']");
     const dialogueCount = document.querySelectorAll(".dialogue-entry").length;
+    const allAnalyzed = Array.from(imageReader.querySelectorAll(".reader-page")).every(page =>
+      page.dataset.translationState === "done" || page.classList.contains("load-error"));
+    const coverageNotice = allAnalyzed
+      ? failedImages
+        ? "Les images accessibles ont été analysées ; certaines images n'ont pas pu être chargées."
+        : "Toutes les images ont été analysées."
+      : "Le chapitre continue en arrière-plan.";
     statusLine.textContent = running
       ? "Traduction en cours..."
       : dialogueCount
-        ? `${dialogueCount} dialogue(s) traduit(s). La traduction des zones non fiables est affichée sous l’image. La suite se traduit pendant la lecture.`
-        : "Aucun dialogue traduit ici pour le moment. Continuez à lire pour analyser la suite.";
+        ? `${dialogueCount} dialogue(s) traduit(s). La traduction des zones non fiables est affichée sous l’image. ${coverageNotice}`
+        : `Aucun texte reconnu pour le moment. ${coverageNotice}`;
     return;
   }
 
@@ -485,8 +492,10 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
       processedWindows += 1;
 
       if (ocr.length) {
-        page.__ocrSegments = mergeSegmentLists(page.__ocrSegments || [], ocr);
-        const freshSegments = newSegmentsForPage(page, ocr);
+        upgradeTranslatedRegions(page, ocr);
+        const coreSegments = ocr.filter(segment => segment.withinWindow);
+        page.__ocrSegments = mergeSegmentLists(page.__ocrSegments || [], coreSegments);
+        const freshSegments = newSegmentsForPage(page, coreSegments);
         if (freshSegments.length) {
           const contextSegments = contextForSegments(page.__ocrSegments);
 
@@ -617,10 +626,22 @@ function backgroundWindowCandidates(page) {
 }
 
 function pageEligibleForBackgroundTranslation(page) {
-  const pageIndex = Number(page.dataset.index || "0");
-  if (pageIndex < BACKGROUND_TRANSLATION_PAGE_LIMIT) return true;
-  const rect = page.getBoundingClientRect();
-  return rect.top <= window.innerHeight * BACKGROUND_TRANSLATION_VIEWPORTS;
+  return page.dataset.loaded === "true";
+}
+
+function preloadTranslationPages() {
+  const pending = Array.from(imageReader.querySelectorAll(".reader-page")).filter(page =>
+    !page.classList.contains("load-error") && !["done", "error"].includes(page.dataset.translationState));
+  let active = pending.filter(page =>
+    page.dataset.loaded === "true" || page.querySelector("img").loading === "eager").length;
+  for (const page of pending) {
+    if (active >= BACKGROUND_PREFETCH_PAGES) break;
+    const img = page.querySelector("img");
+    if (page.dataset.loaded !== "true" && img.loading !== "eager") {
+      img.loading = "eager";
+      active += 1;
+    }
+  }
 }
 
 function nextSequentialWindow(page) {
@@ -629,18 +650,18 @@ function nextSequentialWindow(page) {
 
   const merged = mergeWindows(page.__ocrWindows || []);
   const normalizedMaxHeight = clamp01(OCR_WINDOW_MAX_NATURAL_HEIGHT / Math.max(1, img.naturalHeight));
-  const minimumGap = Math.max(0.03, normalizedMaxHeight * 0.32);
+  const minimumGap = 0.5 / img.naturalHeight;
   let cursor = 0;
 
   for (const windowRange of merged) {
     if (windowRange.y - cursor > minimumGap) {
-      break;
+      return { y: cursor, height: Math.min(windowRange.y - cursor, normalizedMaxHeight) };
     }
     cursor = Math.max(cursor, windowRange.y + windowRange.height);
   }
 
-  if (cursor >= 0.985) return null;
-  const height = Math.min(1 - cursor, Math.max(0.08, normalizedMaxHeight));
+  if (1 - cursor <= minimumGap) return null;
+  const height = Math.min(1 - cursor, normalizedMaxHeight);
   return {
     y: clamp01(cursor),
     height: clamp01(height)
@@ -666,7 +687,7 @@ async function visibleImageCrop(page) {
 
   return {
     dataUrl: canvas.toDataURL("image/png"),
-    cacheKey: `${Math.round(cropWindow.y * 10000)}-${Math.round((cropWindow.y + cropWindow.height) * 10000)}`,
+    cacheKey: `${coreY}-${coreBottom}`,
     window: {
       y: coreY / img.naturalHeight,
       height: (coreBottom - coreY) / img.naturalHeight
@@ -695,40 +716,52 @@ function mapCropSegmentsToPage(segments, crop, page) {
       x: input.x, y: mapping.y + input.y * mapping.height,
       width: input.width, height: input.height * mapping.height
     } : undefined;
+    const raw = mapBox(segment.rawBoundingBox) || fullBox;
+    const center = raw.y + raw.height / 2;
     return {
       ...segment,
       id: `p${pageIndex}-${crop.cacheKey}-${segment.id || index}`,
       boundingBox: fullBox,
-      rawBoundingBox: mapBox(segment.rawBoundingBox) || fullBox,
+      rawBoundingBox: raw,
       textBox: mapBox(segment.textBox),
       imageWidth: crop.imageWidth,
       imageHeight: crop.imageHeight,
       readingOrder: Math.round(fullBox.y * 100000) + index,
-      cropWindow: crop.window
+      cropWindow: crop.window,
+      withinWindow: center >= crop.window.y && center <= crop.window.y + crop.window.height
     };
-  }).filter(segment => {
-    const raw = segment.rawBoundingBox;
-    const center = raw.y + raw.height / 2;
-    return center >= crop.window.y && center <= crop.window.y + crop.window.height;
   });
 }
 
 function mergeSegmentLists(existing, incoming) {
-  const bySignature = new Map();
-  for (const segment of [...existing, ...incoming]) {
-    bySignature.set(segmentSignature(segment), segment);
+  const merged = [...existing];
+  for (const segment of incoming) {
+    const index = merged.findIndex(previous => sameDialogue(previous, segment));
+    if (index >= 0) merged[index] = segment;
+    else merged.push(segment);
   }
-  return Array.from(bySignature.values()).sort((a, b) => Number(a.readingOrder || 0) - Number(b.readingOrder || 0));
+  return merged.sort((a, b) => Number(a.readingOrder || 0) - Number(b.readingOrder || 0));
 }
 
 function newSegmentsForPage(page, segments) {
-  page.__translatedSegmentSignatures ||= new Set();
-  return segments.filter((segment) => !page.__translatedSegmentSignatures.has(segmentSignature(segment)));
+  return mergeSegmentLists([], segments).filter(segment =>
+    !(page.__translatedSegments || []).some(previous => sameDialogue(previous, segment)));
 }
 
 function rememberTranslatedSegment(page, segment) {
-  page.__translatedSegmentSignatures ||= new Set();
-  page.__translatedSegmentSignatures.add(segmentSignature(segment));
+  page.__translatedSegments = mergeSegmentLists(page.__translatedSegments || [], [segment]);
+}
+
+function upgradeTranslatedRegions(page, segments) {
+  for (const segment of segments) {
+    const previous = (page.__translatedSegments || []).find(item => sameDialogue(item, segment));
+    if (!previous || segment.renderMode !== "replace" || !segment.maskData) continue;
+    const area = box => box ? box.width * box.height : 0;
+    if (previous.renderMode === "replace" && area(segment.textBox) <= area(previous.textBox) * 1.15) continue;
+    const upgraded = { ...segment, id: previous.id, translatedText: previous.translatedText };
+    renderSegmentIntoOverlay(page.querySelector(".overlay"), upgraded);
+    rememberTranslatedSegment(page, upgraded);
+  }
 }
 
 function rememberProcessedWindow(page, cropWindow) {
@@ -741,7 +774,8 @@ function visibleWindowAlreadyCovered(page, cropWindow) {
 }
 
 function pageFullyCovered(page) {
-  return coveredRatio({ y: 0, height: 1 }, page.__ocrWindows || []) > 0.94;
+  const height = page.querySelector("img")?.naturalHeight || 1;
+  return coveredRatio({ y: 0, height: 1 }, page.__ocrWindows || []) >= 1 - 0.5 / height;
 }
 
 function coveredRatio(target, windows) {
@@ -755,19 +789,19 @@ function coveredRatio(target, windows) {
     if (end > start) covered += end - start;
   }
 
-  return covered / Math.max(0.0001, target.height);
+  return target.height > 0 ? covered / target.height : 0;
 }
 
 function mergeWindows(windows) {
   const sorted = windows
-    .filter((windowRange) => windowRange && windowRange.height > 0.001)
+    .filter((windowRange) => windowRange && windowRange.height > 0)
     .map((windowRange) => ({ y: clamp01(windowRange.y), height: clamp01(windowRange.height) }))
     .sort((a, b) => a.y - b.y);
   const merged = [];
 
   for (const windowRange of sorted) {
     const last = merged[merged.length - 1];
-    if (!last || windowRange.y > last.y + last.height + 0.015) {
+    if (!last || windowRange.y > last.y + last.height + 1e-8) {
       merged.push({ ...windowRange });
       continue;
     }
@@ -778,18 +812,16 @@ function mergeWindows(windows) {
   return merged;
 }
 
-function segmentSignature(segment) {
-  const box = segment.boundingBox || {};
-  const source = String(segment.sourceText || segment.text || "")
+function dialogueText(segment) {
+  return String(segment.sourceText || segment.text || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+/g, "")
-    .slice(0, 90);
-  return [
-    source,
-    Math.round(Number(box.x || 0) * 40),
-    Math.round(Number(box.y || 0) * 200),
-    Math.round(Number(box.width || 0) * 30)
-  ].join(":");
+    .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+/g, "");
+}
+
+function sameDialogue(first, second) {
+  const a = first.rawBoundingBox || first.boundingBox;
+  const b = second.rawBoundingBox || second.boundingBox;
+  return Boolean(a && b && dialogueText(first) === dialogueText(second) && boxOverlapRatio(a, b) > 0.7);
 }
 
 function clamp01(value) {
@@ -807,7 +839,7 @@ function readerPagesForTranslation() {
   });
   const backgroundPages = pages.filter((page) => !visiblePages.includes(page) && pageEligibleForBackgroundTranslation(page));
 
-  return uniquePageList([...visiblePages, ...backgroundPages, ...pages.slice(0, BACKGROUND_TRANSLATION_PAGE_LIMIT)]);
+  return uniquePageList([...visiblePages, ...backgroundPages]);
 }
 
 function uniquePageList(pages) {
@@ -980,7 +1012,7 @@ function restartTranslation() {
     page.dataset.translationState = "idle";
     delete page.dataset.translationError;
     page.__ocrWindows = [];
-    page.__translatedSegmentSignatures = new Set();
+    page.__translatedSegments = [];
     page.__ocrSegments = [];
     page.__previousTranslations = [];
     window.WebtoonLayout.clear(page.querySelector(".overlay"));
@@ -1015,10 +1047,10 @@ function boxOverlapRatio(a, b) {
   const overlapHeight = Math.max(0, Math.min(ay2, by2) - Math.max(Number(a.y || 0), Number(b.y || 0)));
   const overlap = overlapWidth * overlapHeight;
   const smallestArea = Math.min(
-    Math.max(0.0001, Number(a.width || 0) * Number(a.height || 0)),
-    Math.max(0.0001, Number(b.width || 0) * Number(b.height || 0))
+    Math.max(0, Number(a.width || 0) * Number(a.height || 0)),
+    Math.max(0, Number(b.width || 0) * Number(b.height || 0))
   );
-  return overlap / smallestArea;
+  return smallestArea > 0 ? overlap / smallestArea : 0;
 }
 
 function guessBubbleShape(box) {

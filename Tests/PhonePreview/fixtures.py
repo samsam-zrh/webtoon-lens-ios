@@ -126,6 +126,15 @@ def create(directory: Path):
             y += 43
     colored.save(directory / "colored.png")
     interiors.save(directory / "colored-interiors.png")
+    thin = Image.new("RGB", (800, 800), "white")
+    draw = ImageDraw.Draw(thin)
+    draw.rectangle((0, 320, 799, 799), fill="#384e5a")
+    draw.ellipse((90, 100, 710, 460), fill="white", outline="black", width=2)
+    typeface = font("en", 40)
+    for index, text in enumerate(("WAIT!", "WE STILL HAVE TIME", "TO REACH THE SCHOOL!")):
+        draw.text((400-draw.textlength(text, font=typeface)/2, 170+index*58),
+                  text, fill="black", font=typeface)
+    thin.save(directory / "thin-white.png")
 
 
 if __name__ == "__main__":

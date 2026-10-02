@@ -32,7 +32,7 @@ from local_translation import translate as translate_locally, check_model
 
 ROOT = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("WEBTOON_LENS_CACHE", Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "WebtoonLens" / "cache"))
-OCR_CACHE_VERSION = "ocr-vision-color-v5"
+OCR_CACHE_VERSION = "ocr-vision-contours-v8"
 TRANSLATION_CACHE_VERSION = "translation-v5"
 OCR_MEMORY_CACHE: dict[str, list[dict[str, Any]]] = {}
 TRANSLATION_MEMORY_CACHE: dict[str, dict[str, str]] = {}
