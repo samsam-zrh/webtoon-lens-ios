@@ -1,5 +1,6 @@
 """Images originales de validation, sans extrait de webtoon publié."""
 from pathlib import Path
+import math
 import os
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,6 +13,13 @@ CHINESE = [
     "师兄，突破金丹境后，我们就能加入宗门。",
     "你的灵气已经耗尽了！",
     "明天放学后，我们一起去吃饭吧。",
+]
+COLORED = [
+    ("#000000", "#ffffff", "en", "Wait for me! We must reach the school before the storm."),
+    ("#27365a", "#ffffff", "zh", CHINESE[1]),
+    ("#ffd966", "#111111", "en", ENGLISH[0]),
+    ("#e1bbcf", "#111111", "en", ENGLISH[1]),
+    ("#a83c3c", "#ffffff", "zh", CHINESE[2]),
 ]
 
 
@@ -93,6 +101,31 @@ def create(directory: Path):
         for number, line in enumerate(lines_for(draw, text, typeface, 670, "en")):
             draw.text((60, 80 + index * 145 + number * 40), line, font=typeface, fill="white")
     announcement.save(directory / "announcement.png")
+    colored = Image.new("RGB", (800, 2040), "#384e5a")
+    draw = ImageDraw.Draw(colored)
+    interiors = Image.new("L", colored.size, 0)
+    interior_draw = ImageDraw.Draw(interiors)
+    for index, (fill, ink, language, dialogue) in enumerate(COLORED):
+        top = 80+index*390
+        if index == 0:
+            points = []
+            for point in range(96):
+                angle = point*math.tau/96
+                scale = 1 if point % 2 else 1.12
+                points.append((400+290*scale*math.cos(angle), top+145+135*scale*math.sin(angle)))
+            draw.polygon(points, fill=fill)
+            interior_draw.polygon(points, fill=255)
+        else:
+            draw.ellipse((90, top, 710, top+290), fill=fill, outline="#151515", width=5)
+            interior_draw.ellipse((90, top, 710, top+290), fill=255)
+        typeface = font(language, 31)
+        lines = lines_for(draw, dialogue, typeface, 440, language)
+        y = top+145-len(lines)*43/2
+        for line in lines:
+            draw.text((400-draw.textlength(line, font=typeface)/2, y), line, fill=ink, font=typeface)
+            y += 43
+    colored.save(directory / "colored.png")
+    interiors.save(directory / "colored-interiors.png")
 
 
 if __name__ == "__main__":

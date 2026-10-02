@@ -1,12 +1,15 @@
 """OCR + modèle réels via HTTP ; conserve les réponses et mesures de ce Mac."""
 import base64
+import io
 import json
 from pathlib import Path
 import sys
 import time
 import urllib.request
+import numpy as np
+from PIL import Image
 
-from fixtures import create
+from fixtures import create, COLORED
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".runtime/evidence")
 URL = "http://127.0.0.1:8787"
@@ -48,6 +51,22 @@ def run():
             results[f"{language}-{mode}"] = dict(ocrFirstSeconds=first_s, ocrRepeatSeconds=repeat_s,
                 translationFirstSeconds=translate_s, translationRepeatSeconds=cached_s,
                 ocr=first, translation=translations)
+    data = base64.b64encode((ROOT / "fixtures/colored.png").read_bytes()).decode()
+    colored, seconds = post("/v1/webtoon/ocr", dict(imageData=data, language="auto"))
+    assert len(colored["segments"]) == len(COLORED), colored
+    truth = np.asarray(Image.open(ROOT / "fixtures/colored-interiors.png"))
+    for segment, (fill, ink, _, _) in zip(colored["segments"], COLORED):
+        assert segment["renderMode"] == "replace", segment
+        assert segment["style"]["fillColor"] == fill
+        assert segment["style"]["textColor"] == ink
+        mask = Image.open(io.BytesIO(base64.b64decode(segment["maskData"].split(",")[1])))
+        box = segment["boundingBox"]
+        x, y = round(box["x"]*truth.shape[1]), round(box["y"]*truth.shape[0])
+        allowed = truth[y:y+mask.height, x:x+mask.width]
+        alpha = np.asarray(mask.getchannel("A"))
+        assert alpha.shape == allowed.shape
+        assert not np.any((alpha > 0) & (allowed == 0)), "Masque hors de la forme originale"
+    results["colored"] = dict(ocrFirstSeconds=seconds, originalShapesPreserved=True, ocr=colored)
     payload = dict(segments=[dict(id="custom", text="Azure Moon is waiting for you.")], targetLanguage="fr",
                    glossary=[dict(source="Azure Moon", translation="Lune d'azur", isLocked=True)])
     before, _ = post("/v1/webtoon/translate", payload)

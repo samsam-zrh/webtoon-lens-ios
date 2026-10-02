@@ -9,8 +9,8 @@ import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from playwright.sync_api import sync_playwright
-from fixtures import create
-from PIL import Image, ImageChops, ImageFilter
+from fixtures import create, COLORED
+from PIL import Image, ImageChops, ImageFilter, ImageColor
 import numpy as np
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".runtime/evidence").resolve()
@@ -142,6 +142,30 @@ def run():
         page.locator(".reader-page img").evaluate("el => scrollTo(0, el.getBoundingClientRect().top + scrollY + el.height * .8)")
         page.wait_for_function("document.querySelector('.dialogue-list')?.textContent.includes('Page 7')", timeout=180000)
         measurements["tall"] = fit_assertions(page)
+        # Noir hérissé, bleu, jaune, rose et rouge : OCR et peinture réels EN/ZH.
+        page.locator("#imageInput").set_input_files(str(ROOT / "fixtures/colored.png"))
+        wait_ready(page, 2)
+        page.locator(".reader-page img").evaluate(
+            "el => scrollTo(0, el.getBoundingClientRect().top + scrollY + el.height * .8)")
+        wait_ready(page, len(COLORED))
+        color_mobile = fit_assertions(page)
+        assert color_mobile == dict(adjusted=len(COLORED), preserved=0), color_mobile
+        styles = page.locator('.bubble[data-fit="true"]').evaluate_all("""elements => elements.map(b => ({
+          fill: getComputedStyle(b.querySelector('.bubble-fill')).backgroundColor,
+          ink: getComputedStyle(b.querySelector('.bubble-text')).color
+        }))""")
+        rgb = lambda color: "rgb(%d, %d, %d)" % ImageColor.getrgb(color)
+        assert styles == [dict(fill=rgb(fill), ink=rgb(ink)) for fill, ink, _, _ in COLORED], styles
+        color_painting = paint_assertions(page)
+        page.screenshot(path=str(ROOT / "colored-mobile.png"), full_page=True)
+        page.set_viewport_size({"width": 1280, "height": 1000})
+        page.wait_for_timeout(350)
+        color_desktop = fit_assertions(page)
+        assert color_desktop == dict(adjusted=len(COLORED), preserved=0), color_desktop
+        page.screenshot(path=str(ROOT / "colored-desktop.png"), full_page=True)
+        measurements["colored"] = dict(mobile=color_mobile, desktop=color_desktop,
+                                       painting=color_painting, styles=styles)
+        page.set_viewport_size({"width": 390, "height": 844})
         # Navigation : ne devine pas à partir d'un identifiant aléatoire.
         page.locator("#webtoonUrl").fill("https://example.org/series-123/")
         page.locator("#webtoonUrl").dispatch_event("input")

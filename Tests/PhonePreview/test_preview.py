@@ -15,7 +15,8 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PhonePreview"))
 from PIL import Image, ImageDraw
-from bubble_geometry import fit_dialogue
+from bubble_geometry import fit_dialogue, text_color
+import numpy as np
 from glossary import entries, protect, restore
 from local_translation import generate_dialogue, parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement
 import server
@@ -188,10 +189,10 @@ class ModelTests(unittest.TestCase):
 
 
 class GeometryTests(unittest.TestCase):
-    def image(self, white_background=False):
-        image = Image.new("RGB", (400, 300), "white" if white_background else "#345566")
+    def image(self, white_background=False, color="white"):
+        image = Image.new("RGB", (400, 300), color if white_background else "#345566")
         if not white_background:
-            ImageDraw.Draw(image).ellipse((40, 30, 360, 270), fill="white", outline="black", width=4)
+            ImageDraw.Draw(image).ellipse((40, 30, 360, 270), fill=color, outline="black", width=4)
         data = io.BytesIO()
         image.save(data, format="PNG")
         return data.getvalue()
@@ -220,6 +221,96 @@ class GeometryTests(unittest.TestCase):
     def test_unverified_preserves_art(self):
         results = fit_dialogue(self.image(True), self.lines())
         self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
+
+    def test_dark_and_colored_interiors(self):
+        for color, ink in (("#000000", "#ffffff"), ("#27365a", "#ffffff"),
+                           ("#ffd966", "#111111"), ("#d98fa6", "#111111"), ("#e1bbcf", "#111111"),
+                           ("#68c4b0", "#111111"), ("#b45555", "#ffffff"),
+                           ("#777777", "#000000")):
+            with self.subTest(color=color):
+                result = fit_dialogue(self.image(color=color), self.lines())
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]["renderMode"], "replace")
+                self.assertEqual(result[0]["style"]["fillColor"], color)
+                self.assertEqual(result[0]["style"]["textColor"], ink)
+                mask = Image.open(io.BytesIO(base64.b64decode(result[0]["maskData"].split(",")[1])))
+                self.assertEqual(mask.mode, "RGBA")
+                self.assertEqual(mask.getpixel((0, 0))[3], 0)
+                self.assertEqual(mask.getpixel((mask.width//2, mask.height//2))[3], 255)
+
+    def test_open_colored_background_preserved(self):
+        for color in ("#000000", "#27365a", "#ffd966"):
+            with self.subTest(color=color):
+                results = fit_dialogue(self.image(True, color=color), self.lines())
+                self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
+
+    def test_colored_art_holes_not_filled(self):
+        image = Image.open(io.BytesIO(self.image(color="#000000")))
+        ImageDraw.Draw(image).rectangle((175, 200, 225, 220), fill="#ff5555")
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        result = fit_dialogue(data.getvalue(), self.lines())[0]
+        self.assertEqual(result["renderMode"], "replace")
+        mask = Image.open(io.BytesIO(base64.b64decode(result["maskData"].split(",")[1])))
+        x, y = round(result["boundingBox"]["x"]*400), round(result["boundingBox"]["y"]*300)
+        self.assertEqual(mask.getpixel((200-x, 210-y))[3], 0)
+
+    def test_nearby_punctuation_in_mask(self):
+        image = Image.open(io.BytesIO(self.image(color="#000000")))
+        ImageDraw.Draw(image).ellipse((197, 185, 204, 192), outline="white", width=2)
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        result = fit_dialogue(data.getvalue(), self.lines())[0]
+        self.assertEqual(result["renderMode"], "replace")
+        mask = Image.open(io.BytesIO(base64.b64decode(result["maskData"].split(",")[1])))
+        x, y = round(result["boundingBox"]["x"]*400), round(result["boundingBox"]["y"]*300)
+        self.assertEqual(mask.getpixel((200-x, 188-y))[3], 255)
+        self.assertGreater(result["textBox"]["height"]*300, 80)
+
+    def test_text_contrast_floor(self):
+        def luminance(rgb):
+            values = [value/255 for value in rgb]
+            linear = [value/12.92 if value <= .04045 else ((value+.055)/1.055)**2.4 for value in values]
+            return sum(value*weight for value, weight in zip(linear, (.2126, .7152, .0722)))
+        colors = [(value, value, value) for value in range(256)]
+        colors += [(4, 130, 197), (4.5, 130.5, 197.5)]
+        for rgb in colors:
+            fill = np.array(rgb[::-1], dtype=float)
+            ink = text_color(fill)
+            foreground = luminance([int(ink[i:i+2], 16) for i in (1, 3, 5)])
+            background = luminance([int(value) for value in rgb])
+            ratio = (max(foreground, background)+.05)/(min(foreground, background)+.05)
+            with self.subTest(rgb=rgb):
+                self.assertGreaterEqual(ratio, 4.5)
+
+    def test_textured_text_area_preserved(self):
+        image = Image.open(io.BytesIO(self.image(color="#000000")))
+        ImageDraw.Draw(image).rectangle((185, 100, 205, 190), fill="#cc5544")
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        results = fit_dialogue(data.getvalue(), self.lines())
+        self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
+
+    def test_large_gradient_preserved(self):
+        image = Image.new("RGB", (400, 300), "#345566")
+        shape = Image.new("L", image.size, 0)
+        ImageDraw.Draw(shape).ellipse((40, 30, 360, 270), fill=255)
+        ramp = np.tile(np.linspace(0, 220, 400, dtype=np.uint8), (300, 1))
+        gradient = Image.fromarray(np.stack((ramp, ramp, ramp), axis=2))
+        image.paste(gradient, (0, 0), shape)
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        results = fit_dialogue(data.getvalue(), self.lines())
+        self.assertTrue(all(r["renderMode"] == "inspect" and "maskData" not in r for r in results))
+
+    def test_single_clipped_edge_has_safe_interior(self):
+        image = Image.new("RGB", (400, 300), "#345566")
+        ImageDraw.Draw(image).ellipse((40, 30, 360, 340), fill="black")
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        result = fit_dialogue(data.getvalue(), self.lines())
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["renderMode"], "replace")
 
     def test_invalid_image(self):
         with self.assertRaises(ValueError):
