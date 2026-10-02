@@ -30,7 +30,7 @@ def run():
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(URL)
-        page.wait_for_function("document.getElementById('capabilityLine').textContent.includes('Qwen')")
+        page.wait_for_function("document.getElementById('capabilityLine').dataset.ready === 'true'")
         for name, count in (("joined", 2), ("joined-clipped", 2), ("styled", 1), ("tail", 4)):
             page.set_viewport_size({"width": 1280, "height": 1000})
             page.evaluate("scrollTo(0, 0)")
@@ -86,13 +86,13 @@ def run():
         assert page.locator(".dialogue-entry").count() == 2
         assert page.locator(".dialogue-error").count() == 1
         assert "Échec contrôlé" in page.locator(".dialogue-error").text_content()
-        assert "bulle(s)" in page.locator("#statusLine").text_content()
+        assert "en erreur" in page.locator("#statusLine").text_content()
         requests_before = len(calls)
         page.wait_for_timeout(600)
         assert len(calls) == requests_before, "Pas de boucle de retry"
         page.evaluate("window.savedGoodDialogues = [...document.querySelectorAll('.dialogue-entry')]")
         should_fail = False
-        page.locator("#retryButton").click()
+        page.locator("[data-page-retry]").click()
         done(page, 3)
         assert page.locator(".dialogue-error").count() == 0
         assert page.evaluate("savedGoodDialogues.every(el => el.isConnected)")

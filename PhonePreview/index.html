@@ -3,67 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#f4f6f5">
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <title>Webtoon Lens · Lecteur local</title>
 </head>
 <body>
+  <a class="skip-link" href="#stage">Aller à la lecture</a>
   <main class="app-shell">
     <section class="workspace" aria-label="Lecteur Webtoon Lens">
-      <header class="hero-block">
-        <div class="hero-row">
-          <div class="hero-copy">
-            <h1>Webtoon Lens</h1>
-            <p>Vos webtoons en français, sur votre Mac. Importez des pages ou ouvrez un chapitre : la traduction reste locale.</p>
+      <header class="reader-header">
+        <div class="brand-row">
+          <div class="brand">
+            <svg class="brand-symbol" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+              <path d="M11 9h15a2 2 0 0 1 2 2v21H13a4 4 0 0 1-4-4V11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M9 27h19M14 9v18M19 14h5M19 18h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <div>
+              <h1>Webtoon <span>Lens</span></h1>
+              <p>Vos pages en français. Sur votre Mac.</p>
+            </div>
           </div>
-          <p id="capabilityLine" class="capability-pill" role="status">Vérification du moteur local…</p>
+          <p id="capabilityLine" class="engine-state" role="status" data-state="pending">Connexion locale…</p>
+        </div>
+
+        <div class="source-actions">
+          <div class="url-loader">
+            <label class="url-field">
+              <span class="sr-only">Lien du chapitre</span>
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="m10 13 4-4m-6 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 1 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+              <input id="webtoonUrl" type="url" inputmode="url" spellcheck="false" autocomplete="off" placeholder="Collez le lien d’un chapitre…" aria-describedby="chapterErrorMessage">
+            </label>
+            <button id="openUrlButton" type="button">Ouvrir</button>
+          </div>
+          <label class="file-button" title="PNG, JPEG ou WebP · 20 Mo par page">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 16V4m-4 4 4-4 4 4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Importer des pages
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="importHint" multiple>
+          </label>
+        </div>
+        <p id="importHint" class="sr-only">PNG, JPEG ou WebP. Plusieurs pages dans l’ordre choisi, 20 Mo par page.</p>
+
+        <div id="chapterError" class="chapter-error" role="alert" hidden>
+          <p id="chapterErrorMessage"></p>
+          <div class="chapter-error-actions">
+            <a id="openSourceLink" class="ghost-button" target="_blank" rel="noopener noreferrer" hidden>Ouvrir le site</a>
+            <button id="importAfterError" class="ghost-button" type="button">Importer des pages</button>
+          </div>
         </div>
       </header>
 
-      <div class="url-loader">
-        <label class="url-field">
-          Lien du chapitre
-          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/chapitre-12/" aria-describedby="chapterErrorMessage">
-        </label>
-        <button id="openUrlButton" type="button">Ouvrir</button>
-      </div>
-      <div id="chapterError" class="chapter-error" role="alert" hidden>
-        <p id="chapterErrorMessage"></p>
-        <div class="chapter-error-actions">
-          <a id="openSourceLink" class="ghost-button" target="_blank" rel="noopener noreferrer" hidden>Ouvrir le site</a>
-          <button id="importAfterError" class="ghost-button" type="button">Importer des pages</button>
+      <div class="reading-bar" role="group" aria-label="Commandes de lecture">
+        <nav class="chapter-nav" aria-label="Navigation du chapitre">
+          <button id="prevChapterButton" type="button" class="nav-button" aria-label="Chapitre précédent" disabled>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Précédent</span>
+          </button>
+          <p id="chapterHint" class="chapter-title">Votre lecture</p>
+          <button id="nextChapterButton" type="button" class="nav-button" aria-label="Chapitre suivant" disabled>
+            <span>Suivant</span>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m10 6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </nav>
+        <div class="reader-options">
+          <label class="language-control">
+            <span class="sr-only">Langue des pages</span>
+            <select id="ocrLanguage">
+              <option value="auto">Langue auto</option>
+              <option value="ja">Japonais</option>
+              <option value="ko">Coréen</option>
+              <option value="zh">Chinois</option>
+              <option value="en">Anglais</option>
+            </select>
+            <svg class="icon select-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </label>
+          <label class="toggle-control"><input id="showOriginal" type="checkbox"> Voir l’original</label>
         </div>
       </div>
-      <div class="import-row">
-        <label class="file-button">Importer des pages
-          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple>
-        </label>
-        <p>PNG, JPEG ou WebP · plusieurs pages, dans l’ordre choisi · 20 Mo par page.</p>
-      </div>
 
-      <div class="chapter-nav" aria-label="Navigation chapitre">
-        <button id="prevChapterButton" type="button" class="ghost-button" disabled>Chapitre précédent</button>
-        <p id="chapterHint" class="status-line">Colle un lien de chapitre pour activer la navigation rapide.</p>
-        <button id="nextChapterButton" type="button" class="ghost-button" disabled>Chapitre suivant</button>
-      </div>
-
-      <div class="quick-controls">
-        <label class="compact-field">
-          Langue des pages
-          <select id="ocrLanguage">
-            <option value="auto">Détection automatique</option>
-            <option value="ja">Japonais</option>
-            <option value="ko">Coréen</option>
-            <option value="zh">Chinois</option>
-            <option value="en">Anglais</option>
-          </select>
-        </label>
-        <label class="toggle-control"><input id="showOriginal" type="checkbox"> Voir l’original</label>
-        <button id="retryButton" class="ghost-button" type="button">Relancer la traduction</button>
-      </div>
-
-      <details class="advanced-panel glossary-panel">
+      <div class="internal-tools" hidden inert>
+      <details class="glossary-panel">
         <summary>Glossaire de la série <span id="glossaryCount"></span></summary>
         <div class="panel-content">
           <p>Lexique de départ pour cultivation, arts martiaux, fantasy, jeux, romance et école. Les noms propres varient : vos corrections sont prioritaires et restent dans ce navigateur.</p>
@@ -78,25 +102,32 @@
           <div id="glossaryResults" class="glossary-results"></div>
         </div>
       </details>
-      <details class="advanced-panel">
+      <details>
         <summary>Réglages avancés</summary>
         <label>
           Serveur local OCR / IA
           <input id="backendUrl" type="url" placeholder="http://127.0.0.1:8787">
         </label>
       </details>
+      </div>
 
       <div class="meta-strip">
-        <p id="statusLine" class="status-line primary-status" role="status" aria-live="polite">Importez des pages ou collez un lien de chapitre.</p>
+        <p id="statusLine" class="status-line primary-status" role="status" aria-live="polite" data-state="idle">La traduction démarre automatiquement.</p>
         <p id="readerSummary" class="status-line"></p>
       </div>
 
-      <div class="stage" id="stage">
+      <div class="stage" id="stage" tabindex="-1" aria-label="Pages du chapitre">
         <div id="imageReader" class="image-reader"></div>
-        <img id="previewImage" alt="Capture webtoon importee">
+        <img id="previewImage" alt="Page de webtoon importée">
         <div id="emptyState" class="empty-state">
-          <strong>Un chapitre à lire ?</strong>
-          <span>Importez vos pages anglaises ou chinoises, ou collez un lien. Les premiers dialogues seront traduits pendant le chargement de la suite.</span>
+          <svg class="empty-illustration" viewBox="0 0 120 96" fill="none" aria-hidden="true">
+            <path d="M18 18h32a10 10 0 0 1 10 10v51a17 17 0 0 0-13-5H18V18Zm84 0H70a10 10 0 0 0-10 10v51a17 17 0 0 1 13-5h29V18Z" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M28 33h20m-20 10h15m29-10h20m-20 10h15" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M78 57h19m-5-5 5 5-5 5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <strong>Vos webtoons, en français.</strong>
+          <span>Ouvrez un chapitre ou importez vos pages.<br>Commencez à lire, la suite se traduit en arrière-plan.</span>
+          <small>PNG, JPEG, WebP · 20 Mo par page · traduction locale</small>
         </div>
         <div id="overlay" class="overlay" aria-live="polite"></div>
       </div>

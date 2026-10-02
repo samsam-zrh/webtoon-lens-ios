@@ -1,4 +1,4 @@
-const CACHE_NAME = "webtoon-lens-preview-v26";
+const CACHE_NAME = "webtoon-lens-preview-v30";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,7 +6,8 @@ const ASSETS = [
   "./app.js",
   "./layout.js",
   "./glossary-ui.js",
-  "./manifest.webmanifest"
+  "./manifest.webmanifest",
+  "./favicon.svg"
 ];
 
 self.addEventListener("install", (event) => {

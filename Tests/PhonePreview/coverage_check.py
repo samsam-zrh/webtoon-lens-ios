@@ -19,7 +19,7 @@ def run():
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(URL)
-        page.wait_for_function("document.getElementById('capabilityLine').textContent.includes('Qwen')")
+        page.wait_for_function("document.getElementById('capabilityLine').dataset.ready === 'true'")
         page.evaluate("""() => {
           const check = (condition, message) => { if (!condition) throw new Error(message); };
           const fake = windows => ({

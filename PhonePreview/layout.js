@@ -165,9 +165,16 @@ window.WebtoonLayout = (() => {
     target.__layouts ||= new Map();
     target.__layouts.set(segment.id, update);
     if (!observers.has(target)) {
-      const observer = new ResizeObserver(() => target.__layouts.forEach(fn => fn()));
-      observer.observe(target);
-      observers.set(target, observer);
+      const state = { observer: null, frame: 0 };
+      state.observer = new ResizeObserver(() => {
+        if (state.frame) return;
+        state.frame = requestAnimationFrame(() => {
+          state.frame = 0;
+          target.__layouts.forEach(fn => fn());
+        });
+      });
+      state.observer.observe(target);
+      observers.set(target, state);
     }
     update();
     if (bubble.dataset.fit === "false") details.open = true;
@@ -175,7 +182,9 @@ window.WebtoonLayout = (() => {
   }
 
   function clear(target) {
-    observers.get(target)?.disconnect();
+    const state = observers.get(target);
+    state?.observer.disconnect();
+    if (state?.frame) cancelAnimationFrame(state.frame);
     observers.delete(target);
     target.__layouts = new Map();
     target.innerHTML = "";

@@ -66,7 +66,7 @@ def run():
         page.evaluate("window.savedTranslationEntries = [...document.querySelectorAll('.dialogue-entry')]")
         second_page_calls = calls["p1"]
         fail_first_page = False
-        page.locator("#retryButton").click()
+        page.locator("[data-page-retry]").click()
         assert page.evaluate("savedTranslationEntries.every(el => el.isConnected)")
         wait_ready(page, 6)
         assert page.locator('.reader-page[data-translation-state="error"]').count() == 0

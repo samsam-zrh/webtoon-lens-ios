@@ -38,13 +38,30 @@ def fit_assertions(page):
 def wait_ready(page, count, timeout=180000):
     page.wait_for_function(
         """count => document.querySelectorAll('.dialogue-entry').length >= count &&
-        !document.querySelector('.reader-page[data-translation-state="running"]')""", arg=count, timeout=timeout)
+        [...document.querySelectorAll('.reader-page')].every(page =>
+          ['done','partial','error'].includes(page.dataset.translationState) ||
+          page.classList.contains('load-error'))""", arg=count, timeout=timeout)
     page.wait_for_timeout(250)
 
 
 def paint_assertions(page):
+    toolbar = page.locator(".reading-bar")
+    if not toolbar.count():
+        return image_paint_assertions(page)
+    original = toolbar.evaluate("el => el.style.position")
+    toolbar.evaluate("el => el.style.position = 'static'")
+    try:
+        return image_paint_assertions(page)
+    finally:
+        toolbar.evaluate("(el, position) => el.style.position = position", original)
+
+
+def image_paint_assertions(page):
     image = page.locator(".reader-page img").first
-    translated = Image.open(io.BytesIO(image.screenshot())).convert("RGB")
+    def screenshot():
+        image.evaluate("el => scrollTo(0, Math.round(el.getBoundingClientRect().top + scrollY))")
+        return Image.open(io.BytesIO(image.screenshot())).convert("RGB")
+    translated = screenshot()
     masks = page.locator(".reader-page").first.evaluate("""el => {
       const image = el.querySelector('img').getBoundingClientRect();
       return [...el.querySelectorAll('.bubble[data-fit="true"]')].map(b => {
@@ -55,7 +72,7 @@ def paint_assertions(page):
       });
     }""")
     page.locator("#showOriginal").check()
-    original = Image.open(io.BytesIO(image.screenshot())).convert("RGB")
+    original = screenshot()
     page.locator("#showOriginal").uncheck()
     allowed = Image.new("L", translated.size, 0)
     for mask in masks:
@@ -82,7 +99,7 @@ def run():
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(URL)
-        page.wait_for_function("document.getElementById('capabilityLine').textContent.includes('Qwen')")
+        page.wait_for_function("document.getElementById('capabilityLine').dataset.ready === 'true'")
         assert page.locator("#emptyState").is_visible()
         assert page.locator("#imageInput").count() == 1
         page.screenshot(path=str(ROOT / "desktop-empty.png"), full_page=True)
@@ -121,16 +138,18 @@ def run():
         assert page.locator('.bubble[data-segment-id="long-test"]').get_attribute("data-fit") == "false"
         assert "Original conservé" in page.locator('.dialogue-entry[data-segment-id="long-test"]').text_content()
         # Correction persistée et effectivement appliquée à un dialogue réel.
-        page.locator(".glossary-panel summary").click()
-        page.locator("#termSource").fill("Golden Core realm")
-        page.locator("#termFrench").fill("Royaume doré")
-        page.locator("#glossaryForm button").click()
+        assert page.locator(".glossary-panel").is_hidden()
+        page.evaluate("""() => {
+          document.getElementById('termSource').value = 'Golden Core realm';
+          document.getElementById('termFrench').value = 'Royaume doré';
+          document.getElementById('glossaryForm').requestSubmit();
+        }""")
         page.wait_for_function("document.querySelector('.dialogue-list')?.textContent.includes('Royaume doré')", timeout=180000)
         wait_ready(page, 6)
         assert "Royaume doré" in page.locator("#glossaryOverrides").inner_text()
         page.reload()
-        page.locator(".glossary-panel summary").click()
-        assert "Royaume doré" in page.locator("#glossaryOverrides").inner_text()
+        assert page.locator(".glossary-panel").is_hidden()
+        assert page.evaluate("WebtoonGlossary.terms().some(term => term.translation === 'Royaume doré')")
         # Petite image, texte sur l'illustration : alternative explicite.
         page.locator("#imageInput").set_input_files(str(ROOT / "fixtures/small.png"))
         wait_ready(page, 2)
@@ -210,10 +229,12 @@ def run():
             route.fulfill(status=503, json={"error": "OCR indisponible pour ce test."})
         page.route("**/v1/webtoon/ocr", ocr_error)
         page.locator("#imageInput").set_input_files(str(ROOT / "fixtures/en.png"))
-        page.wait_for_function("document.getElementById('statusLine').textContent.includes('OCR indisponible')")
+        page.wait_for_function("document.getElementById('statusLine').textContent.includes('en erreur')")
+        assert "OCR indisponible" in page.locator(".ocr-notice").text_content()
         page.wait_for_timeout(700)
         assert len(failed_requests) == 1, "Boucle de relance sur erreur"
-        assert "Relancer" in page.locator("#statusLine").inner_text()
+        assert page.locator("[data-page-retry]").is_visible()
+        assert page.locator("#retryButton").count() == 0
         assert not errors, errors
         measurements["javascriptErrors"] = errors
         browser.close()

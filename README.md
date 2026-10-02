@@ -9,7 +9,7 @@ bash ci/Install-PhonePreview.sh
 bash ci/Start-PhonePreview.sh
 ```
 
-Ouvrez **http://127.0.0.1:8787**. Import de pages anglaises/chinoises ou URL de chapitre, OCR Apple Vision, Qwen 4B **Instruct** local, glossaire de 188 concepts et corrections par série. Les traductions sont ajustées dans les intérieurs de bulles détectés ; les zones non fiables gardent leur original avec une traduction lisible séparément.
+Ouvrez **http://127.0.0.1:8787**. Import de pages anglaises/chinoises ou URL de chapitre, OCR Apple Vision et Qwen 4B **Instruct** local. L’interface compacte démarre la traduction automatiquement, conserve les commandes de lecture pendant le défilement et masque les réglages techniques. Le glossaire de 188 concepts et les corrections déjà enregistrées restent actifs en arrière-plan. Les traductions sont ajustées dans les intérieurs de bulles détectés ; les zones non fiables gardent leur original avec une traduction lisible séparément.
 
 Installation, limites du rendu, confidentialité, réseau et tests : **[guide du lecteur macOS](PhonePreview/README.md)**. Les modèles et le serveur s’exécutent sur votre ordinateur, pas sur GitHub Pages.
 
