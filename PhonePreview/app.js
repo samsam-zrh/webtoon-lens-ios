@@ -425,7 +425,7 @@ async function translateReaderImages() {
     const running = document.querySelector(".reader-page[data-translation-state='running']");
     const dialogueCount = document.querySelectorAll(".dialogue-entry").length;
     const allAnalyzed = Array.from(imageReader.querySelectorAll(".reader-page")).every(page =>
-      page.dataset.translationState === "done" || page.classList.contains("load-error"));
+      ["done", "partial"].includes(page.dataset.translationState) || page.classList.contains("load-error"));
     const coverageNotice = allAnalyzed
       ? failedImages
         ? "Les images accessibles ont été analysées ; certaines images n'ont pas pu être chargées."
@@ -466,7 +466,8 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
   if (isStaleSession(sessionId) || !page.isConnected) return false;
 
   let crop = await visibleImageCrop(page);
-  if (!crop || visibleWindowAlreadyCovered(page, crop.window)) return false;
+  const retries = page.__retrySegments || [];
+  if ((!crop || visibleWindowAlreadyCovered(page, crop.window)) && !retries.length) return false;
 
   page.dataset.translationState = "running";
   showOverlayNotice(pageOverlay, `OCR zone ${Number(page.dataset.index || "0") + 1}...`);
@@ -476,6 +477,27 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
     const previousTranslations = page.__previousTranslations || [];
     let translatedCount = 0;
     let processedWindows = 0;
+    const consumeBatch = async batch => {
+      const result = await translateBatchWithFailures(batch, readerContextForPage(page), previousTranslations);
+      if (isStaleSession(sessionId) || !page.isConnected) return;
+      for (const segment of result.translated) {
+        renderSegmentIntoOverlay(pageOverlay, segment);
+        rememberTranslatedSegment(page, segment);
+        page.__failedSegments = (page.__failedSegments || []).filter(failed => !sameDialogue(failed, segment));
+        previousTranslations.push({source: segment.sourceText || "", translation: segment.translatedText || ""});
+        translatedCount += 1;
+      }
+      for (const segment of result.failed) {
+        page.__failedSegments = mergeSegmentLists(page.__failedSegments || [], [segment]);
+        WebtoonLayout.renderError(pageOverlay, segment, segment.translationError);
+      }
+      page.__previousTranslations = previousTranslations.slice(-14);
+    };
+    for (const segment of retries) {
+      if (isStaleSession(sessionId)) return false;
+      await consumeBatch([segment]);
+    }
+    page.__retrySegments = [];
 
     while (crop && processedWindows < OCR_WINDOWS_PER_PASS) {
       if (isStaleSession(sessionId) || !page.isConnected) return false;
@@ -497,27 +519,14 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
         page.__ocrSegments = mergeSegmentLists(page.__ocrSegments || [], coreSegments);
         const freshSegments = newSegmentsForPage(page, coreSegments);
         if (freshSegments.length) {
-          const contextSegments = contextForSegments(page.__ocrSegments);
-
           for (let segmentIndex = 0; segmentIndex < freshSegments.length;) {
             if (isStaleSession(sessionId) || !page.isConnected) return false;
             const batchSize = segmentIndex === 0 ? 1 : progressiveBatchSize(freshSegments.length - segmentIndex);
             const batch = freshSegments.slice(segmentIndex, segmentIndex + batchSize);
             const endIndex = segmentIndex + batch.length;
             statusLine.textContent = `Traduction bulle ${segmentIndex + 1}/${freshSegments.length} - image ${Number(page.dataset.index || "0") + 1}...`;
-            const translated = await translateSegments(batch, contextSegments, previousTranslations);
+            await consumeBatch(batch);
             if (isStaleSession(sessionId)) return false;
-
-            for (const segment of translated) {
-              renderSegmentIntoOverlay(pageOverlay, segment);
-              rememberTranslatedSegment(page, segment);
-              previousTranslations.push({
-                source: segment.sourceText || "",
-                translation: segment.translatedText || ""
-              });
-              translatedCount += 1;
-            }
-            page.__previousTranslations = previousTranslations.slice(-14);
             segmentIndex = endIndex;
           }
         }
@@ -529,10 +538,12 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
 
     if (isStaleSession(sessionId) || !page.isConnected) return false;
     page.__previousTranslations = previousTranslations.slice(-14);
-    if (!translatedCount && !pageOverlay.querySelector(".bubble")) {
+    if (!translatedCount && !pageOverlay.querySelector(".bubble") && !(page.__failedSegments || []).length) {
       showOverlayNotice(pageOverlay, "Aucun texte detecte ici");
     }
-    page.dataset.translationState = pageFullyCovered(page) ? "done" : "idle";
+    page.dataset.translationState = pageFullyCovered(page)
+      ? (page.__failedSegments || []).length ? "partial" : "done"
+      : "idle";
     return translatedCount > 0;
   } catch (error) {
     if (isStaleSession(sessionId)) return false;
@@ -548,17 +559,20 @@ async function translatePageProgressively(page, pageNumber, totalPages, sessionI
 
 function showTranslationErrors() {
   const failed = imageReader.querySelectorAll(".reader-page[data-translation-state='error']");
-  if (!failed.length) return false;
-  statusLine.textContent = `${failed.length} image(s) en erreur : ${failed[0].dataset.translationError}. Les autres pages continuent. « Relancer la traduction » réessaie les échecs sans effacer les traductions affichées.`;
+  const dialogues = Array.from(imageReader.querySelectorAll(".reader-page")).flatMap(page => page.__failedSegments || []);
+  if (!failed.length && !dialogues.length) return false;
+  const reason = dialogues[0]?.translationError || failed[0].dataset.translationError;
+  statusLine.textContent = `${dialogues.length} bulle(s) et ${failed.length} image(s) en erreur : ${reason}. Les autres dialogues et pages continuent. « Relancer la traduction » réessaie seulement les échecs, sans effacer les traductions affichées.`;
   return true;
 }
 
 function pageNeedsTranslation(page) {
-  if (page.dataset.loaded !== "true" || ["running", "done", "error"].includes(page.dataset.translationState)) {
+  if (page.dataset.loaded !== "true" || ["running", "done", "error", "partial"].includes(page.dataset.translationState)) {
     return false;
   }
 
-  return translationWindowCandidates(page).some((cropWindow) => !visibleWindowAlreadyCovered(page, cropWindow));
+  return Boolean(page.__retrySegments?.length) ||
+    translationWindowCandidates(page).some((cropWindow) => !visibleWindowAlreadyCovered(page, cropWindow));
 }
 
 function currentVisibleWindow(page) {
@@ -631,7 +645,7 @@ function pageEligibleForBackgroundTranslation(page) {
 
 function preloadTranslationPages() {
   const pending = Array.from(imageReader.querySelectorAll(".reader-page")).filter(page =>
-    !page.classList.contains("load-error") && !["done", "error"].includes(page.dataset.translationState));
+    !page.classList.contains("load-error") && !["done", "partial", "error"].includes(page.dataset.translationState));
   let active = pending.filter(page =>
     page.dataset.loaded === "true" || page.querySelector("img").loading === "eager").length;
   for (const page of pending) {
@@ -745,7 +759,8 @@ function mergeSegmentLists(existing, incoming) {
 
 function newSegmentsForPage(page, segments) {
   return mergeSegmentLists([], segments).filter(segment =>
-    !(page.__translatedSegments || []).some(previous => sameDialogue(previous, segment)));
+    ![...(page.__translatedSegments || []), ...(page.__failedSegments || [])]
+      .some(previous => sameDialogue(previous, segment)));
 }
 
 function rememberTranslatedSegment(page, segment) {
@@ -890,6 +905,7 @@ async function translateOverlayProgressively(targetOverlay, segments, label, ses
   const contextSegments = contextForSegments(segments);
   const previousTranslations = [];
   let translatedCount = 0;
+  let failedCount = 0;
 
   for (let index = 0; index < segments.length;) {
     if (isStaleSession(sessionId)) return;
@@ -897,9 +913,10 @@ async function translateOverlayProgressively(targetOverlay, segments, label, ses
     const batch = segments.slice(index, index + batchSize);
     const endIndex = index + batch.length;
     statusLine.textContent = `Traduction bulle ${index + 1}/${segments.length} - ${label}...`;
-    const translated = await translateSegments(batch, contextSegments, previousTranslations);
+    const result = await translateBatchWithFailures(batch, contextSegments, previousTranslations);
+    if (isStaleSession(sessionId)) return;
 
-    for (const segment of translated) {
+    for (const segment of result.translated) {
       renderSegmentIntoOverlay(targetOverlay, segment);
       previousTranslations.push({
         source: segment.sourceText || "",
@@ -907,11 +924,17 @@ async function translateOverlayProgressively(targetOverlay, segments, label, ses
       });
       translatedCount += 1;
     }
+    for (const segment of result.failed) {
+      WebtoonLayout.renderError(targetOverlay, segment, segment.translationError);
+      failedCount += 1;
+    }
     index = endIndex;
   }
 
   if (isStaleSession(sessionId)) return;
-  statusLine.textContent = translatedCount
+  statusLine.textContent = failedCount
+    ? `${translatedCount} dialogue(s) traduit(s), ${failedCount} en erreur. Les originaux et les erreurs sont affichés sous l’image.`
+    : translatedCount
     ? `OK: ${translatedCount} bulles traduites avec OCR local.`
     : "OCR termine, mais aucun texte lisible n'a ete traduit.";
 }
@@ -926,7 +949,7 @@ async function translateSegments(segments, contextSegments = [], previousTransla
     contextSegments,
     previousTranslations,
     segments: segments.map(segment => {
-      const { maskData, ...textOnly } = segment;
+      const { maskData, replacementData, ...textOnly } = segment;
       return textOnly;
     })
   });
@@ -936,12 +959,37 @@ async function translateSegments(segments, contextSegments = [], previousTransla
   return payload.segments.map(translated => ({ ...segments.find(source => source.id === translated.id), ...translated }));
 }
 
+async function translateBatchWithFailures(segments, contextSegments, previousTranslations) {
+  try {
+    return {translated: await translateSegments(segments, contextSegments, previousTranslations), failed: []};
+  } catch (error) {
+    if (error.code !== "dialogue_translation_failed") throw error;
+    const failed = segments.find(segment => segment.id === error.failedSegmentID);
+    if (!failed) throw error;
+    const remaining = segments.filter(segment => segment !== failed);
+    const result = remaining.length
+      ? await translateBatchWithFailures(remaining, contextSegments, previousTranslations)
+      : {translated: [], failed: []};
+    return {...result, failed: [...result.failed, {...failed, translationError: error.message}]};
+  }
+}
+
 function contextForSegments(segments) {
   return segments.map((segment, index) => ({
     id: segment.id || `segment-${index}`,
     order: Number(segment.readingOrder ?? index),
     text: segment.sourceText || segment.text || ""
   }));
+}
+
+function readerContextForPage(page) {
+  const pages = Array.from(imageReader.querySelectorAll(".reader-page"));
+  const index = pages.indexOf(page);
+  return contextForSegments([
+    ...(pages[index-1]?.__ocrSegments || []).slice(-2),
+    ...(page.__ocrSegments || []),
+    ...(pages[index+1]?.__ocrSegments || []).slice(0, 2)
+  ]);
 }
 
 function progressiveBatchSize(remaining) {
@@ -957,8 +1005,16 @@ async function postJSON(path, payload) {
     signal: requests.signal
   });
   if (!response.ok) {
-    const message = await readError(response);
-    throw new Error(message || `Backend ${response.status}`);
+    let details;
+    if (response.headers.get("Content-Type")?.includes("application/json")) {
+      details = await response.json();
+    } else {
+      details = {error: await readError(response)};
+    }
+    const error = new Error(details.error || details.message || `Backend ${response.status}`);
+    error.code = details.code;
+    error.failedSegmentID = details.failedSegmentID;
+    throw error;
   }
   return response.json();
 }
@@ -984,16 +1040,18 @@ function renderSegmentIntoOverlay(targetOverlay, segment) {
 }
 
 function retryFailedTranslations() {
-  if (!imageReader.querySelector(".reader-page[data-translation-state='error']")) {
+  const pages = Array.from(imageReader.querySelectorAll(".reader-page"));
+  if (!pages.some(page => page.dataset.translationState === "error" || page.__failedSegments?.length)) {
     restartTranslation();
     return;
   }
   requests.abort();
   requests = new AbortController();
   contentSessionId += 1;
-  for (const page of imageReader.querySelectorAll(".reader-page")) {
+  for (const page of pages) {
     page.dataset.sessionId = String(contentSessionId);
-    if (["error", "running"].includes(page.dataset.translationState)) {
+    if (["error", "running"].includes(page.dataset.translationState) || page.__failedSegments?.length) {
+      page.__retrySegments = [...(page.__failedSegments || [])];
       page.dataset.translationState = "idle";
       delete page.dataset.translationError;
       clearOverlayNotice(page.querySelector(".overlay"));
@@ -1015,6 +1073,8 @@ function restartTranslation() {
     page.__translatedSegments = [];
     page.__ocrSegments = [];
     page.__previousTranslations = [];
+    page.__failedSegments = [];
+    page.__retrySegments = [];
     window.WebtoonLayout.clear(page.querySelector(".overlay"));
   }
   statusLine.textContent = "Nouvelle traduction avec la langue et le glossaire actuels…";

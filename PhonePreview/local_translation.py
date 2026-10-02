@@ -14,8 +14,21 @@ import urllib.request
 from glossary import protect, restore
 
 LOCK = threading.Lock()
-VERSION = "local-fr-plain-v11"
+VERSION = "local-fr-plain-v15"
 MODEL_CHECKS = {}
+
+
+class DialogueTranslationError(RuntimeError):
+    def __init__(self, segment_id: str, message: str):
+        super().__init__(message)
+        self.segment_id = segment_id
+
+
+def nearby_context(context: list, segment_id: str) -> list:
+    index = next((index for index, item in enumerate(context)
+                  if isinstance(item, dict) and str(item.get("id")) == segment_id), None)
+    candidates = context[max(0, index-2):index+3] if index is not None else context[-3:]
+    return [{"text": str(item.get("text", ""))} for item in candidates if isinstance(item, dict)]
 
 
 def validate_model_metadata(metadata: dict) -> None:
@@ -51,9 +64,18 @@ def validate_french(text: str, source: str) -> None:
         raise RuntimeError("Le modèle n'a pas renvoyé un dialogue français exploitable.")
     if re.search(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", text):
         raise RuntimeError("Traduction refusée : des caractères de la langue source subsistent.")
+    if re.match(r"^\s*(?:était|étaient|est|sont|sera|seront)[ -]+nous\b", text, flags=re.IGNORECASE):
+        raise RuntimeError("Accord français invalide : le sujet « nous » exige la première personne du pluriel, ou une construction présentative correctement accordée.")
+    fragment = re.match(r"^\s*(?:was|were|is|are)\s+(?:me|us|him|her|them)\b", source, flags=re.IGNORECASE)
+    if fragment and "?" not in source and re.match(
+            r"^\s*(?:sommes|étions|étais|était|étaient|est|sont)[- ]+(?:nous|je|il|elle|ils|elles)\b",
+            text, flags=re.IGNORECASE):
+        raise RuntimeError("Un fragment déclaratif anglais a été transformé en question. Traduisez le prédicat comme une affirmation française naturelle, à l'aide du contexte.")
     original = re.findall(r"[a-z]+", source.casefold())
     output = re.findall(r"[a-z]+", text.casefold())
     if output == original and is_web_address(source):
+        return
+    if output == original and original and all(word in {"ah", "ha", "oh", "hm", "hmm", "mm", "mmm"} for word in original):
         return
     for index in range(max(0, len(original)-3)):
         phrase = original[index:index+4]
@@ -101,6 +123,8 @@ def generate_dialogue(item: dict, context: list, *, model: str, url: str) -> str
                            "Translate the English or Chinese input into natural French. "
                            "Output only the complete French translation. Translate headings too. "
                            "The nearby text is context only. "
+                           "Use it to resolve sentence fragments in natural French. "
+                           "Keep statements as statements, not questions. "
                            + locked_instruction + address_instruction
                        )),
                        dict(role="user", content=content),
@@ -178,6 +202,9 @@ def translate(payload: dict, *, model: str, url: str, cache_dir: Path, fallback=
     started = time.perf_counter()
     prepared, cached, keys = [], {}, {}
     glossary = payload.get("glossary", [])
+    full_context = payload.get("contextSegments", [])
+    if not isinstance(full_context, list):
+        raise ValueError("Le contexte doit être une liste.")
     source_ids = set()
     for index, segment in enumerate(segments):
         if not isinstance(segment, dict):
@@ -191,9 +218,7 @@ def translate(payload: dict, *, model: str, url: str, cache_dir: Path, fallback=
         language = payload.get("sourceLanguage", "auto")
         if language == "auto":
             language = "zh" if re.search(r"[\u3400-\u9fff]", source) else "en"
-        context = payload.get("contextSegments", [])[-3:]
-        if not isinstance(context, list):
-            raise ValueError("Le contexte doit être une liste.")
+        context = nearby_context(full_context, key)
         seed = dict(version=VERSION, model=model, source=source, language=language,
                     terms=used, context=context, style=payload.get("style", ""))
         digest = hashlib.sha256(json.dumps(seed, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -208,7 +233,7 @@ def translate(payload: dict, *, model: str, url: str, cache_dir: Path, fallback=
             except (OSError, json.JSONDecodeError) as exc:
                 logging.warning("Cache de traduction illisible %s : %s", path, exc)
         prepared.append(dict(id=key, text=text, source=source, protected=protected,
-                             terms=used, language=language))
+                             terms=used, language=language, context=context))
     hits = len(cached)
     if prepared:
         with LOCK:
@@ -228,7 +253,10 @@ def translate(payload: dict, *, model: str, url: str, cache_dir: Path, fallback=
             for item in prepared:
                 try:
                     check_model(model, url)
-                    cached[item["id"]] = generate_dialogue(item, context, model=model, url=url)
+                    try:
+                        cached[item["id"]] = generate_dialogue(item, item["context"], model=model, url=url)
+                    except RuntimeError as exc:
+                        raise DialogueTranslationError(item["id"], str(exc)) from exc
                 except (urllib.error.URLError, TimeoutError, OSError) as exc:
                     if fallback is None:
                         raise RuntimeError(f"Ollama indisponible ({model}). Démarrez Ollama et installez le modèle.") from exc

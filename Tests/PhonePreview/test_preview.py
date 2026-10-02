@@ -15,10 +15,11 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PhonePreview"))
 from PIL import Image, ImageDraw
-from bubble_geometry import fit_dialogue, text_color
+from bubble_geometry import fit_dialogue, text_color, letter_pixels
 import numpy as np
 from glossary import entries, protect, restore
-from local_translation import generate_dialogue, parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement
+from local_translation import generate_dialogue, parse_translations, translate, validate_french, validate_model_metadata, normalize_french_agreement, nearby_context, DialogueTranslationError
+from native_ocr import split_observation_lines
 import server
 
 
@@ -177,6 +178,40 @@ class ModelTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             validate_french("Visit workshop.example.org now.", "Visit workshop.example.org now.")
 
+    def test_shared_interjections_not_mistaken_for_copied_sentences(self):
+        validate_french("Ah ! Ah ! Ah !", "AH! AH! AH!")
+        with self.assertRaises(RuntimeError):
+            validate_french("We are all here.", "WE ARE ALL HERE.")
+
+    def test_invalid_auxiliary_agreement_rejected_without_phrase_substitution(self):
+        for text in ("Était nous ici.", "Étaient-nous tous là.", "Sont nous les témoins."):
+            with self.subTest(text=text), self.assertRaisesRegex(RuntimeError, "Accord"):
+                validate_french(text, "We were the witnesses.")
+        validate_french("Nous étions les témoins.", "We were the witnesses.")
+        validate_french("C'était nous depuis le début.", "It was us all along.")
+
+    def test_declarative_predicate_fragment_does_not_become_question(self):
+        with self.assertRaisesRegex(RuntimeError, "question"):
+            validate_french("Étions-nous les témoins ?", "Were us since the beginning.")
+        validate_french("Nous, depuis le début.", "Were us since the beginning.")
+        validate_french("Sommes-nous les témoins ?", "Are we the witnesses?")
+
+    def test_context_is_near_target_and_independent_of_crop_ids(self):
+        context = [dict(id=str(index), text=f"Nearby {index}") for index in range(10)]
+        self.assertEqual(nearby_context(context, "2"), [dict(text=f"Nearby {index}") for index in range(5)])
+        for index, item in enumerate(context):
+            item["id"] = f"other-{index}"
+        self.assertEqual(nearby_context(context, "other-2"), [dict(text=f"Nearby {index}") for index in range(5)])
+
+    def test_error_identifies_dialogue_without_fake_translation(self):
+        with tempfile.TemporaryDirectory() as directory, patch("local_translation.check_model"), \
+                patch("local_translation.generate_dialogue", side_effect=RuntimeError("Réponse invalide")):
+            with self.assertRaises(DialogueTranslationError) as error:
+                translate(dict(segments=[dict(id="bad", text="Please wait for the others.")]),
+                          model="test", url="http://127.0.0.1", cache_dir=Path(directory))
+            self.assertEqual(error.exception.segment_id, "bad")
+            self.assertFalse(list(Path(directory).rglob("*.json")))
+
     def test_restored_possessive_before_vowel(self):
         self.assertEqual(normalize_french_agreement("Ta énergie et ma amie."), "Ton énergie et mon amie.")
         self.assertEqual(normalize_french_agreement("Sa force et ma sœur."), "Sa force et ma sœur.")
@@ -261,6 +296,43 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(results[0]["renderMode"], "replace")
         self.assertEqual(results[0]["sourceText"], "Hello A much longer sentence")
         self.assertLess(results[0]["textBox"]["width"], results[0]["rawBoundingBox"]["width"])
+
+    def test_connected_bubbles_keep_separate_paragraphs(self):
+        image = Image.new("RGB", (400, 650), "#345566")
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((40, 30, 360, 290), fill="white", outline="black", width=3)
+        draw.ellipse((40, 350, 360, 610), fill="white", outline="black", width=3)
+        draw.rectangle((185, 260, 215, 380), fill="white")
+        lines = [
+            dict(text="Wait for me.", boundingBox=dict(x=.3, y=130/650, width=.4, height=20/650)),
+            dict(text="We must leave.", boundingBox=dict(x=.3, y=460/650, width=.4, height=20/650)),
+        ]
+        data = io.BytesIO()
+        image.save(data, format="PNG")
+        results = fit_dialogue(data.getvalue(), lines)
+        self.assertEqual([s["sourceText"] for s in results], ["Wait for me.", "We must leave."])
+        self.assertTrue(all(s["renderMode"] == "replace" for s in results))
+        self.assertLess(results[0]["textBox"]["y"]+results[0]["textBox"]["height"], .5)
+        self.assertGreater(results[1]["textBox"]["y"], .5)
+
+    def test_glyph_rows_preserve_every_character_and_space(self):
+        glyphs = [dict(text=char, spaceBefore=False,
+                       boundingBox=dict(x=.2+index*.03, y=.2, width=.03, height=.05))
+                  for index, char in enumerate("WAIT")]
+        glyphs += [dict(text=char, spaceBefore=index == 0,
+                       boundingBox=dict(x=.2+index*.03, y=.35, width=.03, height=.05))
+                   for index, char in enumerate("HERE")]
+        rows = split_observation_lines([dict(id="a", sourceText="WAIT HERE", glyphs=glyphs,
+                   boundingBox=dict(x=.2, y=.2, width=.12, height=.2), confidence=1)])
+        self.assertEqual([r["sourceText"] for r in rows], ["WAIT", "HERE"])
+
+    def test_colored_gradient_and_profile_fringe_are_letters(self):
+        patch = np.array([[[112, 115, 148], [48, 55, 128], [22, 27, 126],
+                           [32, 36, 135], [36, 38, 141]]], dtype=np.uint8)
+        fill = np.array([254, 254, 254], dtype=float)
+        inks = [np.array([23, 19, 78], dtype=float), np.array([43, 40, 116], dtype=float)]
+        self.assertTrue(np.all(letter_pixels(patch, fill, inks) == 255))
+        self.assertTrue(np.any(letter_pixels(patch, fill) == 0))
 
     def test_unverified_preserves_art(self):
         results = fit_dialogue(self.image(True), self.lines())

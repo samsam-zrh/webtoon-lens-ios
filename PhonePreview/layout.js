@@ -2,6 +2,7 @@
 window.WebtoonLayout = (() => {
   const measure = document.createElement("canvas").getContext("2d");
   const family = '"Comic Sans MS", "Trebuchet MS", Arial, sans-serif';
+  const displayFamily = 'Impact, "Arial Narrow", Arial, sans-serif';
   const observers = new WeakMap();
 
   function wrap(text, width) {
@@ -26,9 +27,10 @@ window.WebtoonLayout = (() => {
     return lines;
   }
 
-  function fit(text, width, height, preferred, weight = "700") {
-    for (let size = Math.min(48, preferred); size >= 10; size -= 0.5) {
-      measure.font = `${weight} ${size}px ${family}`;
+  function fit(text, width, height, preferred, weight = "700", typeface = family, fontStyle = "normal") {
+    const ceiling = Math.floor(Math.min(preferred, height/1.2, width)*2)/2;
+    for (let size = ceiling; size >= 10; size -= 0.5) {
+      measure.font = `${fontStyle} ${weight} ${size}px ${typeface}`;
       const lines = wrap(text, Math.max(1, width - 2));
       const maxWidth = Math.max(0, ...lines.map(line => measure.measureText(line).width));
       const lineHeight = size * 1.2;
@@ -37,6 +39,40 @@ window.WebtoonLayout = (() => {
       }
     }
     return null;
+  }
+
+  function dialogueDetails(target) {
+    let details = target.parentElement.querySelector(".dialogue-list");
+    if (!details) {
+      details = document.createElement("details");
+      details.className = "dialogue-list";
+      const summary = document.createElement("summary");
+      summary.textContent = "Lire les dialogues et leur original";
+      details.append(summary);
+      target.parentElement.append(details);
+    }
+    return details;
+  }
+
+  function removeDialogueItem(details, id) {
+    Array.from(details.querySelectorAll(".dialogue-entry, .dialogue-error"))
+      .find(entry => entry.dataset.segmentId === id)?.remove();
+  }
+
+  function renderError(target, segment, message) {
+    const details = dialogueDetails(target);
+    removeDialogueItem(details, segment.id);
+    const item = document.createElement("div");
+    item.className = "dialogue-error";
+    item.dataset.segmentId = segment.id;
+    const original = document.createElement("p");
+    original.textContent = segment.sourceText || segment.text || "";
+    const error = document.createElement("p");
+    error.setAttribute("role", "alert");
+    error.textContent = `Traduction indisponible : ${message}. Les autres dialogues continuent.`;
+    item.append(original, error);
+    details.append(item);
+    details.open = true;
   }
 
   function render(target, segment) {
@@ -56,6 +92,11 @@ window.WebtoonLayout = (() => {
     const fill = document.createElement("div");
     fill.className = "bubble-fill";
     fill.style.background = segment.style?.fillColor || "#fff";
+    if (segment.replacementData) {
+      fill.style.backgroundColor = "transparent";
+      fill.style.backgroundImage = `url("${segment.replacementData}")`;
+      fill.style.backgroundSize = "100% 100%";
+    }
     if (segment.maskData) {
       fill.style.maskImage = `url("${segment.maskData}")`;
       fill.style.webkitMaskImage = `url("${segment.maskData}")`;
@@ -72,26 +113,20 @@ window.WebtoonLayout = (() => {
     const capitals = letters.length >= 6 && letters.filter(l => l === l.toUpperCase()).length / letters.length > 0.82;
     const translation = String(segment.translatedText || "").replace(/\s+/g, " ").trim();
     const displayed = capitals ? translation.toLocaleUpperCase("fr") : translation;
-    text.style.fontFamily = family;
+    const typeface = segment.style?.fontFamily === "display" ? displayFamily : family;
+    const fontStyle = segment.style?.fontStyle === "italic" ? "italic" : "normal";
+    text.style.fontFamily = typeface;
+    text.style.fontStyle = fontStyle;
     text.style.color = segment.style?.textColor || "#111";
     const weight = capitals ? "800" : "700";
     text.style.fontWeight = weight;
     bubble.append(fill, text);
     target.append(bubble);
-    let details = target.parentElement.querySelector(".dialogue-list");
-    if (!details) {
-      details = document.createElement("details");
-      details.className = "dialogue-list";
-      const summary = document.createElement("summary");
-      summary.textContent = "Lire les dialogues et leur original";
-      details.append(summary);
-      target.parentElement.append(details);
-    }
+    const details = dialogueDetails(target);
     const item = document.createElement("div");
     item.className = "dialogue-entry";
     item.dataset.segmentId = segment.id;
-    Array.from(details.querySelectorAll(".dialogue-entry"))
-      .find(entry => entry.dataset.segmentId === segment.id)?.remove();
+    removeDialogueItem(details, segment.id);
     const source = document.createElement("p");
     source.lang = /[\u3400-\u9fff]/.test(original) ? "zh" : "en";
     source.textContent = original;
@@ -107,14 +142,14 @@ window.WebtoonLayout = (() => {
       const scale = target.clientWidth / (segment.imageWidth || target.clientWidth);
       const preferred = (segment.fontSizeSource || 20) * scale;
       let result = segment.renderMode === "replace" && segment.maskData
-        ? fit(displayed, width, height, Math.max(10, preferred), weight) : null;
+        ? fit(displayed, width, height, Math.max(10, preferred), weight, typeface, fontStyle) : null;
       bubble.hidden = false;
       while (result) {
         text.textContent = result.lines.join("\n");
         text.style.fontSize = `${result.size}px`;
         text.style.lineHeight = `${result.lineHeight}px`;
         if (text.scrollHeight <= text.clientHeight && text.scrollWidth <= text.clientWidth) break;
-        result = fit(displayed, width, height, result.size - 0.5, weight);
+        result = fit(displayed, width, height, result.size - 0.5, weight, typeface, fontStyle);
       }
       bubble.dataset.fit = result ? "true" : "false";
       bubble.hidden = !result;
@@ -146,5 +181,5 @@ window.WebtoonLayout = (() => {
     target.innerHTML = "";
     target.parentElement.querySelector(".dialogue-list")?.remove();
   }
-  return { fit, render, clear };
+  return { fit, render, renderError, clear };
 })();

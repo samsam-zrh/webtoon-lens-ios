@@ -28,11 +28,11 @@ from typing import Any
 import native_ocr
 from bubble_geometry import fit_dialogue
 from glossary import entries as glossary_entries
-from local_translation import translate as translate_locally, check_model
+from local_translation import translate as translate_locally, check_model, DialogueTranslationError
 
 ROOT = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("WEBTOON_LENS_CACHE", Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "WebtoonLens" / "cache"))
-OCR_CACHE_VERSION = "ocr-vision-contours-v8"
+OCR_CACHE_VERSION = "ocr-vision-ink-paragraphs-v13"
 TRANSLATION_CACHE_VERSION = "translation-v5"
 OCR_MEMORY_CACHE: dict[str, list[dict[str, Any]]] = {}
 TRANSLATION_MEMORY_CACHE: dict[str, dict[str, str]] = {}
@@ -304,9 +304,14 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         except ValueError as exc:
             self.write_json(400, {"error": str(exc)})
             return
+        except DialogueTranslationError as exc:
+            logging.exception("Échec du dialogue %s", exc.segment_id)
+            self.write_json(503, {"error": str(exc), "code": "dialogue_translation_failed",
+                                  "failedSegmentID": exc.segment_id})
+            return
         except Exception as exc:
             logging.exception("Échec de traduction locale")
-            self.write_json(503, {"error": str(exc)})
+            self.write_json(503, {"error": str(exc), "code": "translation_service_error"})
             return
 
         self.write_json(200, response)

@@ -2,7 +2,7 @@
 from pathlib import Path
 import math
 import os
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ENGLISH = [
     "Your cultivation has reached the Golden Core realm.",
@@ -135,6 +135,44 @@ def create(directory: Path):
         draw.text((400-draw.textlength(text, font=typeface)/2, 170+index*58),
                   text, fill="black", font=typeface)
     thin.save(directory / "thin-white.png")
+    joined = Image.new("RGB", (800, 1200), "#384e5a")
+    draw = ImageDraw.Draw(joined)
+    draw.ellipse((90, 70, 710, 550), fill="white", outline="black", width=5)
+    draw.ellipse((90, 600, 710, 1080), fill="white", outline="black", width=5)
+    draw.rectangle((365, 510, 435, 640), fill="white")
+    for top, text in ((240, "Wait for the others. We will leave together."),
+                      (780, "We can still reach the school before the storm.")):
+        typeface = font("en", 34)
+        for index, line in enumerate(lines_for(draw, text, typeface, 430, "en")):
+            draw.text((400-draw.textlength(line, font=typeface)/2, top+index*48),
+                      line, font=typeface, fill="#111")
+    joined.save(directory / "joined.png")
+    styled = Image.new("RGB", (800, 850), "#384e5a")
+    draw = ImageDraw.Draw(styled)
+    draw.ellipse((35, 40, 765, 650), fill="white", outline="black", width=4)
+    shadow = Image.new("RGBA", styled.size, (0, 0, 0, 0))
+    ink = Image.new("RGBA", styled.size, (0, 0, 0, 0))
+    for index, text in enumerate(("WAIT FOR ME!", "WE WILL LEAVE", "TOGETHER!")):
+        typeface = font("en", 67)
+        x = 400-ImageDraw.Draw(ink).textlength(text, font=typeface)/2
+        y = 200+index*98
+        ImageDraw.Draw(shadow).text((x+6, y+10), text, font=typeface, fill=(100, 25, 30, 180))
+        ImageDraw.Draw(ink).text((x, y), text, font=typeface, fill="#8d181d",
+                                stroke_width=2, stroke_fill="white")
+    styled = Image.alpha_composite(styled.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(6)))
+    styled = Image.alpha_composite(styled, ink).convert("RGB")
+    styled.save(directory / "styled.png")
+    tail = Image.new("RGB", (800, 6200), "#384e5a")
+    draw = ImageDraw.Draw(tail)
+    for index, top in enumerate((90, 2280, 4690, 5770)):
+        draw.rounded_rectangle((90, top, 710, top+300), radius=65,
+                               fill="white", outline="black", width=3)
+        typeface = font("en", 31)
+        text = f"Scene {index+1}. We will meet at school tomorrow."
+        for number, line in enumerate(lines_for(draw, text, typeface, 440, "en")):
+            draw.text((400-draw.textlength(line, font=typeface)/2, top+90+number*43),
+                      line, font=typeface, fill="#111")
+    tail.save(directory / "tail.png")
 
 
 if __name__ == "__main__":
