@@ -7,8 +7,10 @@ import re
 import base64
 import csv
 import hashlib
+import http.client
 import io
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -72,6 +74,38 @@ WEBTOON_PROTECTED_UPPERCASE = {
     "ASTRA",
     "QUANRONG",
 }
+
+
+def source_failure(error: Exception) -> tuple[int, dict[str, Any]]:
+    if isinstance(error, urllib.error.HTTPError):
+        source_status = error.code
+        messages = {
+            401: ("source_auth_required", "Le site demande une connexion pour accéder à ce contenu. Ouvrez-le dans votre navigateur ou importez vos pages."),
+            403: ("source_access_denied", "Le site refuse la récupération automatique (403). Ouvrez-le dans votre navigateur ou importez des pages que vous avez le droit d’utiliser."),
+            404: ("source_not_found", "Le contenu est introuvable sur le site source (404). Vérifiez le lien du chapitre."),
+            429: ("source_rate_limited", "Le site limite temporairement les requêtes (429). Attendez avant de réessayer, ou importez vos pages."),
+        }
+        code, message = messages.get(
+            source_status,
+            ("source_http_error", f"Le site source n’a pas pu fournir ce contenu (HTTP {source_status}). Réessayez plus tard ou importez vos pages."),
+        )
+        status = source_status if source_status in {404, 429} else 502
+        return status, {"error": message, "code": code, "sourceStatus": source_status}
+    if isinstance(error, (ValueError, http.client.InvalidURL)):
+        return 400, {
+            "error": "Entrez un lien HTTP ou HTTPS valide, sans identifiants.",
+            "code": "invalid_source_url",
+        }
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return 504, {
+            "error": "Le site source met trop de temps à répondre. Réessayez plus tard ou importez vos pages.",
+            "code": "source_timeout",
+        }
+    return 502, {
+        "error": "Impossible de joindre le site source. Vérifiez votre connexion ou importez vos pages.",
+        "code": "source_unreachable",
+    }
 
 
 class PreviewHandler(SimpleHTTPRequestHandler):
@@ -208,14 +242,21 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         url = query.get("url", [""])[0]
         if not url:
-            self.send_error(400, "Missing url")
+            self.write_json(400, {"error": "Collez le lien d’un chapitre.", "code": "missing_source_url"})
             return
 
         try:
             html = fetch_url(url)
             images = filter_chapter_images(extract_images(html, url))
-        except Exception as exc:
-            self.send_error(502, f"Extraction failed: {exc}")
+        except (urllib.error.URLError, http.client.HTTPException, ValueError, OSError) as exc:
+            self.write_source_error(exc, "chapitre")
+            return
+
+        if not images:
+            self.write_json(422, {
+                "error": "Aucune image de chapitre accessible n’a été trouvée. Le lecteur du site peut nécessiter JavaScript ou une connexion ; ouvrez-le dans votre navigateur ou importez vos pages.",
+                "code": "chapter_images_missing",
+            })
             return
 
         self.write_json(200, {"pageURL": url, "images": images[:80]})
@@ -225,13 +266,13 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         url = query.get("url", [""])[0]
         referer = query.get("referer", [""])[0]
         if not url:
-            self.send_error(400, "Missing url")
+            self.write_json(400, {"error": "Le lien de l’image est manquant.", "code": "missing_source_url"})
             return
 
         try:
             data, content_type = fetch_binary(url, referer=referer)
-        except Exception as exc:
-            self.send_error(502, f"Image proxy failed: {exc}")
+        except (urllib.error.URLError, http.client.HTTPException, ValueError, OSError) as exc:
+            self.write_source_error(exc, "image")
             return
 
         self.send_response(200)
@@ -241,13 +282,21 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def write_source_error(self, error: Exception, resource: str) -> None:
+        status, payload = source_failure(error)
+        logging.warning("Chargement %s impossible (%s): %s", resource, payload["code"], payload["error"])
+        self.write_json(status, payload)
+
     def write_json(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            logging.info("Réponse JSON annulée : le lecteur a fermé la connexion.")
 
     def handle_translate_payload(self, payload: dict[str, Any]) -> None:
         try:

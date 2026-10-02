@@ -176,7 +176,8 @@ def run():
         # Erreur API visible, pas de faux succès ni boucle automatique.
         page.route("**/v1/webtoon/extract?**", lambda route: route.fulfill(status=502, json={"error": "Chapitre indisponible."}))
         page.locator("#openUrlButton").click()
-        page.wait_for_function("document.getElementById('statusLine').textContent.includes('Chapitre indisponible')")
+        page.wait_for_function("document.getElementById('chapterErrorMessage').textContent.includes('Chapitre indisponible')")
+        assert page.locator("#chapterError").is_visible()
         assert page.locator("#openUrlButton").is_enabled()
         failed_requests = []
         def ocr_error(route):

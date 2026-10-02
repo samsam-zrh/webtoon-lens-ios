@@ -34,7 +34,7 @@ Une relecture reste utile : OCR, segmentation, noms non configurés et traductio
 
 Le serveur écoute **uniquement sur `127.0.0.1`** par défaut. Les URL `file:`, identifiants dans une URL et appels à un serveur de traduction externe depuis l’interface sont refusés. Importer une image fonctionne sans connexion après installation ; ouvrir un chapitre contacte nécessairement le site et ses hébergeurs d’images.
 
-Les sites nécessitant une connexion, un lecteur JavaScript, une protection anti-bot ou un DRM ne sont pas contournés. En cas d’échec, importez des pages que vous avez le droit d’utiliser. La navigation précédent/suivant n’est proposée que pour les formats de chapitre explicites, pas pour un identifiant numérique arbitraire.
+Les sites nécessitant une connexion, un lecteur JavaScript, une protection anti-bot ou un DRM ne sont pas contournés. Un refus du site (notamment **403 / Cloudflare**) ou l’absence d’images affiche une erreur en français près du lien, sans effacer les pages déjà ouvertes. **Ouvrir le site** donne accès au lecteur original dans votre navigateur ; **Importer des pages** permet de choisir des images que vous avez le droit d’utiliser. Cette récupération ne débloque pas l’extraction automatique du site protégé. La navigation précédent/suivant n’est proposée que pour les formats de chapitre explicites, pas pour un identifiant numérique arbitraire.
 
 Pour tester sur un téléphone du **même réseau privé de confiance**, exposez volontairement le lecteur :
 
@@ -56,12 +56,15 @@ Le lecteur et Ollama doivent fonctionner pour les tests réels :
 .runtime/venv/bin/python -m unittest discover -s Tests/PhonePreview -p 'test_*.py' -v
 .runtime/venv/bin/python Tests/PhonePreview/runtime_check.py .runtime/evidence
 .runtime/venv/bin/python Tests/PhonePreview/browser_check.py .runtime/evidence
+.runtime/venv/bin/python Tests/PhonePreview/access_check.py .runtime/evidence
 .runtime/venv/bin/python Tests/PhonePreview/benchmark.py .runtime/evidence
 ```
 
 Le premier test couvre glossaire, limites, réponses invalides, cache, chinois traditionnel et alpha du masque. Le second exécute réellement OCR et traduction EN/ZH, compare auto / langue forcée, vérifie les noms personnalisés et conserve les réponses/timings. Le troisième utilise Chromium : imports, original, glossaire persistant, redimensionnement 1 280 → 390 px, texte français très long, petites/grandes pages, navigation et erreurs. Il vérifie largeur/hauteur mesurées, débordement DOM et **pixels modifiés hors masque**. Captures et mesures sont conservées dans `.runtime/evidence/`.
 
 Les fixtures sont générées par `Tests/PhonePreview/fixtures.py`. Sur un autre système, indiquez `WEBTOON_TEST_EN_FONT` et `WEBTOON_TEST_ZH_FONT` si les polices proposées n’existent pas.
+
+`access_check.py` fait recevoir un vrai refus HTTP 403 au backend depuis un serveur local de test : message et actions accessibles, ancien chapitre intact, reprise par import et traduction chinoise réelle. Il couvre aussi l’absence d’images, les erreurs HTML anciennes, les URL invalides et l’annulation d’une ouverture pendant un import ou un changement de langue.
 
 ### Mesures effectuées sur le Mac M5 / 24 Go
 

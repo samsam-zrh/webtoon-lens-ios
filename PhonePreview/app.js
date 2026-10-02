@@ -14,6 +14,11 @@ const ocrLanguage = document.getElementById("ocrLanguage");
 const prevChapterButton = document.getElementById("prevChapterButton");
 const nextChapterButton = document.getElementById("nextChapterButton");
 const chapterHint = document.getElementById("chapterHint");
+const chapterError = document.getElementById("chapterError");
+const chapterErrorMessage = document.getElementById("chapterErrorMessage");
+const openSourceLink = document.getElementById("openSourceLink");
+
+document.getElementById("importAfterError").addEventListener("click", () => imageInput.click());
 
 const OCR_WINDOW_MARGIN_BEFORE = 0.12;
 const OCR_WINDOW_MARGIN_AFTER = 0.42;
@@ -65,6 +70,7 @@ if (imageInput) {
       statusLine.textContent = "Utilisez des pages PNG, JPEG ou WebP de moins de 20 Mo.";
       return;
     }
+    clearChapterError();
     currentPageUrl = "";
     renderImageFeed(files.map(file => ({ url: URL.createObjectURL(file), alt: file.name, local: true })));
     warmupLocalModel();
@@ -110,38 +116,72 @@ nextChapterButton.addEventListener("click", () => {
 });
 
 async function openWebtoonUrl(urlOverride = "") {
+  if (openUrlButton.disabled) return;
+  clearChapterError();
   const value = normalizedUrlValue(urlOverride || webtoonUrl.value);
   if (!value) {
-    statusLine.textContent = "Colle d'abord un lien.";
+    showChapterError("Collez d’abord le lien d’un chapitre, ou importez vos pages.", "");
     return;
   }
 
   setOpenButtonBusy(true);
-  const sessionId = beginContentSession();
-  readerSummary.textContent = "";
+  const sessionId = contentSessionId;
   statusLine.textContent = "Ouverture du chapitre, extraction des images et prechauffe de la traduction...";
 
   try {
     warmupLocalModel();
     webtoonUrl.value = value;
-    localStorage.setItem("webtoonLensUrl", value);
-    currentPageUrl = value;
-    currentCaptureDataUrl = "";
-    updateChapterNavigation(value);
 
-    const response = await fetch(`/v1/webtoon/extract?url=${encodeURIComponent(value)}`);
+    const response = await fetch(`/v1/webtoon/extract?url=${encodeURIComponent(value)}`, { signal: requests.signal });
     if (!response.ok) {
       const message = await readError(response);
       throw new Error(message || `Extraction impossible (${response.status})`);
     }
     const payload = await response.json();
     if (isStaleSession(sessionId)) return;
-    renderImageFeed(payload.images || []);
+    if (!Array.isArray(payload.images) || !payload.images.length) {
+      throw new Error("Aucune image de chapitre accessible n’a été trouvée. Ouvrez le site dans votre navigateur ou importez vos pages.");
+    }
+    localStorage.setItem("webtoonLensUrl", value);
+    updateChapterNavigation(value);
+    currentPageUrl = value;
+    currentCaptureDataUrl = "";
+    renderImageFeed(payload.images);
   } catch (error) {
-    statusLine.textContent = error && error.message ? error.message : String(error);
+    if (isStaleSession(sessionId) || error.name === "AbortError") return;
+    const message = error instanceof TypeError
+      ? "Le lecteur n’a pas pu contacter le serveur local. Vérifiez qu’il est démarré, ou réessayez."
+      : error.message || "Impossible d’ouvrir ce chapitre. Vous pouvez importer vos pages.";
+    showChapterError(message, value);
   } finally {
     setOpenButtonBusy(false);
   }
+}
+
+function clearChapterError() {
+  chapterError.hidden = true;
+  chapterErrorMessage.textContent = "";
+  webtoonUrl.removeAttribute("aria-invalid");
+  openSourceLink.removeAttribute("href");
+  openSourceLink.hidden = true;
+}
+
+function showChapterError(message, url) {
+  chapterErrorMessage.textContent = message;
+  chapterError.hidden = false;
+  webtoonUrl.setAttribute("aria-invalid", "true");
+  try {
+    const source = new URL(url);
+    if (["http:", "https:"].includes(source.protocol) && !source.username && !source.password) {
+      openSourceLink.href = source.href;
+      openSourceLink.hidden = false;
+    }
+  } catch {
+    openSourceLink.hidden = true;
+  }
+  statusLine.textContent = imageReader.querySelector(".reader-page")
+    ? "Ce chapitre n’a pas été chargé. Les pages précédentes sont conservées."
+    : "Ce chapitre n’a pas été chargé. Utilisez « Importer des pages » pour continuer.";
 }
 
 function normalizedUrlValue(rawValue) {
@@ -1084,6 +1124,9 @@ async function readError(response) {
     const payload = JSON.parse(text);
     return payload.error || payload.message || "";
   } catch {
+    if (/<(?:!doctype|html|head|body)\b/i.test(text)) {
+      return `Le serveur n’a pas pu traiter la demande (HTTP ${response.status}). Réessayez ou importez vos pages.`;
+    }
     return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
   }
 }

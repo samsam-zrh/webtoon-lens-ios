@@ -109,6 +109,52 @@ button:disabled {
   background: rgba(255, 255, 255, 0.76);
 }
 
+.chapter-error {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #c78674;
+  border-radius: 8px;
+  color: #6b3022;
+  background: #fff4ef;
+}
+
+.chapter-error[hidden],
+.chapter-error a[hidden] {
+  display: none;
+}
+
+.chapter-error p {
+  margin: 0;
+  max-width: 70ch;
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.chapter-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chapter-error a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #111111;
+  border-radius: 8px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.chapter-error a:hover {
+  background: #265b51;
+  color: #ffffff;
+}
+
 .capability-pill {
   margin: 0;
   display: inline-flex;

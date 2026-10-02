@@ -24,9 +24,16 @@
       <div class="url-loader">
         <label class="url-field">
           Lien du chapitre
-          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/chapitre-12/">
+          <input id="webtoonUrl" type="url" placeholder="https://exemple.com/chapitre-12/" aria-describedby="chapterErrorMessage">
         </label>
         <button id="openUrlButton" type="button">Ouvrir</button>
+      </div>
+      <div id="chapterError" class="chapter-error" role="alert" hidden>
+        <p id="chapterErrorMessage"></p>
+        <div class="chapter-error-actions">
+          <a id="openSourceLink" class="ghost-button" target="_blank" rel="noopener noreferrer" hidden>Ouvrir le site</a>
+          <button id="importAfterError" class="ghost-button" type="button">Importer des pages</button>
+        </div>
       </div>
       <div class="import-row">
         <label class="file-button">Importer des pages

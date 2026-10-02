@@ -1,11 +1,17 @@
 import base64
 import io
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import socket
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
+import urllib.error
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "PhonePreview"))
 from PIL import Image, ImageDraw
@@ -156,6 +162,91 @@ class ContractTests(unittest.TestCase):
     def test_extract(self):
         images = server.extract_images('<img src="/page-1.png"><img src="/page-2.png">', "https://example.org/chapter-1/")
         self.assertEqual([item["url"] for item in images], ["https://example.org/page-1.png", "https://example.org/page-2.png"])
+
+
+class SourceAccessTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        class SourceHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/chapter":
+                    status, body = 200, b'<img src="/page-1.png"><img src="/page-2.png">'
+                elif self.path == "/empty":
+                    status, body = 200, b"<html><body>JavaScript required</body></html>"
+                else:
+                    status = int(self.path.lstrip("/"))
+                    body = b"<html><body>PRIVATE UPSTREAM ERROR</body></html>"
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        for name, handler in (("source", SourceHandler), ("preview", server.PreviewHandler)):
+            instance = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            cls.addClassCleanup(instance.server_close)
+            cls.addClassCleanup(instance.shutdown)
+            threading.Thread(target=instance.serve_forever, kwargs={"poll_interval": .01}, daemon=True).start()
+            setattr(cls, name, f"http://127.0.0.1:{instance.server_port}")
+
+    def request(self, endpoint, url=""):
+        query = urllib.parse.urlencode({"url": url})
+        try:
+            response = urllib.request.urlopen(f"{self.preview}/v1/webtoon/{endpoint}?{query}", timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            self.assertEqual(response.headers.get_content_type(), "application/json")
+            self.assertEqual(response.headers.get_content_charset(), "utf-8")
+            return response.status, json.loads(response.read())
+
+    def test_upstream_errors_are_json_and_do_not_reflect_html(self):
+        cases = ((401, 502, "source_auth_required"), (403, 502, "source_access_denied"),
+                 (404, 404, "source_not_found"), (429, 429, "source_rate_limited"),
+                 (503, 502, "source_http_error"))
+        for endpoint in ("extract", "image"):
+            for upstream, expected, code in cases:
+                with self.subTest(endpoint=endpoint, upstream=upstream):
+                    status, payload = self.request(endpoint, f"{self.source}/{upstream}")
+                    self.assertEqual(status, expected)
+                    self.assertEqual(payload["code"], code)
+                    self.assertEqual(payload["sourceStatus"], upstream)
+                    self.assertNotIn("PRIVATE", payload["error"])
+                    self.assertNotIn("<html>", payload["error"])
+                    self.assertNotIn("images", payload)
+
+    def test_missing_and_invalid_source(self):
+        for endpoint in ("extract", "image"):
+            for url, code in (("", "missing_source_url"), ("file:///tmp/page.png", "invalid_source_url"),
+                              ("https://user:secret@example.org/", "invalid_source_url"),
+                              ("http://127.0.0.1:notaport/", "invalid_source_url")):
+                with self.subTest(endpoint=endpoint, url=url):
+                    status, payload = self.request(endpoint, url)
+                    self.assertEqual(status, 400)
+                    self.assertEqual(payload["code"], code)
+                    self.assertNotIn("secret", payload["error"])
+
+    def test_empty_chapter_is_an_error_but_valid_chapter_still_opens(self):
+        status, payload = self.request("extract", f"{self.source}/empty")
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["code"], "chapter_images_missing")
+        status, payload = self.request("extract", f"{self.source}/chapter")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload["images"]), 2)
+        self.assertEqual(payload["pageURL"], f"{self.source}/chapter")
+
+    def test_timeouts_and_network_errors(self):
+        for error in (TimeoutError("PRIVATE"), socket.timeout("PRIVATE"),
+                      urllib.error.URLError(socket.timeout("PRIVATE"))):
+            with self.subTest(error=error):
+                status, payload = server.source_failure(error)
+                self.assertEqual((status, payload["code"]), (504, "source_timeout"))
+                self.assertNotIn("PRIVATE", payload["error"])
+        status, payload = server.source_failure(urllib.error.URLError("PRIVATE"))
+        self.assertEqual((status, payload["code"]), (502, "source_unreachable"))
+        self.assertNotIn("PRIVATE", payload["error"])
 
 
 if __name__ == "__main__":
