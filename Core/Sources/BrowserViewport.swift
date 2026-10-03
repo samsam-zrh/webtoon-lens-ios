@@ -161,11 +161,15 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
     public let viewportTop: Double
     public let viewportScale: Double
     public let blockedReason: String?
+    public let contentRevision: Int?
+    public let captureRegion: NormalizedRect?
+    public let readingSource: String?
 
     public init(
         documentID: String, revision: Int, url: String, scrollX: Double, scrollY: Double,
         viewportWidth: Double, viewportHeight: Double, viewportLeft: Double,
-        viewportTop: Double, viewportScale: Double, blockedReason: String?
+        viewportTop: Double, viewportScale: Double, blockedReason: String?,
+        contentRevision: Int? = nil, captureRegion: NormalizedRect? = nil, readingSource: String? = nil
     ) {
         self.documentID = documentID
         self.revision = revision
@@ -178,6 +182,9 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
         self.viewportTop = viewportTop
         self.viewportScale = viewportScale
         self.blockedReason = blockedReason
+        self.contentRevision = contentRevision
+        self.captureRegion = captureRegion
+        self.readingSource = readingSource
     }
 
     public func validateForCapture() throws {
@@ -193,6 +200,16 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
         case "frame", "media": throw BrowserCaptureError.unsupportedFrame
         default: throw BrowserCaptureError.unavailablePage
         }
+        guard captureRegion.map(\.isInsideImage) ?? true else { throw BrowserCaptureError.invalidViewport }
+    }
+
+    public func matchesReading(_ other: BrowserDocumentState) -> Bool {
+        documentID == other.documentID && revision == other.revision && url == other.url &&
+            scrollX == other.scrollX && scrollY == other.scrollY &&
+            viewportWidth == other.viewportWidth && viewportHeight == other.viewportHeight &&
+            viewportLeft == other.viewportLeft && viewportTop == other.viewportTop &&
+            viewportScale == other.viewportScale && blockedReason == other.blockedReason &&
+            captureRegion == other.captureRegion && readingSource == other.readingSource
     }
 }
 
@@ -212,6 +229,18 @@ public struct BrowserStabilizationWindow: Sendable {
 
     public func hasExpired(now: ContinuousClock.Instant = ContinuousClock().now) -> Bool {
         now >= deadline
+    }
+}
+
+public enum BrowserRestabilizationPolicy {
+    public static func allows(
+        previous: BrowserDocumentState, current: BrowserDocumentState,
+        explicitIntent: Bool, retries: Int, withinWindow: Bool
+    ) -> Bool {
+        explicitIntent && retries < 2 && withinWindow && current.blockedReason == nil &&
+            previous.documentID == current.documentID && previous.url == current.url &&
+            previous.revision == current.revision && !previous.matchesReading(current) &&
+            (previous.readingSource == current.readingSource || previous.readingSource == nil)
     }
 }
 
@@ -236,7 +265,7 @@ public struct BrowserCaptureLifecycle: Sendable {
 
     public func canCommit(_ token: BrowserCaptureToken, geometry: BrowserViewportGeometry, document: BrowserDocumentState) -> Bool {
         activeCaptureID == token.id && epoch == token.epoch &&
-            token.geometry.matches(geometry) && token.document == document
+            token.geometry.matches(geometry) && token.document.matchesReading(document)
     }
 
     public mutating func finish(_ token: BrowserCaptureToken) {

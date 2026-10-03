@@ -2,6 +2,7 @@ import SwiftUI
 import WebtoonLensCore
 
 struct SettingsView: View {
+    var onSaved: () -> Void = {}
     @State private var backendURL = ""
     @State private var stylePrompt = WebtoonLensConstants.defaultStylePrompt
     @State private var allowTextTranslation = false
@@ -78,6 +79,7 @@ struct SettingsView: View {
             store.setTextTranslationConsent(allowTextTranslation)
             store.setPublicChapterConsent(allowPublicChapters)
             savedMessage = "Reglages V2 enregistres. Les captures ne quittent pas l'iPhone."
+            onSaved()
         } catch {
             savedMessage = error.localizedDescription
         }

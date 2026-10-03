@@ -12,55 +12,7 @@ struct PublicChapterReaderView: View {
     let close: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: close) { Image(systemName: "safari").frame(minWidth: 44, minHeight: 44) }
-                    .accessibilityLabel("Navigateur")
-                Button { reader.movePage(-1) } label: {
-                    Image(systemName: "chevron.left").frame(minWidth: 44, minHeight: 44)
-                }
-                .disabled(reader.selectedPage == 0)
-                .accessibilityLabel("Precedente")
-                Button { reader.movePage(1) } label: {
-                    Image(systemName: "chevron.right").frame(minWidth: 44, minHeight: 44)
-                }
-                .disabled(reader.selectedPage + 1 >= reader.pageCount)
-                .accessibilityLabel("Suivante")
-                Button("Dialogue") { reader.moveToDialogue() }.frame(minHeight: 44)
-            }
-            .buttonStyle(.bordered)
-            .padding(.horizontal)
-            HStack {
-                Text("\(reader.pageCount) pages · \(reader.translationCount) dialogues")
-                    .font(.caption)
-                    .accessibilityIdentifier("v2.chapterProgress")
-                Spacer()
-                Toggle("Original", isOn: Binding(get: { reader.showOriginal }, set: { reader.setOriginal($0) }))
-                    .fixedSize()
-                    .accessibilityIdentifier("v2.chapterOriginal")
-            }
-            .padding(.horizontal)
-            Text(reader.status)
-                .font(.caption)
-                .foregroundStyle(reader.hasError ? Color.red : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.vertical, 6)
-                .accessibilityIdentifier("v2.chapterStatus")
-            Text("\(reader.renderedCount) masques ajustes · \(reader.pageCount) pages")
-                .font(.caption2)
-                .accessibilityIdentifier("v2.chapterMasks")
-                .accessibilityValue(reader.renderProof)
-            if !reader.sourceErrors.isEmpty {
-                DisclosureGroup("Problemes de chargement (\(reader.sourceErrors.count))") {
-                    ForEach(Array(reader.sourceErrors.enumerated()), id: \.offset) { _, error in
-                        Text(error).font(.caption).foregroundStyle(.red)
-                    }
-                }
-                .padding(.horizontal)
-            }
-            PublicChapterWebView(controller: reader)
-        }
+        PublicChapterWebView(controller: reader)
     }
 }
 
@@ -78,6 +30,11 @@ final class PublicChapterController: NSObject {
     private(set) var renderedCount = 0
     private(set) var renderProof = ""
     private(set) var sourceErrors: [String] = []
+    private(set) var displaySourceURL: URL?
+    @ObservationIgnored var onScroll: (@MainActor (Double) -> Void)?
+    @ObservationIgnored var onDisplayed: (@MainActor () -> Void)?
+    @ObservationIgnored private var unavailable: (@MainActor (Error) -> Void)?
+    @ObservationIgnored private var scrollObservation: NSKeyValueObservation?
 
     @ObservationIgnored private var generation = PublicChapterGeneration()
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -105,7 +62,10 @@ final class PublicChapterController: NSObject {
     @ObservationIgnored private let activity = PublicChapterActivity()
     private static let logger = Logger(subsystem: "com.example.webtoonlens.v2", category: "PublicChapter")
 
-    func start(_ source: URL, sourceLanguage: String, glossary: [GlossaryTermInstruction], style: String) {
+    func start(
+        _ source: URL, sourceLanguage: String, glossary: [GlossaryTermInstruction], style: String,
+        onUnavailable: (@MainActor (Error) -> Void)? = nil
+    ) {
         let previous = task
         previous?.cancel()
         generation.advance()
@@ -116,9 +76,11 @@ final class PublicChapterController: NSObject {
         isLoading = true
         status = "Le Mac ouvre les images publiques du chapitre..."
         hasError = false
+        unavailable = onUnavailable
         task = Task { [weak self] in
             await previous?.value
             guard let self, self.generation.accepts(id) else { return }
+            var committed = false
             do {
                 try await self.activity.waitUntilActive()
                 let backend = try SharedSettingsStore.shared.publicChapterBackend()
@@ -129,7 +91,6 @@ final class PublicChapterController: NSObject {
                 try self.check(id)
                 let referer = try PublicChapterURL.parse(extraction.pageURL)
                 var accepted = 0
-                var committed = false
                 var skipped = 0
                 var sessionBytes = 0
                 for image in extraction.images {
@@ -153,7 +114,9 @@ final class PublicChapterController: NSObject {
                             self.translator = translator
                             self.displayBackend = backend
                             self.referer = referer
+                            self.displaySourceURL = source
                             committed = true
+                            self.onDisplayed?()
                         }
                         let file = try self.imageStore.save(data, generation: id, page: accepted)
                         let page = ChapterRenderCommand.page(id: id, index: accepted, metadata: metadata, publicURL: url)
@@ -213,6 +176,7 @@ final class PublicChapterController: NSObject {
                 if self.generation.accepts(id) {
                     self.status = "\(error.localizedDescription) \(self.hasChapter ? "Chapitre precedent conserve." : "Navigateur original conserve.")"
                     self.hasError = true
+                    if !committed { onUnavailable?(error) }
                 }
             }
             if self.generation.accepts(id) { self.isLoading = false }
@@ -229,8 +193,17 @@ final class PublicChapterController: NSObject {
         rendererReady = false
         displayGeneration = nil
         displayBackend = nil
+        displaySourceURL = nil
         do { try imageStore.clear() }
         catch { status = "Nettoyage du cache public impossible : \(error.localizedDescription)"; hasError = true }
+    }
+
+    func cancelWorkPreservingDisplay() {
+        task?.cancel()
+        rendererTask?.cancel()
+        generation.advance()
+        isLoading = false
+        commands.removeAll()
     }
 
     func setActive(_ value: Bool) {
@@ -255,6 +228,10 @@ final class PublicChapterController: NSObject {
         webView = view
         view.navigationDelegate = self
         view.configuration.userContentController.add(self, name: "publicChapter")
+        scrollObservation = view.scrollView.observe(\.contentOffset, options: [.old, .new]) { [weak self] scroll, change in
+            guard change.oldValue != change.newValue, scroll.isDragging || scroll.isDecelerating else { return }
+            MainActor.assumeIsolated { self?.onScroll?(Double(scroll.contentOffset.y)) }
+        }
         guard let url = Bundle.main.url(forResource: "PublicChapterReader", withExtension: "html") else {
             failRenderer(PublicChapterError.rendererUnavailable)
             return
@@ -268,6 +245,7 @@ final class PublicChapterController: NSObject {
         rendererReady = false
         webView = nil
         rendererTask?.cancel()
+        scrollObservation = nil
     }
 
     private func commitSession(_ id: UUID) throws {
@@ -401,9 +379,11 @@ final class PublicChapterController: NSObject {
     }
 
     private func failRenderer(_ error: Error) {
+        let fallback = translationCount == 0 ? unavailable : nil
         close()
         status = "\(error.localizedDescription) Navigateur original conserve."
         hasError = true
+        fallback?(error)
     }
 }
 

@@ -26,12 +26,12 @@ final class PublicChapterReaderTests: XCTestCase {
             for _ in 0..<3 where !save.isHittable { app.swipeUp() }
             save.tap()
         }
-        app.tabBars.buttons["Webtoon"].tap()
+        app.buttons["Fermer"].tap()
         let address = app.textFields["v2.address"]
         address.tap()
         address.typeText(source.absoluteString)
-        app.buttons["v2.readChapter"].tap()
-        let authorize = app.buttons["Autoriser la lecture publique"]
+        app.buttons["v2.translate"].tap()
+        let authorize = app.buttons["Autoriser la traduction"]
         XCTAssertTrue(authorize.waitForExistence(timeout: 5))
         authorize.tap()
         let masks = app.staticTexts["v2.chapterMasks"]
@@ -42,7 +42,7 @@ final class PublicChapterReaderTests: XCTestCase {
                 proof.rendered.contains(where: { $0.page == 1 })
         }, object: masks)
         let result = await XCTWaiter.fulfillment(of: [completed], timeout: 120)
-        XCTAssertEqual(result, .completed, app.staticTexts["v2.chapterStatus"].label)
+        XCTAssertEqual(result, .completed, app.staticTexts["v2.status"].label)
         let proof = try decodeProof(masks)
         XCTAssertGreaterThanOrEqual(proof.pageCount, 2)
         XCTAssertLessThanOrEqual(proof.mountedImages, 3)
@@ -58,7 +58,7 @@ final class PublicChapterReaderTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(mask.fontSize, 10)
             XCTAssertTrue(mask.id.hasPrefix("p\(mask.page)-"))
         }
-        app.buttons["Dialogue"].tap()
+        ReaderUITestSupport.openContext("Aller au dialogue", in: app)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "NanoMachine genuine chapter viewport with safe French mask (local evidence only)"
         screenshot.lifetime = .keepAlways
@@ -69,8 +69,7 @@ final class PublicChapterReaderTests: XCTestCase {
         add(evidence)
         let page = app.webViews.firstMatch
         XCTAssertGreaterThan(page.images.count, 0)
-        let original = app.switches["v2.chapterOriginal"]
-        original.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        ReaderUITestSupport.openContext("Voir l'original", in: app)
         let originalSet = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             (try? self.decodeProof(masks).original) == true
         }, object: masks)
@@ -79,10 +78,7 @@ final class PublicChapterReaderTests: XCTestCase {
         originalScreenshot.name = "Same original Nano chapter viewport, overlays hidden (local evidence only)"
         originalScreenshot.lifetime = .keepAlways
         add(originalScreenshot)
-        app.buttons["Suivante"].tap()
-        try await Task.sleep(for: .milliseconds(500))
         XCTAssertTrue(try decodeProof(masks).pages.contains(where: { $0.index == 1 && $0.loaded }))
-        app.buttons["Navigateur"].tap()
         ReaderUITestSupport.revokeTextConsent(in: app)
         let consent = app.switches["v2.publicChapterConsent"]
         if consent.value as? String == "1" { consent.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }

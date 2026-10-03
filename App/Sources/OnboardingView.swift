@@ -7,15 +7,15 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Lis dans Webtoon Lens V2")
                         .font(.title.bold())
-                    Text("Colle le lien dans Webtoon : Lire le chapitre traite ses images publiques comme V1 ; Ouvrir garde le navigateur et sa capture privee. L'original reste intact.")
+                    Text("Colle le lien puis Traduire. Lens choisit les images publiques quand elles sont accessibles, sinon le navigateur normal et le texte OCR de la zone lue. L'original reste intact.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
 
                 OnboardingStep(
                     number: "1",
-                    title: "Ouvre le site dans l'app",
-                    detail: "Pour un chapitre public extractible, choisis Lire le chapitre. Sinon Ouvrir conserve la navigation normale. Connexion, abonnement et verifications restent manuels ; aucun contournement."
+                    title: "Une seule commande",
+                    detail: "Traduire ouvre et traduit le chapitre. Les chevrons changent uniquement un numero de chapitre explicite ; un identifiant opaque garde la navigation desactivee."
                 )
 
                 OnboardingStep(
@@ -26,8 +26,8 @@ struct OnboardingView: View {
 
                 OnboardingStep(
                     number: "3",
-                    title: "Compare et continue a lire",
-                    detail: "Le mode public reprend les masques Mac V1 et garde les dialogues/source sous chaque page. La capture privee reste une approximation de viewport. Original permet de comparer sans perdre le dessin."
+                    title: "Lis sans bandeau encombrant",
+                    detail: "Le bandeau se retracte en defilant. Remonte legerement ou touche sa poignee pour retrouver les commandes. Maintiens le bandeau pour l'original, les erreurs et les reglages. Les images publiques gardent les masques V1 ; les captures privees restent approximatives."
                 )
 
                 Text("En cas de page incompatible, utilise Safari ou importe une capture autorisee dans Lecteur. iOS ne permet pas de dessiner librement par-dessus les autres apps. V2 est une version personnelle distincte de V1, pas une promesse de compatibilite universelle ni de publication App Store.")

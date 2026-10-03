@@ -25,25 +25,22 @@ final class PartialTranslationReaderTests: XCTestCase {
         ReaderUITestSupport.launch(in: app)
         defer { app.terminate() }
         ReaderUITestSupport.configureLocalBackend(endpoint.absoluteString, in: app)
-        app.tabBars.buttons["Webtoon"].tap()
+        app.buttons["Fermer"].tap()
         ReaderUITestSupport.open(endpoint.appendingPathComponent("chapter"), in: app)
-        let ready = await ReaderUITestSupport.waitForPage(in: app, timeout: 15)
-        XCTAssertTrue(ready)
-        try await Task.sleep(for: .milliseconds(600))
-        app.buttons["v2.translate"].tap()
-        let authorize = app.buttons["Autoriser ce backend local"]
+        let authorize = app.buttons["Autoriser la traduction"]
         XCTAssertTrue(authorize.waitForExistence(timeout: 5))
         authorize.tap()
-        let transcript = app.buttons["Texte"]
-        let completed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: transcript)
+        let status = app.staticTexts["v2.status"]
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.label.contains("dialogues traduits") || status.label.contains("Aucun dialogue traduit")
+        }, object: status)
         await fulfillment(of: [completed], timeout: 45)
         let overlays = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
         XCTAssertEqual(overlays.count, allRejected ? 0 : 2)
         if allRejected {
-            XCTAssertTrue(app.segmentedControls["v2.presentation"].buttons["Original"].isSelected)
             XCTAssertTrue(app.staticTexts["v2.status"].label.contains("Aucun dialogue traduit."))
         }
-        transcript.tap()
+        ReaderUITestSupport.openContext("Texte et erreurs", in: app)
         XCTAssertTrue(app.staticTexts["CONTROLLED REFUSAL"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Refus controle de la fixture originale."].exists)
         let successes = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedText."))
@@ -52,7 +49,7 @@ final class PartialTranslationReaderTests: XCTestCase {
         let batches = await server.recorder.batches
         XCTAssertEqual(batches.map(\.count), allRejected ? [3, 2, 1] : [3, 2])
         XCTAssertTrue(Set(batches[0]).isSuperset(of: Set(batches[1])))
-        ReaderUITestSupport.configureLocalBackend("http://127.0.0.1:8787", in: app)
+        ReaderUITestSupport.revokeTextConsent(in: app)
     }
 }
 

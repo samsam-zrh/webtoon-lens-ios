@@ -62,6 +62,10 @@ public final class PublicChapterClient: PublicChapterClientProtocol {
         return try response.segments.map { try $0.validated() }
     }
 
+    public func warmup() async throws {
+        _ = try await request(path: "v1/webtoon/warmup")
+    }
+
     private func request(path: String, query: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
         try Task.checkCancellation()
         _ = try LocalBackendAddress.parse(baseURL.absoluteString)

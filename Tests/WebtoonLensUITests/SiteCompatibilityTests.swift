@@ -25,6 +25,9 @@ final class SiteCompatibilityTests: XCTestCase {
     }
 
     private func checkSite(_ site: String, url: String) async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_LEGACY_MODE_MATRIX"] == "1" else {
+            throw XCTSkip("Historical manual-mode matrix is archived; use UnifiedWebnovelTests for the single-intent reader.")
+        }
         guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_SITES"] == "1",
               let backend = ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] else {
             throw XCTSkip("Real-site checks require the explicit WebtoonLensV2SiteChecks scheme.")

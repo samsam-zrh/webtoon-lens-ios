@@ -36,44 +36,15 @@ struct AppView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        @Bindable var appModel = appModel
-
-        TabView(selection: $appModel.selectedTab) {
+        WebtoonBrowserView()
+        .fullScreenCover(isPresented: Binding(
+            get: { appModel.selectedTab == .reader },
+            set: { if !$0 { appModel.selectedTab = .webtoon } }
+        )) {
             NavigationStack {
-                OnboardingView()
-                    .navigationTitle(WebtoonLensConstants.displayName)
+                ReaderView().navigationTitle("Lecteur")
+                    .toolbar { Button("Fermer") { appModel.selectedTab = .webtoon } }
             }
-            .tabItem { Label(AppTab.home.title, systemImage: AppTab.home.systemImage) }
-            .tag(AppTab.home)
-
-            NavigationStack {
-                WebtoonBrowserView()
-                    .navigationTitle("Webtoon V2")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
-            .tabItem { Label(AppTab.webtoon.title, systemImage: AppTab.webtoon.systemImage) }
-            .tag(AppTab.webtoon)
-
-            NavigationStack {
-                ReaderView()
-                    .navigationTitle("Lecteur")
-            }
-            .tabItem { Label(AppTab.reader.title, systemImage: AppTab.reader.systemImage) }
-            .tag(AppTab.reader)
-
-            NavigationStack {
-                SeriesView()
-                    .navigationTitle("Series")
-            }
-            .tabItem { Label(AppTab.series.title, systemImage: AppTab.series.systemImage) }
-            .tag(AppTab.series)
-
-            NavigationStack {
-                SettingsView()
-                    .navigationTitle("Reglages")
-            }
-            .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.systemImage) }
-            .tag(AppTab.settings)
         }
         .task {
             appModel.routeForPendingHandoffs()

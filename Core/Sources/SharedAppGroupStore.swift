@@ -2,10 +2,16 @@ import Foundation
 
 public enum SharedAppGroupStore {
     public static var defaults: UserDefaults {
+        #if DEBUG && targetEnvironment(simulator)
+        if let suite = ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_PREFERENCES"],
+           suite.hasPrefix("WebtoonLensV2.UI-"), let isolated = UserDefaults(suiteName: suite) {
+            return isolated
+        }
+        #endif
         #if WEBTOON_LENS_PERSONAL
-        .standard
+        return .standard
         #else
-        UserDefaults(suiteName: WebtoonLensConstants.appGroupIdentifier) ?? .standard
+        return UserDefaults(suiteName: WebtoonLensConstants.appGroupIdentifier) ?? .standard
         #endif
     }
 
@@ -37,17 +43,40 @@ public final class SharedSettingsStore {
     }
 
     private let defaults: UserDefaults
+    private var isolatedValues: [String: Any]?
 
     public init(defaults: UserDefaults = SharedAppGroupStore.defaults) {
         self.defaults = defaults
-        if defaults.string(forKey: Key.defaultStylePrompt) == nil {
-            defaults.set(WebtoonLensConstants.defaultStylePrompt, forKey: Key.defaultStylePrompt)
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_PREFERENCES"]?.hasPrefix("WebtoonLensV2.UI-") == true {
+            isolatedValues = [:]
+            let arguments = ProcessInfo.processInfo.arguments
+            for key in [Key.backendBaseURL, Key.defaultStylePrompt, Key.consentedTextBackend,
+                        Key.consentedPublicChapterBackend, Key.lastPublicChapterURL] {
+                if let index = arguments.firstIndex(of: "-\(key)"), index + 1 < arguments.count {
+                    isolatedValues?[key] = arguments[index + 1]
+                }
+            }
         }
+        #endif
+        if string(for: Key.defaultStylePrompt) == nil {
+            set(WebtoonLensConstants.defaultStylePrompt, for: Key.defaultStylePrompt)
+        }
+    }
+
+    private func string(for key: String) -> String? {
+        if let isolatedValues { return isolatedValues[key] as? String }
+        return defaults.string(forKey: key)
+    }
+
+    private func set(_ value: Any?, for key: String) {
+        if isolatedValues != nil { isolatedValues?[key] = value }
+        else { defaults.set(value, forKey: key) }
     }
 
     public var backendBaseURL: URL? {
         get {
-            guard let value = defaults.string(forKey: Key.backendBaseURL), !value.isEmpty else { return nil }
+            guard let value = string(for: Key.backendBaseURL), !value.isEmpty else { return nil }
             return try? LocalBackendAddress.parse(value)
         }
         set {
@@ -56,36 +85,36 @@ public final class SharedSettingsStore {
     }
 
     public var backendBaseURLString: String {
-        get { defaults.string(forKey: Key.backendBaseURL) ?? "" }
+        get { string(for: Key.backendBaseURL) ?? "" }
         set {
             if newValue != backendBaseURLString {
-                defaults.removeObject(forKey: Key.consentedTextBackend)
-                defaults.removeObject(forKey: Key.consentedPublicChapterBackend)
+                set(nil, for: Key.consentedTextBackend)
+                set(nil, for: Key.consentedPublicChapterBackend)
             }
-            defaults.set(newValue, forKey: Key.backendBaseURL)
+            set(newValue, for: Key.backendBaseURL)
         }
     }
 
     public var allowImageFallback: Bool {
-        get { defaults.bool(forKey: Key.allowImageFallback) }
-        set { defaults.set(newValue, forKey: Key.allowImageFallback) }
+        get { isolatedValues == nil ? defaults.bool(forKey: Key.allowImageFallback) : isolatedValues?[Key.allowImageFallback] as? Bool ?? false }
+        set { set(newValue, for: Key.allowImageFallback) }
     }
 
     public var defaultStylePrompt: String {
-        get { defaults.string(forKey: Key.defaultStylePrompt) ?? WebtoonLensConstants.defaultStylePrompt }
-        set { defaults.set(newValue, forKey: Key.defaultStylePrompt) }
+        get { string(for: Key.defaultStylePrompt) ?? WebtoonLensConstants.defaultStylePrompt }
+        set { set(newValue, for: Key.defaultStylePrompt) }
     }
 
     public var hasTextTranslationConsent: Bool {
         guard let url = backendBaseURL else { return false }
-        return defaults.string(forKey: Key.consentedTextBackend) == url.absoluteString
+        return string(for: Key.consentedTextBackend) == url.absoluteString
     }
 
     public func setTextTranslationConsent(_ allowed: Bool) {
         if allowed, let url = backendBaseURL {
-            defaults.set(url.absoluteString, forKey: Key.consentedTextBackend)
+            set(url.absoluteString, for: Key.consentedTextBackend)
         } else {
-            defaults.removeObject(forKey: Key.consentedTextBackend)
+            set(nil, for: Key.consentedTextBackend)
         }
     }
 
@@ -98,14 +127,14 @@ public final class SharedSettingsStore {
 
     public var hasPublicChapterConsent: Bool {
         guard let url = backendBaseURL else { return false }
-        return defaults.string(forKey: Key.consentedPublicChapterBackend) == url.absoluteString
+        return string(for: Key.consentedPublicChapterBackend) == url.absoluteString
     }
 
     public func setPublicChapterConsent(_ allowed: Bool) {
         if allowed, let url = backendBaseURL {
-            defaults.set(url.absoluteString, forKey: Key.consentedPublicChapterBackend)
+            set(url.absoluteString, for: Key.consentedPublicChapterBackend)
         } else {
-            defaults.removeObject(forKey: Key.consentedPublicChapterBackend)
+            set(nil, for: Key.consentedPublicChapterBackend)
         }
     }
 
@@ -117,12 +146,12 @@ public final class SharedSettingsStore {
     }
 
     public var lastPublicChapterURL: String {
-        defaults.string(forKey: Key.lastPublicChapterURL) ?? ""
+        string(for: Key.lastPublicChapterURL) ?? ""
     }
 
     public func rememberPublicChapter(_ url: URL) throws {
         let validated = try PublicChapterURL.parse(url.absoluteString)
-        defaults.set(validated.absoluteString, forKey: Key.lastPublicChapterURL)
+        set(validated.absoluteString, for: Key.lastPublicChapterURL)
     }
 }
 

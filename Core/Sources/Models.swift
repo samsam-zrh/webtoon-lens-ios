@@ -186,6 +186,7 @@ public struct GlossaryUpdate: Identifiable, Codable, Hashable, Sendable {
 public enum SegmentFailureKind: String, Codable, Hashable, Sendable {
     case dialogueRejected
     case retryLimitReached
+    case sourceChanged
 }
 
 public struct SegmentTranslationFailure: Identifiable, Codable, Hashable, Sendable {

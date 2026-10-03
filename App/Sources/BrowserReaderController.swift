@@ -41,6 +41,12 @@ final class BrowserReaderController: NSObject {
     private(set) var result: TranslationResult?
     private(set) var status = "Colle un lien HTTP ou HTTPS. La traduction et le mode Auto sont desactives au depart."
     private(set) var hasError = false
+    private(set) var isCapturePending = false
+    private(set) var captureProof = ""
+    @ObservationIgnored var onScroll: (@MainActor (Double) -> Void)?
+    @ObservationIgnored var onReady: (@MainActor () -> Void)?
+    @ObservationIgnored var onNavigationStarted: (@MainActor (Bool) -> Void)?
+    @ObservationIgnored var onTranslated: (@MainActor () -> Void)?
 
     @ObservationIgnored private weak var surface: BrowserSurfaceView?
     @ObservationIgnored private var lifecycle = BrowserCaptureLifecycle()
@@ -57,6 +63,13 @@ final class BrowserReaderController: NSObject {
     @ObservationIgnored private var contextID = ""
     @ObservationIgnored private var documentID: String?
     @ObservationIgnored private var documentRevision = -1
+    @ObservationIgnored private var contentRevision = -1
+    @ObservationIgnored private var displayGuardTask: Task<Void, Never>?
+    @ObservationIgnored private var displayedCapture: (BrowserCaptureToken, [(NormalizedRect, String)])?
+    @ObservationIgnored private var explicitCaptureIntent = false
+    @ObservationIgnored private var stabilizationRetries = 0
+    @ObservationIgnored private var intentWindow: BrowserStabilizationWindow?
+    @ObservationIgnored private var navigationUserInitiated = false
     @ObservationIgnored private var translate: (@MainActor (BrowserViewportCapture) async throws -> TranslationResult)?
 
     private static let contentWorld = WKContentWorld.world(name: "WebtoonLensV2")
@@ -72,14 +85,17 @@ final class BrowserReaderController: NSObject {
             source: BrowserBridgeScript.source, injectionTime: .atDocumentEnd,
             forMainFrameOnly: BrowserBridgeScript.mainFrameOnly, in: Self.contentWorld
         ))
-        surface.onSizeChange = { [weak self] in self?.viewportChanged(reason: "size") }
+        surface.onSizeChange = { [weak self] in self?.viewportChanged(reason: "size", settling: true) }
         let scrollView = webView.scrollView
         scrollView.panGestureRecognizer.addTarget(self, action: #selector(gestureChanged(_:)))
         scrollView.pinchGestureRecognizer?.addTarget(self, action: #selector(gestureChanged(_:)))
         observations = [
-            scrollView.observe(\.contentOffset, options: [.old, .new]) { [weak self] _, change in
+            scrollView.observe(\.contentOffset, options: [.old, .new]) { [weak self] scroll, change in
                 guard change.oldValue != change.newValue else { return }
-                MainActor.assumeIsolated { self?.viewportChanged(reason: "offset") }
+                MainActor.assumeIsolated {
+                    self?.viewportChanged(reason: "offset", settling: !scroll.isDragging && !scroll.isDecelerating)
+                    if scroll.isDragging || scroll.isDecelerating { self?.onScroll?(Double(scroll.contentOffset.y)) }
+                }
             },
             scrollView.observe(\.zoomScale, options: [.old, .new]) { [weak self] _, change in
                 guard change.oldValue != change.newValue else { return }
@@ -147,6 +163,8 @@ final class BrowserReaderController: NSObject {
         surface.webView.load(URLRequest(url: url))
     }
 
+    var canCapture: Bool { ready && currentURL != nil && active }
+
     func goBack() {
         invalidate()
         surface?.webView.goBack()
@@ -182,7 +200,11 @@ final class BrowserReaderController: NSObject {
         guard ready, currentURL != nil else { report(BrowserCaptureError.unavailablePage); return }
         invalidate()
         wantsTranslation = true
+        isCapturePending = true
         manualCaptureRequested = true
+        explicitCaptureIntent = true
+        stabilizationRetries = 0
+        intentWindow = BrowserStabilizationWindow()
         stabilizationWindow = BrowserStabilizationWindow()
         autoPausedAfterError = false
         status = "Attente d'une zone stable..."
@@ -204,14 +226,22 @@ final class BrowserReaderController: NSObject {
         pendingCapture = false
         manualCaptureRequested = false
         stabilizationWindow = nil
+        explicitCaptureIntent = false
+        intentWindow = nil
+        isCapturePending = false
+        displayGuardTask?.cancel()
+        displayedCapture = nil
         surface?.clearTranslation()
         result = nil
     }
 
-    private func viewportChanged(reason: String) {
-        Self.logger.debug("Viewport invalidated: \(reason, privacy: .public), pending manual: \(self.manualCaptureRequested), translating: \(self.isTranslating)")
+    private func viewportChanged(reason: String, settling: Bool = false) {
+        Self.logger.notice("Viewport invalidated: \(reason, privacy: .public)")
         let shouldResumeManual = manualCaptureRequested
         let pendingWindow = stabilizationWindow
+        let retryIntent = explicitCaptureIntent && settling && stabilizationRetries < 2 && intentWindow?.hasExpired() == false
+        let retries = stabilizationRetries
+        let window = intentWindow
         let hadWork = result != nil || isTranslating
         invalidate()
         if hadWork {
@@ -220,7 +250,20 @@ final class BrowserReaderController: NSObject {
         }
         if shouldResumeManual {
             manualCaptureRequested = true
+            isCapturePending = true
             stabilizationWindow = pendingWindow
+            explicitCaptureIntent = true
+            intentWindow = window
+            scheduleCapture()
+        } else if retryIntent {
+            explicitCaptureIntent = true
+            intentWindow = window
+            stabilizationRetries = retries + 1
+            manualCaptureRequested = true
+            wantsTranslation = true
+            isCapturePending = true
+            stabilizationWindow = window
+            status = "Mise en page en cours · traduction apres stabilisation…"
             scheduleCapture()
         } else if wantsTranslation && autoTranslate && !autoPausedAfterError {
             scheduleCapture()
@@ -274,6 +317,7 @@ final class BrowserReaderController: NSObject {
         let runID = UUID()
         activeRunID = runID
         isTranslating = true
+        isCapturePending = true
         activeTask = Task { [weak self] in
             guard let self else { return }
             await self.captureAndTranslate()
@@ -281,6 +325,7 @@ final class BrowserReaderController: NSObject {
                 self.activeRunID = nil
                 self.activeTask = nil
                 self.isTranslating = false
+                self.isCapturePending = false
                 self.pump()
             }
         }
@@ -288,34 +333,59 @@ final class BrowserReaderController: NSObject {
 
     private func captureAndTranslate() async {
         var token: BrowserCaptureToken?
+        var capturedDocument: BrowserDocumentState?
         let startingEpoch = lifecycle.epoch
         defer { if let token { lifecycle.finish(token) } }
         do {
             guard let surface, let translate, active, ready else { throw BrowserCaptureError.unavailablePage }
             let geometry = surface.geometry
             let document = try await readDocument()
+            capturedDocument = document
             try Task.checkCancellation()
             guard lifecycle.epoch == startingEpoch, geometry.matches(surface.geometry) else { throw CancellationError() }
             let captureToken = try lifecycle.begin(geometry: geometry, document: document)
             token = captureToken
             status = "Capture locale et OCR sur l'iPhone..."
-            let capture = try await snapshot()
+            let capture = try await snapshot(document: document)
             let afterCapture = try await readDocument()
             try ensureCurrent(captureToken, document: afterCapture)
 
             status = "Traduction du texte OCR par ton backend local..."
-            let translated = try await translate(capture)
+            var translated = try await translate(capture)
             let afterTranslation = try await readDocument()
             try ensureCurrent(captureToken, document: afterTranslation)
 
             // Canvas pixels can change without a DOM mutation. Recheck the source itself.
-            let verification = try await snapshot()
+            let verification = try await snapshot(document: afterTranslation)
             let beforePresentation = try await readDocument()
             try ensureCurrent(captureToken, document: beforePresentation)
-            guard ImageHasher.sha256Hex(capture.data) == ImageHasher.sha256Hex(verification.data) else {
-                throw BrowserCaptureError.changedContent
+            guard let sourcePixels = capture.image.cgImage, let verificationPixels = verification.image.cgImage else {
+                throw BrowserCaptureError.unreadableSnapshot
             }
-            let count = surface.present(capture: capture.image, result: translated)
+            var accepted: [TranslatedSegmentPayload] = []
+            for segment in translated.segments {
+                if try ReadingPixelFingerprint.value(for: sourcePixels, region: segment.boundingBox) ==
+                    ReadingPixelFingerprint.value(for: verificationPixels, region: segment.boundingBox) {
+                    accepted.append(segment)
+                } else {
+                    translated.failures.append(SegmentTranslationFailure(
+                        source: TranslationSourceSegment(id: segment.id, text: segment.sourceText,
+                            boundingBox: segment.boundingBox, confidence: segment.confidence, readingOrder: segment.readingOrder),
+                        message: "Cette zone a change pendant la traduction ; son original est conserve.", kind: .sourceChanged
+                    ))
+                }
+            }
+            guard !accepted.isEmpty || translated.segments.isEmpty else { throw BrowserCaptureError.changedContent }
+            translated.segments = accepted
+            let rect = captureRect(document: document)
+            let count = surface.present(capture: capture.image, result: translated, in: rect)
+            let proof = BrowserReadingProof(
+                pageURL: document.url, region: document.captureRegion,
+                readingKind: document.readingSource?.split(separator: ":").dropFirst().first.map(String.init),
+                pixelWidth: sourcePixels.width, pixelHeight: sourcePixels.height,
+                translatedSegments: translated.segments.count, fittedSegments: count
+            )
+            captureProof = String(decoding: try JSONEncoder().encode(proof), as: UTF8.self)
             result = translated
             hasError = !translated.failures.isEmpty
             if translated.segments.isEmpty {
@@ -329,12 +399,38 @@ final class BrowserReaderController: NSObject {
                 let skipped = translated.segments.count - count
                 status = "Capture traduite : \(count) zones\(skipped > 0 ? ", \(skipped) dans Texte" : ""). Defiler, zoomer ou choisir Original rend la page vivante."
             }
+            if count > 0 {
+                displayedCapture = (captureToken, try accepted.filter { surface.presentedSegmentIDs.contains($0.id) }.map {
+                    ($0.boundingBox, try ReadingPixelFingerprint.value(for: sourcePixels, region: $0.boundingBox))
+                })
+                startDisplayGuard()
+                onTranslated?()
+            }
         } catch is CancellationError {
             // Never present or report an obsolete viewport result.
         } catch {
             if !Task.isCancelled, lifecycle.epoch == startingEpoch, active {
-                report(error)
+                if case BrowserCaptureError.changedContent = error, let capturedDocument,
+                   await canRestabilize(capturedDocument) {
+                    viewportChanged(reason: "reading layout settled", settling: true)
+                } else {
+                    report(error)
+                }
             }
+        }
+    }
+
+    private func canRestabilize(_ previous: BrowserDocumentState) async -> Bool {
+        guard explicitCaptureIntent, stabilizationRetries < 2, intentWindow?.hasExpired() == false else { return false }
+        do {
+            let current = try await readDocument()
+            try current.validateForCapture()
+            return BrowserRestabilizationPolicy.allows(
+                previous: previous, current: current, explicitIntent: explicitCaptureIntent,
+                retries: stabilizationRetries, withinWindow: intentWindow?.hasExpired() == false
+            )
+        } catch {
+            return false
         }
     }
 
@@ -354,11 +450,21 @@ final class BrowserReaderController: NSObject {
         return try await WebKitViewportCapture.document(in: webView, world: Self.contentWorld)
     }
 
-    private func snapshot() async throws -> BrowserViewportCapture {
+    private func captureRect(document: BrowserDocumentState) -> CGRect {
+        guard let bounds = surface?.webView.bounds else { return .zero }
+        let region = document.captureRegion ?? NormalizedRect(x: 0, y: 0, width: 1, height: 1)
+        return CGRect(x: region.x * bounds.width, y: region.y * bounds.height,
+                      width: region.width * bounds.width, height: region.height * bounds.height)
+            .integral.intersection(bounds)
+    }
+
+    private func snapshot(document: BrowserDocumentState) async throws -> BrowserViewportCapture {
         guard let surface else { throw BrowserCaptureError.unavailablePage }
+        let rect = captureRect(document: document)
         let configuration = WKSnapshotConfiguration()
-        configuration.rect = surface.webView.bounds
-        configuration.snapshotWidth = NSNumber(value: try surface.geometry.snapshotWidth(
+        configuration.rect = rect
+        let geometry = BrowserViewportGeometry(width: rect.width, height: rect.height, offsetX: 0, offsetY: 0, zoomScale: 1)
+        configuration.snapshotWidth = NSNumber(value: try geometry.snapshotWidth(
             pixelScale: Double(surface.webView.traitCollection.displayScale)
         ))
         configuration.afterScreenUpdates = true
@@ -368,6 +474,40 @@ final class BrowserReaderController: NSObject {
             throw BrowserCaptureError.unreadableSnapshot
         }
         return BrowserViewportCapture(image: image, data: data)
+    }
+
+    private func startDisplayGuard() {
+        displayGuardTask?.cancel()
+        displayGuardTask = Task { [weak self] in
+            do {
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(500))
+                    guard let self, let (token, fingerprints) = self.displayedCapture, let surface = self.surface else { return }
+                    let document = try await self.readDocument()
+                    try document.validateForCapture()
+                    guard token.epoch == self.lifecycle.epoch, token.geometry.matches(surface.geometry),
+                          token.document.matchesReading(document) else {
+                        let sameSource = token.document.documentID == document.documentID &&
+                            token.document.url == document.url && token.document.readingSource == document.readingSource &&
+                            token.document.revision == document.revision
+                        self.viewportChanged(reason: "reading geometry changed", settling: sameSource)
+                        return
+                    }
+                    let verification = try await self.snapshot(document: document)
+                    try Task.checkCancellation()
+                    guard let image = verification.image.cgImage else { throw BrowserCaptureError.unreadableSnapshot }
+                    for (region, fingerprint) in fingerprints {
+                        if try ReadingPixelFingerprint.value(for: image, region: region) != fingerprint {
+                            self.viewportChanged(reason: "reading text pixels changed")
+                            return
+                        }
+                    }
+                }
+            } catch is CancellationError {
+            } catch {
+                if !Task.isCancelled { self?.report(error) }
+            }
+        }
     }
 
     private static func isUsable(_ image: UIImage) -> Bool {
@@ -396,6 +536,9 @@ extension BrowserReaderController: WKNavigationDelegate, WKUIDelegate, WKScriptM
             }
         }
         decisionHandler(.allow)
+        if action.targetFrame?.isMainFrame != false {
+            navigationUserInitiated = action.navigationType != .other
+        }
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
@@ -411,7 +554,9 @@ extension BrowserReaderController: WKNavigationDelegate, WKUIDelegate, WKScriptM
         isLoading = true
         documentID = nil
         documentRevision = -1
+        contentRevision = -1
         invalidate()
+        onNavigationStarted?(navigationUserInitiated)
         status = "Chargement du site. Connexion et verifications restent sous ton controle."
         hasError = false
     }
@@ -426,6 +571,7 @@ extension BrowserReaderController: WKNavigationDelegate, WKUIDelegate, WKScriptM
         currentURL = webView.url
         status = "Page prete. Affiche uniquement le chapitre puis touche Traduire ; compatibilite selon le site."
         if wantsTranslation && autoTranslate && !autoPausedAfterError { scheduleCapture() }
+        onReady?()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -456,10 +602,20 @@ extension BrowserReaderController: WKNavigationDelegate, WKUIDelegate, WKScriptM
             let change = try JSONDecoder().decode(PageChange.self, from: data)
             guard change.url == surface?.webView.url?.absoluteString,
                   documentID == nil || documentID == change.documentID,
-                  change.revision > documentRevision else { return }
+                  change.kind == "content" ? (change.contentRevision ?? 0) > contentRevision : change.revision > documentRevision else { return }
             documentID = change.documentID
             documentRevision = change.revision
-            viewportChanged(reason: "document revision \(change.revision)")
+            if change.kind == "content" {
+                contentRevision = change.contentRevision ?? contentRevision
+                // The source geometry/guards and normalized reading pixels are checked before commit.
+            } else {
+                switch change.blockedReason {
+                case "form": report(BrowserCaptureError.sensitivePage)
+                case "challenge": report(BrowserCaptureError.protectedPage)
+                case "frame", "media": report(BrowserCaptureError.unsupportedFrame)
+                default: viewportChanged(reason: change.reason ?? "document revision", settling: change.reason == "layout")
+                }
+            }
         } catch {
             report(BrowserCaptureError.invalidBridge)
         }
@@ -470,6 +626,20 @@ private struct PageChange: Decodable {
     let documentID: String
     let revision: Int
     let url: String
+    let kind: String?
+    let contentRevision: Int?
+    let blockedReason: String?
+    let reason: String?
+}
+
+private struct BrowserReadingProof: Encodable {
+    let pageURL: String
+    let region: NormalizedRect?
+    let readingKind: String?
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let translatedSegments: Int
+    let fittedSegments: Int
 }
 
 @MainActor
@@ -478,6 +648,7 @@ final class BrowserSurfaceView: UIView {
     var onSizeChange: (() -> Void)?
     private let translationLayer = UIView()
     private var previousSize = CGSize.zero
+    private(set) var presentedSegmentIDs = Set<String>()
 
     override init(frame: CGRect) {
         let configuration = WKWebViewConfiguration()
@@ -520,18 +691,21 @@ final class BrowserSurfaceView: UIView {
     func clearTranslation() {
         translationLayer.isHidden = true
         translationLayer.subviews.forEach { $0.removeFromSuperview() }
+        presentedSegmentIDs.removeAll()
     }
 
-    func present(capture: UIImage, result: TranslationResult) -> Int {
+    func present(capture: UIImage, result: TranslationResult, in region: CGRect) -> Int {
         clearTranslation()
         let source = UIImageView(image: capture)
-        source.frame = bounds
+        source.frame = region
         source.contentMode = .scaleToFill
         source.isAccessibilityElement = false
         translationLayer.addSubview(source)
         var occupied: [CGRect] = []
         for segment in result.segments {
-            guard let frame = ViewportOverlayLayout.frame(for: segment, in: bounds.size),
+            guard let localFrame = ViewportOverlayLayout.frame(for: segment, in: region.size) else { continue }
+            let frame = localFrame.offsetBy(dx: region.minX, dy: region.minY)
+            guard
                   !occupied.contains(where: { $0.intersects(frame) }),
                   let font = fittingFont(for: segment.translatedText, in: frame.size) else { continue }
             let label = UILabel(frame: frame)
@@ -549,6 +723,7 @@ final class BrowserSurfaceView: UIView {
             label.layer.borderColor = UIColor.black.withAlphaComponent(0.25).cgColor
             translationLayer.addSubview(label)
             occupied.append(frame)
+            presentedSegmentIDs.insert(segment.id)
         }
         if !occupied.isEmpty { translationLayer.isHidden = false }
         return occupied.count

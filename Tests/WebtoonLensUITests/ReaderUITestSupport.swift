@@ -3,6 +3,7 @@ import XCTest
 @MainActor
 enum ReaderUITestSupport {
     static func launch(in app: XCUIApplication) {
+        app.launchEnvironment["WEBTOON_LENS_TEST_PREFERENCES"] = "WebtoonLensV2.UI-\(UUID())"
         app.launchArguments += ["-v2.lastPublicChapterURL", ""]
         app.launch()
     }
@@ -11,7 +12,7 @@ enum ReaderUITestSupport {
         let endpoint = URLComponents(string: backend)
         XCTAssertEqual(endpoint?.host, "127.0.0.1")
         XCTAssertEqual(endpoint?.scheme, "http")
-        app.tabBars.buttons["Reglages"].tap()
+        openContext("Reglages", in: app)
         let backendField = app.textFields["v2.backend"]
         XCTAssertTrue(backendField.waitForExistence(timeout: 5))
         let existingValue = backendField.value as? String ?? ""
@@ -20,7 +21,7 @@ enum ReaderUITestSupport {
                           URLComponents(string: existingValue)?.host == "127.0.0.1",
                           "Use a fresh V2 test install rather than overwrite another backend configuration.")
             backendField.tap()
-            if existingValue.hasPrefix("http://") {
+            if existingValue.hasPrefix("http://"), existingValue != "http://mon-mac.local:8787" {
                 backendField.press(forDuration: 1)
                 let selectAll = [app.menuItems["Select All"], app.buttons["Select All"]].first { $0.exists }
                 XCTAssertNotNil(selectAll, "The test must select the complete known fixture endpoint before replacing it.")
@@ -34,7 +35,7 @@ enum ReaderUITestSupport {
     }
 
     static func revokeTextConsent(in app: XCUIApplication) {
-        app.tabBars.buttons["Reglages"].tap()
+        openContext("Reglages", in: app)
         setTextConsentOff(in: app)
         saveSettings(in: app)
     }
@@ -46,7 +47,18 @@ enum ReaderUITestSupport {
         field.tap()
         field.typeText(url.absoluteString)
         XCTAssertEqual(field.value as? String, url.absoluteString)
-        app.buttons["Ouvrir"].tap()
+        app.buttons["v2.translate"].tap()
+    }
+
+    static func openContext(_ label: String, in app: XCUIApplication) {
+        let handle = app.descendants(matching: .any)["v2.headerHandle"]
+        if handle.exists { handle.tap() }
+        let status = app.staticTexts["v2.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        status.press(forDuration: 1)
+        let action = app.buttons[label]
+        XCTAssertTrue(action.waitForExistence(timeout: 5), "Context action \(label) must remain available without permanent chrome.")
+        action.tap()
     }
 
     static func waitForPage(in app: XCUIApplication, timeout: TimeInterval) async -> Bool {

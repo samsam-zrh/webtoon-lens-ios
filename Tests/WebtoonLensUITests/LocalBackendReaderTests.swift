@@ -21,36 +21,29 @@ final class LocalBackendReaderTests: XCTestCase {
         defer { app.terminate() }
 
         ReaderUITestSupport.configureLocalBackend(backend, in: app)
-        app.tabBars.buttons["Webtoon"].tap()
+        app.buttons["Fermer"].tap()
 
         let address = app.textFields["v2.address"]
         address.tap()
         address.typeText(chapter.absoluteString)
-        app.buttons["Ouvrir"].tap()
-        let status = app.staticTexts["v2.status"]
-        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Page prete."), object: status)
-        await fulfillment(of: [loaded], timeout: 20)
-        try await Task.sleep(for: .milliseconds(800))
-        XCTAssertEqual(app.alerts.count, 0, "Do not accept an OS or site prompt through a test.")
-
         app.buttons["v2.translate"].tap()
-        let authorize = app.buttons["Autoriser ce backend local"]
+        let authorize = app.buttons["Autoriser la traduction"]
         XCTAssertTrue(authorize.waitForExistence(timeout: 5), "Text export must request app consent for this fixture.")
         authorize.tap()
 
-        let transcript = app.buttons["Texte"]
+        let status = app.staticTexts["v2.status"]
+        let overlays = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
         let translated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            transcript.isEnabled || status.label.contains("Original conserve.") || status.label.contains("Zone modifiee.")
-        }, object: transcript)
+            overlays.count > 0 || status.label.contains("Original conserve.") || status.label.contains("Zone modifiee.")
+        }, object: status)
         let completion = await XCTWaiter.fulfillment(of: [translated], timeout: 45)
         let captureStatus = XCTAttachment(string: status.label)
         captureStatus.name = "Native fixture capture completion status"
         captureStatus.lifetime = .keepAlways
         add(captureStatus)
         XCTAssertEqual(completion, .completed, status.label)
-        XCTAssertTrue(transcript.isEnabled, status.label)
+        XCTAssertGreaterThan(overlays.count, 0, status.label)
         XCTAssertFalse(status.label.contains("Original conserve."), status.label)
-        let overlays = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
         XCTAssertGreaterThan(overlays.count, 0, "The real result must be presented over this stable, readable fixture.")
         let french = overlays.element(boundBy: 0).label
         XCTAssertTrue(french.localizedCaseInsensitiveContains("ensemble"), french)
@@ -60,15 +53,14 @@ final class LocalBackendReaderTests: XCTestCase {
         evidence.lifetime = .keepAlways
         add(evidence)
 
-        transcript.tap()
-        XCTAssertTrue(app.navigationBars["Texte de la capture"].waitForExistence(timeout: 5))
+        ReaderUITestSupport.openContext("Texte et erreurs", in: app)
+        XCTAssertTrue(app.navigationBars["Texte et erreurs"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[cd] %@", "ensemble")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "WE LEAVE")).firstMatch.exists,
                       "Keep the recognized source alongside its translation.")
         app.buttons["Fermer"].tap()
-        app.segmentedControls["v2.presentation"].buttons["Original"].tap()
+        ReaderUITestSupport.openContext("Voir l'original", in: app)
         XCTAssertEqual(overlays.count, 0, "Original removes the native translated capture.")
-        XCTAssertFalse(transcript.isEnabled)
         XCTAssertTrue(app.webViews.firstMatch.staticTexts["WAIT FOR THE OTHERS."].exists,
                       "The original page is never replaced or rewritten.")
 

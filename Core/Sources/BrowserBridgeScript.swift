@@ -9,8 +9,14 @@ public enum BrowserBridgeScript {
       const documentID = window.crypto && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
       let revision = 0;
+      let contentRevision = 0;
       let disposed = false;
       const listeners = [];
+      const sourceIDs = new WeakMap();
+      let sourceSequence = 0;
+      let softTimer = 0;
+      let lastBlock = null;
+      let readingElement = null;
       const viewport = () => window.visualViewport;
       function visible(element) {
         const rect = element.getBoundingClientRect();
@@ -47,30 +53,72 @@ public enum BrowserBridgeScript {
       }
       function state() {
         const v = viewport();
+        const left = v ? v.offsetLeft : 0, top = v ? v.offsetTop : 0;
+        const width = v ? v.width : innerWidth, height = v ? v.height : innerHeight;
+        const candidates = Array.from(document.querySelectorAll('img, canvas')).filter(element => {
+          if (!visible(element)) return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width >= 140 && rect.height >= 160 &&
+            (element.tagName !== 'IMG' || (element.complete && element.naturalWidth >= 140));
+        }).map(element => {
+          const rect = element.getBoundingClientRect();
+          const x = Math.max(left, rect.left), y = Math.max(top, rect.top);
+          const right = Math.min(left + width, rect.right), bottom = Math.min(top + height, rect.bottom);
+          return { element, x, y, width: right - x, height: bottom - y };
+        }).filter(candidate => candidate.width >= 140 && candidate.height >= 120)
+          .sort((a, b) => b.width * b.height - a.width * a.height);
+        const reading = candidates[0];
+        readingElement = reading?.element || null;
+        let readingSource = null, captureRegion = null;
+        if (reading) {
+          if (!sourceIDs.has(reading.element)) sourceIDs.set(reading.element, ++sourceSequence);
+          const element = reading.element;
+          readingSource = `${sourceIDs.get(element)}:${element.tagName}:${element.currentSrc || ''}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`;
+          captureRegion = { x: (reading.x - left) / width, y: (reading.y - top) / height,
+            width: reading.width / width, height: reading.height / height };
+        }
         return {
-          documentID, revision, url: location.href, scrollX, scrollY,
+          documentID, revision, contentRevision, url: location.href, scrollX, scrollY,
           viewportWidth: v ? v.width : innerWidth,
           viewportHeight: v ? v.height : innerHeight,
           viewportLeft: v ? v.offsetLeft : 0,
           viewportTop: v ? v.offsetTop : 0,
           viewportScale: v ? v.scale : 1,
-          blockedReason: blockedReason()
+          blockedReason: blockedReason(), captureRegion, readingSource
         };
       }
-      function changed() {
+      function changed(reason = 'initial') {
         if (disposed) return;
         revision += 1;
         window.webkit.messageHandlers.webtoonLensV2Viewport.postMessage({
           documentID, revision, url: location.href
+          , kind: 'hard', reason, contentRevision, blockedReason: blockedReason()
         });
+      }
+      function contentChanged() {
+        if (disposed) return;
+        const block = blockedReason();
+        if (block !== lastBlock) {
+          lastBlock = block;
+          changed('privacy');
+          return;
+        }
+        clearTimeout(softTimer);
+        softTimer = setTimeout(() => {
+          contentRevision += 1;
+          window.webkit.messageHandlers.webtoonLensV2Viewport.postMessage({
+            documentID, revision, contentRevision, url: location.href, kind: 'content'
+          });
+        }, 80);
       }
       function listen(target, event, capture = false) {
         if (!target) return;
-        target.addEventListener(event, changed, { passive: true, capture });
-        listeners.push([target, event, capture]);
+        const handler = () => changed(event === 'resize' ? 'layout' : event);
+        target.addEventListener(event, handler, { passive: true, capture });
+        listeners.push([target, event, capture, handler]);
       }
       listen(document, 'scroll', true); // Includes nested scrolling containers.
-      listen(document, 'load', true);
+      document.addEventListener('load', contentChanged, true);
       listen(document, 'pointerdown', true);
       listen(document, 'keydown', true);
       listen(document, 'focusin', true);
@@ -81,19 +129,30 @@ public enum BrowserBridgeScript {
       listen(window, 'popstate');
       listen(viewport(), 'scroll');
       listen(viewport(), 'resize');
-      const mutations = new MutationObserver(changed);
+      const mutations = new MutationObserver(records => {
+        if (readingElement && records.some(record =>
+            (record.target === readingElement && record.type === 'attributes' &&
+              ['src', 'srcset'].includes(record.attributeName)) ||
+            (record.type !== 'attributes' && readingElement.contains(record.target)))) {
+          changed('reading-source');
+        } else {
+          contentChanged();
+        }
+      });
       mutations.observe(document.documentElement, {
         childList: true, subtree: true, attributes: true, characterData: true
       });
-      const sizes = new ResizeObserver(changed);
+      const sizes = new ResizeObserver(contentChanged);
       sizes.observe(document.documentElement);
       window.WebtoonLensV2 = {
         state,
         dispose() {
           disposed = true;
+          clearTimeout(softTimer);
           mutations.disconnect();
           sizes.disconnect();
-          for (const [target, event, capture] of listeners) target.removeEventListener(event, changed, capture);
+          document.removeEventListener('load', contentChanged, true);
+          for (const [target, event, capture, handler] of listeners) target.removeEventListener(event, handler, capture);
         }
       };
       changed();

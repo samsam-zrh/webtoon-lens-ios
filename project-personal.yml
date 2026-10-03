@@ -10,6 +10,9 @@ settings:
     SWIFT_VERSION: 5.0
     IPHONEOS_DEPLOYMENT_TARGET: 18.0
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WEBTOON_LENS_PERSONAL
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WEBTOON_LENS_PERSONAL DEBUG
 targets:
   WebtoonLensCore:
     type: framework
@@ -114,3 +117,17 @@ schemes:
       environmentVariables:
         WEBTOON_LENS_TEST_PUBLIC_CHAPTER: "1"
         WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787
+  WebtoonLensV2FocusedReader:
+    build:
+      targets:
+        WebtoonLensV2: all
+        WebtoonLensCoreTests: [test]
+        WebtoonLensUITests: [test]
+    test:
+      targets:
+        - WebtoonLensCoreTests
+        - WebtoonLensUITests
+      environmentVariables:
+        WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787
+        WEBTOON_LENS_TEST_PUBLIC_CHAPTER: "1"
+        WEBTOON_LENS_TEST_WEBNOVEL: "1"
