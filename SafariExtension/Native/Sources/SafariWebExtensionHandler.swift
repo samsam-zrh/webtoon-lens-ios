@@ -45,6 +45,7 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             glossary: SharedGlossarySnapshotStore.loadInstructions(seriesID: message.seriesID),
             style: settings.defaultStylePrompt
         )
+        guard result.failures.isEmpty else { throw TranslationClientError.partialTranslation(result.failures.count) }
 
         return SafariTranslateImageResponse(
             ok: true,

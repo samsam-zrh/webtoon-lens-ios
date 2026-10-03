@@ -82,6 +82,7 @@ targets:
       - Tests/WebtoonLensUITests
     dependencies:
       - target: WebtoonLensV2
+      - target: WebtoonLensCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.uitests

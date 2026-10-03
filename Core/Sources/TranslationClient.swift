@@ -48,6 +48,8 @@ public enum TranslationClientError: Error, LocalizedError {
     case invalidResponse
     case serverError(Int)
     case backendError(Int, String)
+    case dialogueRejected(segmentID: String, message: String)
+    case partialTranslation(Int)
     case missingBackend
 
     public var errorDescription: String? {
@@ -58,6 +60,10 @@ public enum TranslationClientError: Error, LocalizedError {
             return "Le serveur de traduction a renvoye le statut \(statusCode)."
         case .backendError(let statusCode, let message):
             return "Backend local (\(statusCode)) : \(message)"
+        case .dialogueRejected(_, let message):
+            return message
+        case .partialTranslation(let count):
+            return "\(count) dialogues en erreur : original conserve. Le lecteur de l'app donne les details et les traductions partielles."
         case .missingBackend:
             return "Configure un backend de traduction dans les reglages. L'app ne genere plus de fausses traductions locales."
         }
@@ -119,6 +125,12 @@ public final class WebtoonTranslationClient: TranslationClientProtocol {
         }
         guard 200..<300 ~= httpResponse.statusCode else {
             if let error = try? JSONDecoder().decode(BackendFailure.self, from: data), !error.error.isEmpty {
+                if error.code == "dialogue_translation_failed" {
+                    guard let id = error.failedSegmentID, request.segments.contains(where: { $0.id == id }) else {
+                        throw TranslationClientError.invalidResponse
+                    }
+                    throw TranslationClientError.dialogueRejected(segmentID: id, message: String(error.error.prefix(500)))
+                }
                 throw TranslationClientError.backendError(httpResponse.statusCode, String(error.error.prefix(500)))
             }
             throw TranslationClientError.serverError(httpResponse.statusCode)
@@ -131,6 +143,8 @@ public final class WebtoonTranslationClient: TranslationClientProtocol {
 
 private struct BackendFailure: Decodable {
     let error: String
+    let code: String?
+    let failedSegmentID: String?
 }
 
 private final class NoBackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {

@@ -14,6 +14,7 @@ public enum BrowserCaptureError: Error, LocalizedError {
     case unsupportedFrame
     case changedContent
     case invalidBridge
+    case unstableViewport
 
     public var errorDescription: String? {
         switch self {
@@ -41,6 +42,8 @@ public enum BrowserCaptureError: Error, LocalizedError {
             return "Le contenu a change pendant la traduction. L'original est conserve ; attends une zone stable puis reessaie."
         case .invalidBridge:
             return "Impossible de verifier l'etat de la page. Recharge-la ou utilise l'import manuel."
+        case .unstableViewport:
+            return "La page change en continu depuis 10 secondes. La capture est annulee ; attends une zone stable puis reessaie, ou importe une capture autorisee."
         }
     }
 }
@@ -198,6 +201,18 @@ public struct BrowserCaptureToken: Hashable, Sendable {
     public let epoch: UInt64
     public let geometry: BrowserViewportGeometry
     public let document: BrowserDocumentState
+}
+
+public struct BrowserStabilizationWindow: Sendable {
+    private let deadline: ContinuousClock.Instant
+
+    public init(now: ContinuousClock.Instant = ContinuousClock().now) {
+        deadline = now.advanced(by: .seconds(10))
+    }
+
+    public func hasExpired(now: ContinuousClock.Instant = ContinuousClock().now) -> Bool {
+        now >= deadline
+    }
 }
 
 public struct BrowserCaptureLifecycle: Sendable {

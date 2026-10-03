@@ -104,6 +104,16 @@ final class BrowserViewportTests: XCTestCase {
         XCTAssertTrue(lifecycle.canCommit(current, geometry: geometry, document: page(revision: 100)))
     }
 
+    func testManualStabilizationHasAFixedTenSecondDeadline() {
+        let started = ContinuousClock().now
+        let window = BrowserStabilizationWindow(now: started)
+        XCTAssertFalse(window.hasExpired(now: started.advanced(by: .milliseconds(9_999))))
+        XCTAssertTrue(window.hasExpired(now: started.advanced(by: .seconds(10))))
+        XCTAssertTrue(window.hasExpired(now: started.advanced(by: .seconds(30))))
+        let explicitRetry = BrowserStabilizationWindow(now: started.advanced(by: .seconds(30)))
+        XCTAssertFalse(explicitRetry.hasExpired(now: started.advanced(by: .seconds(30))))
+    }
+
     func testFormsChallengesAndFramesNeverReachCapture() {
         for reason in ["form", "challenge", "frame", "media", "scheme"] {
             var lifecycle = BrowserCaptureLifecycle()

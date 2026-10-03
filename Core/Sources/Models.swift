@@ -183,6 +183,24 @@ public struct GlossaryUpdate: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public enum SegmentFailureKind: String, Codable, Hashable, Sendable {
+    case dialogueRejected
+    case retryLimitReached
+}
+
+public struct SegmentTranslationFailure: Identifiable, Codable, Hashable, Sendable {
+    public var source: TranslationSourceSegment
+    public var message: String
+    public var kind: SegmentFailureKind
+    public var id: String { source.id }
+
+    public init(source: TranslationSourceSegment, message: String, kind: SegmentFailureKind) {
+        self.source = source
+        self.message = message
+        self.kind = kind
+    }
+}
+
 public struct TranslationResult: Codable, Hashable, Sendable {
     public var imageHash: String
     public var detectedSourceLanguage: String?
@@ -191,6 +209,7 @@ public struct TranslationResult: Codable, Hashable, Sendable {
     public var glossaryUpdates: [GlossaryUpdate]
     public var createdAt: Date
     public var durationMilliseconds: Int
+    public var failures: [SegmentTranslationFailure]
 
     public init(
         imageHash: String,
@@ -199,7 +218,8 @@ public struct TranslationResult: Codable, Hashable, Sendable {
         segments: [TranslatedSegmentPayload],
         glossaryUpdates: [GlossaryUpdate],
         createdAt: Date = Date(),
-        durationMilliseconds: Int
+        durationMilliseconds: Int,
+        failures: [SegmentTranslationFailure] = []
     ) {
         self.imageHash = imageHash
         self.detectedSourceLanguage = detectedSourceLanguage
@@ -208,6 +228,24 @@ public struct TranslationResult: Codable, Hashable, Sendable {
         self.glossaryUpdates = glossaryUpdates
         self.createdAt = createdAt
         self.durationMilliseconds = durationMilliseconds
+        self.failures = failures
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case imageHash, detectedSourceLanguage, targetLanguage, segments, glossaryUpdates
+        case createdAt, durationMilliseconds, failures
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        imageHash = try values.decode(String.self, forKey: .imageHash)
+        detectedSourceLanguage = try values.decodeIfPresent(String.self, forKey: .detectedSourceLanguage)
+        targetLanguage = try values.decode(String.self, forKey: .targetLanguage)
+        segments = try values.decode([TranslatedSegmentPayload].self, forKey: .segments)
+        glossaryUpdates = try values.decode([GlossaryUpdate].self, forKey: .glossaryUpdates)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        durationMilliseconds = try values.decode(Int.self, forKey: .durationMilliseconds)
+        failures = try values.decodeIfPresent([SegmentTranslationFailure].self, forKey: .failures) ?? []
     }
 }
 

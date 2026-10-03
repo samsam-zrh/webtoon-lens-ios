@@ -142,12 +142,29 @@ struct WebtoonBrowserView: View {
         }
         .sheet(isPresented: $showsTranscript) {
             NavigationStack {
-                List(browser.result?.segments ?? []) { segment in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(segment.translatedText).font(.body)
-                        Text(segment.sourceText).font(.caption).foregroundStyle(.secondary)
+                List {
+                    Section("Dialogues traduits") {
+                        ForEach(browser.result?.segments ?? []) { segment in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(segment.translatedText).font(.body)
+                                    .accessibilityIdentifier("v2.translatedText.\(segment.id)")
+                                Text(segment.sourceText).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .textSelection(.enabled)
+                        }
                     }
-                    .textSelection(.enabled)
+                    if let failures = browser.result?.failures, !failures.isEmpty {
+                        Section("Dialogues en erreur : original conserve") {
+                            ForEach(failures) { failure in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(failure.source.text)
+                                    Text(failure.message).font(.caption).foregroundStyle(.red)
+                                }
+                                .accessibilityIdentifier("v2.failedSegment.\(failure.id)")
+                                .textSelection(.enabled)
+                            }
+                        }
+                    }
                 }
                 .navigationTitle("Texte de la capture")
                 .toolbar { Button("Fermer") { showsTranscript = false } }

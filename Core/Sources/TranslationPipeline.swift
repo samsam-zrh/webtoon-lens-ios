@@ -23,53 +23,47 @@ public final class VisionOCRService: OCRRecognizing {
     public init() {}
 
     public func recognizeText(in image: UIImage, mode: OCRMode) async throws -> [OCRSegment] {
+        try Task.checkCancellation()
         guard let cgImage = image.cgImage else {
             throw TranslationPipelineError.invalidImage
         }
+        let orientation = CGImagePropertyOrientation(image.imageOrientation)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
-                let segments = observations.compactMap { observation -> OCRSegment? in
-                    guard let candidate = observation.topCandidates(1).first else { return nil }
-                    let box = observation.boundingBox
-                    let normalized = NormalizedRect(
-                        x: box.minX,
-                        y: 1 - box.maxY,
-                        width: box.width,
-                        height: box.height
-                    )
-                    return OCRSegment(
-                        sourceText: candidate.string.trimmingCharacters(in: .whitespacesAndNewlines),
-                        boundingBox: normalized,
-                        confidence: Double(candidate.confidence)
-                    )
-                }
-                .filter { !$0.sourceText.isEmpty }
-
-                continuation.resume(returning: WebtoonReadingOrder.sort(segments))
-            }
-
-            request.recognitionLevel = mode == .fast ? .fast : .accurate
-            request.recognitionLanguages = WebtoonLensConstants.supportedRecognitionLanguages
-            request.usesLanguageCorrection = true
-            request.minimumTextHeight = 0.008
-
-            let orientation = CGImagePropertyOrientation(image.imageOrientation)
-            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
+        let segments: [OCRSegment] = try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
+                    let request = VNRecognizeTextRequest()
+                    request.recognitionLevel = mode == .fast ? .fast : .accurate
+                    request.recognitionLanguages = WebtoonLensConstants.supportedRecognitionLanguages
+                    request.usesLanguageCorrection = true
+                    request.minimumTextHeight = 0.008
+                    let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
                     try handler.perform([request])
+
+                    let segments = (request.results ?? []).compactMap { observation -> OCRSegment? in
+                        guard let candidate = observation.topCandidates(1).first else { return nil }
+                        let box = observation.boundingBox
+                        let normalized = NormalizedRect(
+                            x: box.minX,
+                            y: 1 - box.maxY,
+                            width: box.width,
+                            height: box.height
+                        )
+                        return OCRSegment(
+                            sourceText: candidate.string.trimmingCharacters(in: .whitespacesAndNewlines),
+                            boundingBox: normalized,
+                            confidence: Double(candidate.confidence)
+                        )
+                    }
+                    .filter { !$0.sourceText.isEmpty }
+                    continuation.resume(returning: WebtoonReadingOrder.sort(segments))
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
         }
+        try Task.checkCancellation()
+        return segments
     }
 }
 
@@ -197,7 +191,7 @@ public actor WebtoonTranslationPipeline {
             segments: sourceSegments,
             glossary: glossary
         )
-        let response = try await client.translate(request).validated(against: request)
+        let response = try await TranslationBatchProcessor(client: client).translate(request)
         try Task.checkCancellation()
 
         let duration = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -207,10 +201,11 @@ public actor WebtoonTranslationPipeline {
             targetLanguage: targetLanguage,
             segments: response.segments.sorted { $0.readingOrder < $1.readingOrder },
             glossaryUpdates: response.glossaryUpdates,
-            durationMilliseconds: duration
+            durationMilliseconds: duration,
+            failures: response.failures
         )
 
-        await cache.store(result, for: cacheKey)
+        if result.failures.isEmpty { await cache.store(result, for: cacheKey) }
         try Task.checkCancellation()
         return result
     }

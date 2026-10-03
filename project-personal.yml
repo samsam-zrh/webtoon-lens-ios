@@ -56,6 +56,7 @@ targets:
       - Tests/WebtoonLensUITests
     dependencies:
       - target: WebtoonLensV2
+      - target: WebtoonLensCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.webtoonlens.v2.uitests
@@ -71,3 +72,27 @@ schemes:
       targets:
         - WebtoonLensCoreTests
         - WebtoonLensUITests
+  WebtoonLensV2LocalBackend:
+    build:
+      targets:
+        WebtoonLensV2: all
+        WebtoonLensUITests: [test]
+    test:
+      targets:
+        - WebtoonLensUITests
+      environmentVariables:
+        WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787
+  WebtoonLensV2SiteChecks:
+    build:
+      targets:
+        WebtoonLensV2: all
+        WebtoonLensCoreTests: [test]
+        WebtoonLensUITests: [test]
+    test:
+      targets:
+        - WebtoonLensCoreTests
+        - WebtoonLensUITests
+      environmentVariables:
+        WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787
+        WEBTOON_LENS_TEST_SITES: "1"
+        WEBTOON_LENS_TEST_READING_VIEWPORT: "1"

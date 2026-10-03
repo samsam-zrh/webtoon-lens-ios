@@ -14,6 +14,7 @@ struct SettingsView: View {
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier("v2.backend")
 
                 Text("Indique ton propre Mac ou serveur sur le reseau prive. Sur iPhone, localhost designe l'iPhone, pas ton Mac. Aucun service tiers n'est utilise.")
                     .font(.caption)
@@ -22,6 +23,7 @@ struct SettingsView: View {
 
             Section("Confidentialite") {
                 Toggle("Autoriser le texte OCR vers ce backend", isOn: $allowTextTranslation)
+                    .accessibilityIdentifier("v2.textConsent")
                 Text("Consentement desactive au depart et revoque si l'URL change. Texte reconnu, coordonnees, style et glossaire uniquement. Les captures restent sur l'iPhone ; aucun envoi d'image, cookie ou identifiant, meme en cas d'echec OCR.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

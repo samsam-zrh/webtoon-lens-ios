@@ -2,7 +2,7 @@
 
 **V2 est une version separee de V1.** Elle ouvre normalement un site dans une `WKWebView`, conserve sa session de navigation et traduit une **capture locale de la zone visible**, sans recuperer les URL d'images par une seconde requete. L'original du site n'est jamais modifie.
 
-Ce n'est pas une promesse de compatibilite avec « n'importe quel site », de remplacement de bulles de qualite Mac, ni de publication App Store. Le code iOS n'a **pas encore ete compile ni execute** : Xcode/SDK iOS sont absents du Mac utilise, et la CI distante n'a pas demarre a cause d'un verrouillage de facturation GitHub. Les verifications macOS ci-dessous ne remplacent pas ces essais.
+**La version personnelle est compilee et executee sur un simulateur iPhone 18 Pro / iOS 27.0**, avec Xcode 27.0. Le parcours reel capture WKWebView → Vision iOS → API Qwen locale → presentation francaise a ete verifie sur des dialogues originaux de test. Ce n'est pas une promesse de compatibilite avec « n'importe quel site », de remplacement de bulles de qualite Mac, ni de publication App Store. La signature et l'installation sur un iPhone physique restent a effectuer.
 
 ## V1 reste intacte
 
@@ -23,10 +23,14 @@ Les cookies WKWebView, preferences, glossaires, historique SwiftData et captures
 
 1. Ouvrir un lien HTTP/HTTPS dans **Webtoon**. Retour, avance, rechargement et ouverture dans Safari restent disponibles. Connexion, abonnement et verification du site restent des interactions manuelles normales.
 2. Configurer son backend local dans **Reglages**. L'envoi de texte est desactive au depart. Le consentement nomme cette URL et est revoque si elle change ; aucun backend public de traduction n'est accepte.
-3. Afficher uniquement le chapitre, puis toucher **Traduire**. Vision fait l'OCR sur l'iPhone ; le backend traduit reellement le texte. Sans backend, texte lisible ou reponse complete, l'original reste affiche avec une erreur, jamais une fausse traduction.
+3. Afficher uniquement le chapitre, apres ses choix ordinaires de cookies, puis toucher **Traduire**. Vision fait l'OCR sur l'iPhone ; le backend traduit reellement le texte. Sans backend, texte lisible ou reponse valide, l'original reste affiche avec une erreur, jamais une fausse traduction. Traduire une notice de cookies ou un titre n'est pas une validation de lecture du chapitre.
 4. **Traduit** presente une capture figee, avec du texte uniquement dans des rectangles OCR fiables ou dans **Texte** s'il ne tient pas. **Original**, defilement, zoom, changement de page ou retour en arriere retirent la capture traduite. **Auto**, facultatif et desactive au depart, attend la fin du mouvement pour demander la zone suivante.
 
 Le bridge est injecte uniquement dans la frame principale, dans un monde JavaScript isole du site. Une seule traduction occupe la file, meme apres annulation jusqu'a la fin du travail precedent. Un delai de stabilisation de 450 ms, les generations de navigation, revisions DOM, scroll/zoom/taille et une seconde empreinte des pixels empechent de publier un resultat obsolete. Les superpositions sont natives, **hors de WKWebView** : aucune capture ne contient sa propre traduction.
+
+Une demande manuelle reste en attente pendant les petits changements de viewport, notamment a la fermeture du consentement de l'app. Les notifications KVO sans changement reel sont ignorees. Si la page change continuellement pendant **10 secondes**, la capture est annulee avec une erreur explicite et possibilite de reessayer ; le delai ne repart pas a zero a chaque mutation.
+
+Un refus serveur `dialogue_translation_failed` est associe uniquement a son `failedSegmentID` connu. Les autres dialogues sont retentes, avec **32 segments au maximum par lot et 5 appels au maximum par lot** ; une limite atteinte est affichee pour chaque dialogue non termine. Chaque reponse conserve la validation complete des IDs du sous-lot restant. Les erreurs generiques/reseau, IDs inconnus ou reponses incompletes ne sont pas escamotes. **Texte** separe les traductions reussies des originaux en erreur. Aucun ID refuse n'est peint ou compte comme francais ; aucun resultat partiel n'est mis en cache comme capture complete. Un refus total conserve l'affichage **Original**, avec ses erreurs consultables, pas une capture identique estampillee « Traduit ».
 
 La largeur demandee a WebKit est exprimee en points puis corrigee du facteur Retina ; les captures sont limitees a 1 600 pixels de large et 4 millions de pixels. Les zones trop petites, peu fiables ou qui se chevauchent conservent leur original. La police n'est pas reduite sous 11 pt pour simuler un texte qui tiendrait. **Pas de masques blancs/noirs/colores, de separation de lobes ni de restauration d'encre comparables au lecteur Mac V1** : la segmentation native existante reste une approximation.
 
@@ -36,11 +40,15 @@ Le site recoit ses propres requetes normales de navigation et conserve ses cooki
 
 Les formulaires visibles, y compris les champs detectables dans des shadow roots ouverts, challenges connus, frames et videos visibles sont refuses avant l'OCR/export. Ce filtrage prudent ne certifie pas toutes les constructions possibles d'un site : affichez seulement le chapitre et ne traduisez pas un ecran contenant des donnees personnelles. Une capture opaque/vide ou sans texte lisible n'est pas consideree comme un succes.
 
-Les sites peuvent refuser WKWebView, exiger Safari ou rendre des contenus non capturables. Aucune automatisation de connexion, CAPTCHA, paiement, DRM, avertissement de securite ou protection anti-bot. **Webnovel n'est pas valide** : le lien precedemment teste renvoyait un challenge Cloudflare 403 a V1 ; WKWebView peut ameliorer le rendu normal, pas garantir sa resolution. Safari et l'import manuel d'une capture autorisee dans **Lecteur** restent les solutions de secours. L'extension Safari historique est optionnelle et garde son ancien telechargement d'images : elle ne beneficie pas automatiquement du nouveau flux de capture.
+Les sites peuvent refuser WKWebView, exiger Safari ou rendre des contenus non capturables. Aucune automatisation de connexion, CAPTCHA, paiement, DRM, verification d'age, avertissement de securite ou protection anti-bot. Le choix ordinaire des cookies appartient au lecteur ; **aucune fonction d'auto-consentement n'est ajoutee en production**. Des tests natifs bornes sur les trois sites demandes distinguent navigation, contenu reellement visible, OCR et traduction ; voir le bilan ci-dessous. Le refus Cloudflare 403 de l'ancien telechargement V1 n'est pas une preuve de contournement ou de compatibilite Webnovel dans V2.
+
+Safari et l'import manuel d'une capture autorisee dans **Lecteur** restent les solutions de secours. L'extension Safari historique est optionnelle et garde son ancien telechargement d'images : elle ne beneficie pas automatiquement du nouveau flux de capture et refuse explicitement un resultat partiel plutot que d'annoncer une traduction complete. Le lecteur d'images de l'app affiche les erreurs partielles et marque l'historique `partial` ou `failed`, jamais `completed` pour un refus total.
 
 ## Backend V2 sans toucher aux services V1
 
 Si un backend local est deja accessible au telephone, configurez simplement son URL. Un iPhone ne peut pas joindre le `127.0.0.1` du Mac : **localhost sur iPhone designe l'iPhone**.
+
+Le simulateur iOS sur ce Mac peut joindre le backend du Mac sur **`http://127.0.0.1:8787`** : ce transport et l'API textuelle reelle ont ete testes, sans exposition LAN ni tunnel. Le backend choisi reste configure dans V2 a la fin des tests, mais le **consentement texte est revoque** et Auto desactive. L'app normale s'ouvre sur Webtoon, sans lancer automatiquement une page ou une traduction.
 
 Pour preparer un backend V2 independant, **uniquement dans ce checkout V2**, avec Python deja installe :
 
@@ -62,7 +70,7 @@ Configurer ensuite `http://nom-du-mac.local:8788` dans V2 et accorder sa permiss
 
 ## Construire pour une installation personnelle
 
-Prerequis non installes ici : **Xcode complet avec SDK iOS 18+**, XcodeGen et une identite Apple permettant la signature choisie. Ne changez pas la selection globale des outils, n'acceptez pas de licence et n'installez rien sans votre accord.
+Prerequis : **Xcode complet avec SDK iOS 18+**, XcodeGen et, pour un iPhone physique, une identite Apple permettant la signature choisie. Validation locale effectuee avec Xcode **27.0 / 27A266a**, SDK/runtime iOS **27.0** et XcodeGen **2.46.0**. Les commandes de validation utilisent `DEVELOPER_DIR` par commande ; aucun changement de selection globale, acceptation de licence ou installation de SDK n'a ete effectue par cette session.
 
 La version personnelle evite les capacites App Group et l'extension Safari, souvent incompatibles avec une equipe de provisionnement gratuite :
 
@@ -83,18 +91,60 @@ swift run V2Checks
 # Verifie aussi le flag de sandbox de la version personnelle.
 swift run -Xswiftc -DWEBTOON_LENS_PERSONAL V2Checks
 
-# Avec Xcode complet, pas disponible localement ici :
-swift test
-xcodegen generate
-bash ci/test.sh
+# XCTest partage, avec Xcode selectionne seulement pour cette commande :
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test
+
+# Generer la version personnelle avec le XcodeGen deja installe dans ce worktree :
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  .runtime/tools/xcodegen.artifactbundle/xcodegen-2.46.0-macosx/bin/xcodegen \
+  generate --spec project-personal.yml
+
+# Build et tests ordinaires : les tests de reseau reel sont opt-in.
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2 \
+  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
+  -derivedDataPath .runtime/ios-build CODE_SIGNING_ALLOWED=NO build test
+
+# Fixture originale : vrai Vision/Qwen + refus HTTP type controle sur plusieurs dialogues.
+# Le backend 8787 doit deja fonctionner ; aucun service ni modele n'est installe.
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2LocalBackend \
+  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
+  -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
+  CODE_SIGNING_ALLOWED=NO test
 ```
 
 Le harness compile le core partage et les **memes helpers WebKit de capture/etat** que l'app. Il utilise une vraie WKWebView macOS sans mettre sa fenetre au premier plan, et un serveur de fixtures originales sur un port loopback ephemere, arrete en fin de test. Il couvre URL/consentement, budgets Retina, cache/glossaire/ordre, coordonnees et annulation serialisee, JS/blob/canvas/lazy, sessions, refus de retelechargement sans cookie, DOM intact, scroll imbrique/navigation, formulaires/challenges/frames, pixels opaques, 503/retry/reponse incomplete, redirection et annulation HTTP. Le backend de fixtures est **explicitement synthetique**, pas un traducteur ni une preuve linguistique.
 
-Resultat local : **98 assertions passees** dans la configuration standard et **99 dans la version personnelle**. Les plists, YAML, scripts Bash, gardes des ports/LAN du lanceur et la syntaxe Swift sont egalement verifies. Les avertissements de chemins de frameworks CLT manquants n'empechent pas cette compilation macOS, mais ne fournissent aucun SDK iOS.
+Premier resultat macOS : **98 assertions passees** dans la configuration standard et **99 dans la version personnelle**. Ces anciennes verifications restent distinctes de la validation native suivante.
 
-Les XCTest iOS ajoutes couvrent les frontieres de capture, le consentement, les reponses, le cache et les comportements deja existants ; ils attendent un runner Xcode. Sur macOS sans UIKit, les declarations de modeles exercitent leurs valeurs uniquement, **pas la persistence SwiftData**. Une analyse syntaxique Swift n'est pas une compilation iOS.
+Validation native du **3 octobre 2026**, sur le seul simulateur iPhone 18 Pro `52F6BB73-EE31-4ACF-8B85-55E7ACEBC388` :
 
-La CI V2 declenchee au premier push est [ce run](https://github.com/samsam-zrh/webtoon-lens-ios/actions/runs/37067720554). **Aucun runner ni aucune etape n'a demarre** ; annotation GitHub : `The job was not started because your account is locked due to a billing issue.` Ce n'est ni un resultat de compilation ni un echec de test du code. Aucun changement de facturation n'a ete entrepris.
+| Preuve locale dans `.runtime/ios-build/Results/` | Resultat |
+|---|---|
+| `native-smoke-20261003.xcresult` | 24 tests Core + 1 UI, tous passes : vrai build/install/launch, navigation, onboarding et reglages |
+| `native-complete-sites-20261003.xcresult` | 30 tests passes : SwiftData, vrai parcours de fixture, premier lot de sites et preservation de l'original ; pas 30 preuves de compatibilite chapitre |
+| `native-stability-final-20261003.xcresult` | 26 Core + NanoMachine passes ; erreur de stabilisation explicite a 10 s, pas succes de traduction NanoMachine |
+| `native-typed-recovery-20261003.xcresult` | **34 Core + 2 UI passes** : isolation typed503, IDs complets, lots32, budget5, erreurs reseau, cache partiel refuse et Source/Original preserves |
 
-**Encore non verifies** : compilation/type-check UIKit/SwiftUI/Vision/SwiftData de l'app et de l'extension, generation Xcode/signature, simulateur iOS, snapshots/orientation/zoom sur iPhone, permissions reseau/ATS reelles, cookies persistants apres relance d'app, retour/avance/Auto sur appareil, installation personnelle et Safari/Raccourcis. Retablir la CI GitHub ou utiliser Xcode avec autorisation permettra ces essais. Aucune compatibilite Webnovel ou autre site protege n'est declaree.
+La fixture originale a produit, via **Vision iOS et Qwen reel**, « Attendez les autres. Nous partons ensemble. », avec une zone francaise native, le texte source consultable, puis retrait via Original. Une seconde fixture de trois bulles injecte seulement un **refus HTTP type de test** ; les deux autres dialogues sont traduits par le vrai backend local, pas remplaces par des phrases codees. Sa variante totalement refusee finit sur Original avec zero segment francais et chaque erreur visible. Les serveurs de fixtures sont sur loopback ephemere et arretes a la fin ; ils ne recuperent aucune page tierce.
+
+Les tests multisites sont dans le scheme **`WebtoonLensV2SiteChecks`**, volontairement separe : ils visitent uniquement les trois URL demandees, avec un viewport borne. Les tests ordinaires/CI ne contactent pas ces sites. Les captures diagnostiques restent locales et ne sont pas publiees ; les rapports ne reproduisent aucun texte de chapitre.
+
+### Bilan des trois sites demandes
+
+**Aucun des trois chapitres n'est declare compatible sur la seule base de son HTML, de ses images AX ou de texte d'interface traduit.** Les choix ordinaires de cookies ont ete refuses dans la session d'essai quand leur controle etait accessible, sans accepter de CGU, verifier un age, se connecter ou franchir une protection. Ce geste existe uniquement dans le test opt-in, pas dans le produit.
+
+| Cas | Navigation native et zone observee | OCR/API et rendu | Conclusion chapitre |
+|---|---|---|---|
+| [NanoMachine 332](https://nanomachin.com/manga/nano-machine-chapter-332/) | WKWebView annonce la page prete, mais mutations continues du viewport initial | Capture annulee explicitement a 10 s ; aucun OCR/API ni francais annonce | **NON VALIDE** : zone stable non obtenue |
+| [WEBTOON / Lore Olympus episode 1](https://www.webtoons.com/en/romance/lore-olympus/episode-1/viewer?title_no=1320&episode_no=1) | Redirection normale vers le lecteur mobile ; refus « Refuser tout » effectif, episode/art d'introduction visibles | Vision et Qwen ont traite du texte d'interface ; six segments dans Texte, aucun remplacement de dialogue demontre | **NON VALIDE pour les dialogues** : l'introduction/UI n'est pas une preuve de traduction du chapitre |
+| [Webnovel / chapitre fourni](https://www.webnovel.com/fr/comic/wait-i-39-m-the-ultimate-demon-king_33398540708901501/chapter-1_89660822980187997) | Redirection mobile normale ; les premiers essais restent sur la notice de cookies, pas sur des bulles | Les deux segments recuperes concernent cette interface et sont exclus du bilan chapitre | **NON VALIDE** : aucune chaine sur un dialogue de chapitre n'a ete demontree |
+
+Le dernier essai borne de ces deux lecteurs a echoue **dans XCUITest avant la capture de lecture**, sur une cible image dont le « visible frame is empty ». Les deux echecs sont conserves dans `native-reading-controls-final-20261003.xcresult`, pas maquilles en tests passes. Le helper a ensuite ete corrige pour defiler le viewport WebView plutot qu'une image AX ambiguë ; **`build-for-testing` reussit, mais ce changement du helper n'a pas ete reexecute sur les sites**, conformement a la borne de test. Les preuves precedentes de retrait des overlays par scroll/reload/back restent distinctes de ces limites de lecture.
+
+Les lots `native-reading-sites-final-20261003.xcresult` et `native-reading-after-cookie-refusal-20261003.xcresult` contiennent les essais d'interface/introduction et leurs captures locales ; ils ne sont pas des validations de dialogues. La verification manuelle d'une zone de chapitre legitimement accessible reste necessaire. En revanche, la chaine complete et l'isolation des erreurs sont effectivement validees sur les **fixtures originales natives** decrites plus haut.
+
+La CI distante du premier push a ete [bloquee avant toute etape](https://github.com/samsam-zrh/webtoon-lens-ios/actions/runs/37067720554) par la facturation GitHub. Ce constat historique n'est **plus un blocage du build local**, maintenant execute avec Xcode. Aucun changement de facturation n'a ete entrepris.
+
+**Encore non verifies** : signature et installation sur iPhone physique, execution sur iOS 18/19/26, permissions reseau/ATS sur telephone physique, rotation/zoom/Auto sur appareil reel, extension Safari et Raccourcis en usage reel, qualite linguistique et compatibilite de chapitres entiers. Le diagnostic non fatal Xcode27 « Could not archive SSU artifacts » ne constitue pas une validation des Raccourcis. Aucune compatibilite universelle ou garantie de contournement d'un site protege n'est declaree.

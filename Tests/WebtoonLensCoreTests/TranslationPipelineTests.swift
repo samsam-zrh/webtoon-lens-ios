@@ -56,6 +56,30 @@ final class TranslationPipelineTests: XCTestCase {
     }
 
     #if canImport(UIKit)
+    func testPartialResponsesAreNeverStoredAsCompleteCaptureCacheEntries() async throws {
+        let cache = TranslationCache()
+        let client = PartialFixtureClient()
+        let pipeline = WebtoonTranslationPipeline(ocr: MockOCRService(segments: [
+            OCRSegment(sourceText: "CONTROLLED REFUSAL", boundingBox: NormalizedRect(x: 0.1, y: 0.1, width: 0.5, height: 0.05), confidence: 0.9),
+            OCRSegment(sourceText: "Original valid dialogue", boundingBox: NormalizedRect(x: 0.1, y: 0.7, width: 0.5, height: 0.05), confidence: 0.9)
+        ]), client: client, cache: cache)
+        let data = Data("partial original fixture".utf8)
+        for _ in 0..<2 {
+            let result = try await pipeline.translate(image: Self.fixtureImage(), imageData: data, seriesID: nil, glossary: [], style: "test")
+            XCTAssertEqual(result.segments.count, 1)
+            XCTAssertEqual(result.failures.count, 1)
+            XCTAssertFalse(result.segments.contains(where: { $0.id == result.failures[0].id }))
+        }
+        let key = TranslationCacheKey(
+            imageHash: ImageHasher.sha256Hex(data), targetLanguage: "fr", glossaryChecksum: GlossaryResolver.checksum(for: []),
+            styleChecksum: ImageHasher.sha256Hex(Data("test".utf8)), clientNamespace: client.cacheNamespace
+        )
+        let cached = await cache.value(for: key)
+        XCTAssertNil(cached)
+        let calls = await client.calls
+        XCTAssertEqual(calls, 4)
+    }
+
     private static func fixtureImage() -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
         return renderer.image { context in
@@ -98,6 +122,25 @@ private actor MockTranslationClient: TranslationClientProtocol {
             },
             glossaryUpdates: [],
             confidence: 0.9
+        )
+    }
+}
+
+private actor PartialFixtureClient: TranslationClientProtocol {
+    private(set) var calls = 0
+
+    func translate(_ request: TranslationRequest) async throws -> TranslationResponse {
+        calls += 1
+        if let refused = request.segments.first(where: { $0.text == "CONTROLLED REFUSAL" }) {
+            throw TranslationClientError.dialogueRejected(segmentID: refused.id, message: "Controlled fixture refusal")
+        }
+        return TranslationResponse(
+            detectedSourceLanguage: "en", segments: request.segments.map {
+                TranslatedSegmentPayload(
+                    id: $0.id, sourceText: $0.text, translatedText: "Traduction de fixture synthetique",
+                    boundingBox: $0.boundingBox, confidence: 0.9, readingOrder: $0.readingOrder
+                )
+            }, glossaryUpdates: [], confidence: 0.9
         )
     }
 }

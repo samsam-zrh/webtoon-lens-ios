@@ -15,19 +15,19 @@ struct OnboardingView: View {
                 OnboardingStep(
                     number: "1",
                     title: "Ouvre le site dans l'app",
-                    body: "Colle un lien HTTP ou HTTPS. Connexion, abonnement et verifications du site restent manuels. La compatibilite depend du site ; aucun contournement n'est effectue."
+                    detail: "Colle un lien HTTP ou HTTPS. Connexion, abonnement et verifications du site restent manuels. La compatibilite depend du site ; aucun contournement n'est effectue."
                 )
 
                 OnboardingStep(
                     number: "2",
                     title: "Configure le backend",
-                    body: "Ajoute l'URL de ton backend local dans Reglages et autorise l'envoi du texte OCR. Sans backend reel, aucune traduction n'est inventee. Les captures restent sur l'iPhone."
+                    detail: "Ajoute l'URL de ton backend local dans Reglages et autorise l'envoi du texte OCR. Sans backend reel, aucune traduction n'est inventee. Les captures restent sur l'iPhone."
                 )
 
                 OnboardingStep(
                     number: "3",
                     title: "Compare et continue a lire",
-                    body: "Traduit montre une capture stable, pas des masques de bulles de qualite Mac. Defiler ou zoomer remet l'original ; Auto est facultatif. Texte donne les traductions qui ne tiennent pas dans leurs zones."
+                    detail: "Traduit montre une capture stable, pas des masques de bulles de qualite Mac. Defiler ou zoomer remet l'original ; Auto est facultatif. Texte donne les traductions qui ne tiennent pas dans leurs zones."
                 )
 
                 Text("En cas de page incompatible, utilise Safari ou importe une capture autorisee dans Lecteur. iOS ne permet pas de dessiner librement par-dessus les autres apps. V2 est une version personnelle distincte de V1, pas une promesse de compatibilite universelle ni de publication App Store.")
@@ -43,7 +43,7 @@ struct OnboardingView: View {
 private struct OnboardingStep: View {
     let number: String
     let title: String
-    let body: String
+    let detail: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -56,7 +56,7 @@ private struct OnboardingStep: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                Text(body)
+                Text(detail)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

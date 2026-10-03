@@ -148,26 +148,26 @@ struct ReaderView: View {
                 style: activeProfile?.stylePrompt ?? settings.defaultStylePrompt
             )
             result = translated
-            persist(translated)
+            try persist(translated)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func persist(_ result: TranslationResult) {
+    private func persist(_ result: TranslationResult) throws {
         let job = TranslationJob(
             seriesID: selectedSeriesID.isEmpty ? nil : selectedSeriesID,
             imageHash: result.imageHash,
             sourceLanguage: result.detectedSourceLanguage ?? WebtoonLensConstants.autoSourceLanguage,
             targetLanguage: result.targetLanguage,
-            status: "completed",
+            status: result.failures.isEmpty ? "completed" : result.segments.isEmpty ? "failed" : "partial",
             durationMilliseconds: result.durationMilliseconds
         )
         modelContext.insert(job)
         for payload in result.segments {
             modelContext.insert(TranslatedSegment(jobID: job.id, payload: payload))
         }
-        try? modelContext.save()
+        try modelContext.save()
     }
 }
 
@@ -225,6 +225,10 @@ private struct ResultSummary: View {
                 .font(.headline)
             Text("\(result.segments.count) bulles traduites en \(result.durationMilliseconds) ms")
                 .foregroundStyle(.secondary)
+            ForEach(result.failures) { failure in
+                Text(failure.source.text)
+                Text(failure.message).font(.caption).foregroundStyle(.red)
+            }
             if !result.glossaryUpdates.isEmpty {
                 Text("\(result.glossaryUpdates.count) termes proposes pour le glossaire")
                     .foregroundStyle(.secondary)
