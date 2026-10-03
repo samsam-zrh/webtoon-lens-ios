@@ -17,7 +17,7 @@ final class LocalBackendReaderTests: XCTestCase {
         let chapter = try await server.start()
         defer { server.stop() }
         let app = XCUIApplication()
-        app.launch()
+        ReaderUITestSupport.launch(in: app)
         defer { app.terminate() }
 
         ReaderUITestSupport.configureLocalBackend(backend, in: app)

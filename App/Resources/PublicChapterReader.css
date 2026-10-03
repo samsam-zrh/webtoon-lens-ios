@@ -1,0 +1,26 @@
+:root { color-scheme: light dark; font: 16px -apple-system, sans-serif; }
+body { margin: 0; background: #fff; color: #111; }
+.reader-page { position: relative; margin: 0 0 16px; }
+.reader-page img { display: block; width: 100%; height: auto; background: #f2f2f2; }
+.page-label { margin: 0; padding: 10px 12px; font-size: 14px; background: #f2f2f2; }
+.overlay { position: absolute; left: 0; right: 0; pointer-events: none; }
+.bubble { position: absolute; z-index: 2; padding: 0; border: 0; pointer-events: none; }
+.bubble-fill { position: absolute; inset: 0; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
+.bubble-text { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; white-space: pre-line; }
+.original .overlay { visibility: hidden; }
+.dialogue-list { padding: 0 12px; background: #f8f8f8; color: #111; overflow-wrap: anywhere; }
+.dialogue-list summary { padding: 14px 0; cursor: pointer; }
+.dialogue-entry, .dialogue-error { padding: 8px 0; border-top: 1px solid #ddd; }
+.dialogue-entry p, .dialogue-error p { margin: 5px 0; line-height: 1.45; }
+.dialogue-entry small { font-size: 12px; color: #555; }
+.dialogue-error [role="alert"], .page-error { color: #9b1515; }
+.page-error { margin: 0; padding: 12px; background: #fff0f0; }
+.page-retry { margin: 8px 12px; min-height: 44px; padding: 8px 14px; font: inherit; }
+.evicted img { visibility: hidden; }
+@media (prefers-color-scheme: dark) {
+  body { background: #111; color: #eee; }
+  .page-label, .reader-page img { background: #252525; }
+  .dialogue-list { background: #202020; color: #eee; }
+  .dialogue-entry small { color: #bbb; }
+  .dialogue-error [role="alert"], .page-error { color: #ffb4a8; background: #281414; }
+}

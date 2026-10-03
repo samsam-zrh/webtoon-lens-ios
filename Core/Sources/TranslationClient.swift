@@ -7,6 +7,8 @@ public struct TranslationRequest: Codable, Hashable, Sendable {
     public var style: String
     public var segments: [TranslationSourceSegment]
     public var glossary: [GlossaryTermInstruction]
+    public var contextSegments: [TranslationContextSegment]?
+    public var previousTranslations: [PreviousDialogueTranslation]?
 
     public init(
         sourceLanguage: String = WebtoonLensConstants.autoSourceLanguage,
@@ -14,7 +16,9 @@ public struct TranslationRequest: Codable, Hashable, Sendable {
         seriesID: String?,
         style: String,
         segments: [TranslationSourceSegment],
-        glossary: [GlossaryTermInstruction]
+        glossary: [GlossaryTermInstruction],
+        contextSegments: [TranslationContextSegment]? = nil,
+        previousTranslations: [PreviousDialogueTranslation]? = nil
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
@@ -22,6 +26,30 @@ public struct TranslationRequest: Codable, Hashable, Sendable {
         self.style = style
         self.segments = segments
         self.glossary = glossary
+        self.contextSegments = contextSegments
+        self.previousTranslations = previousTranslations
+    }
+}
+
+public struct TranslationContextSegment: Codable, Hashable, Sendable {
+    public var id: String
+    public var order: Int
+    public var text: String
+
+    public init(id: String, order: Int, text: String) {
+        self.id = id
+        self.order = order
+        self.text = text
+    }
+}
+
+public struct PreviousDialogueTranslation: Codable, Hashable, Sendable {
+    public var source: String
+    public var translation: String
+
+    public init(source: String, translation: String) {
+        self.source = source
+        self.translation = translation
     }
 }
 
@@ -147,7 +175,7 @@ private struct BackendFailure: Decodable {
     let failedSegmentID: String?
 }
 
-private final class NoBackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+final class NoBackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
         _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void

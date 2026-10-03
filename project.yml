@@ -29,8 +29,13 @@ targets:
     sources:
       - App/Sources
       - AppIntents/Sources
-    resources:
-      - App/Resources
+      - path: App/Resources
+        buildPhase: resources
+        excludes:
+          - Info.plist
+          - WebtoonLens.entitlements
+      - path: PhonePreview/layout.js
+        buildPhase: resources
     dependencies:
       - target: WebtoonLensCore
       - target: WebtoonLensV2SafariExtension
@@ -50,8 +55,8 @@ targets:
     platform: iOS
     sources:
       - SafariExtension/Native/Sources
-    resources:
-      - SafariExtension/Web
+      - path: SafariExtension/Web
+        buildPhase: resources
     dependencies:
       - target: WebtoonLensCore
     settings:

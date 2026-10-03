@@ -34,7 +34,7 @@ final class SiteCompatibilityTests: XCTestCase {
         let originalFixture = try await server.start()
         defer { server.stop() }
         let app = XCUIApplication()
-        app.launch()
+        ReaderUITestSupport.launch(in: app)
         defer { app.terminate() }
         ReaderUITestSupport.configureLocalBackend(backend, in: app)
         app.tabBars.buttons["Webtoon"].tap()

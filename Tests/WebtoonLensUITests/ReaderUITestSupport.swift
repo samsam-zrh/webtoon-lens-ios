@@ -2,6 +2,11 @@ import XCTest
 
 @MainActor
 enum ReaderUITestSupport {
+    static func launch(in app: XCUIApplication) {
+        app.launchArguments += ["-v2.lastPublicChapterURL", ""]
+        app.launch()
+    }
+
     static func configureLocalBackend(_ backend: String, in app: XCUIApplication) {
         let endpoint = URLComponents(string: backend)
         XCTAssertEqual(endpoint?.host, "127.0.0.1")

@@ -7,7 +7,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Lis dans Webtoon Lens V2")
                         .font(.title.bold())
-                    Text("Ouvre normalement le site dans Webtoon, puis traduis une capture de la zone visible. L'original reste intact, sans telechargement parallele des images.")
+                    Text("Colle le lien dans Webtoon : Lire le chapitre traite ses images publiques comme V1 ; Ouvrir garde le navigateur et sa capture privee. L'original reste intact.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -15,19 +15,19 @@ struct OnboardingView: View {
                 OnboardingStep(
                     number: "1",
                     title: "Ouvre le site dans l'app",
-                    detail: "Colle un lien HTTP ou HTTPS. Connexion, abonnement et verifications du site restent manuels. La compatibilite depend du site ; aucun contournement n'est effectue."
+                    detail: "Pour un chapitre public extractible, choisis Lire le chapitre. Sinon Ouvrir conserve la navigation normale. Connexion, abonnement et verifications restent manuels ; aucun contournement."
                 )
 
                 OnboardingStep(
                     number: "2",
                     title: "Configure le backend",
-                    detail: "Ajoute l'URL de ton backend local dans Reglages et autorise l'envoi du texte OCR. Sans backend reel, aucune traduction n'est inventee. Les captures restent sur l'iPhone."
+                    detail: "Configure ton backend local. Le consentement chapitre autorise ses images publiques et leurs crops ; le consentement capture n'envoie que le texte OCR. Les captures personnelles restent sur l'iPhone."
                 )
 
                 OnboardingStep(
                     number: "3",
                     title: "Compare et continue a lire",
-                    detail: "Traduit montre une capture stable, pas des masques de bulles de qualite Mac. Defiler ou zoomer remet l'original ; Auto est facultatif. Texte donne les traductions qui ne tiennent pas dans leurs zones."
+                    detail: "Le mode public reprend les masques Mac V1 et garde les dialogues/source sous chaque page. La capture privee reste une approximation de viewport. Original permet de comparer sans perdre le dessin."
                 )
 
                 Text("En cas de page incompatible, utilise Safari ou importe une capture autorisee dans Lecteur. iOS ne permet pas de dessiner librement par-dessus les autres apps. V2 est une version personnelle distincte de V1, pas une promesse de compatibilite universelle ni de publication App Store.")

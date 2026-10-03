@@ -10,11 +10,14 @@ struct WebtoonBrowserView: View {
     @Query(sort: \TermMemoryEntry.updatedAt, order: .reverse) private var terms: [TermMemoryEntry]
 
     @State private var browser = BrowserReaderController()
-    @State private var address = ""
+    @State private var chapter = PublicChapterController()
+    @State private var address = SharedSettingsStore.shared.lastPublicChapterURL
     @State private var selectedSeriesID = ""
     @State private var settingsRevision = 0
     @State private var showsConsent = false
     @State private var showsTranscript = false
+    @State private var showsPublicConsent = false
+    @State private var requestedPublicURL: URL?
     @FocusState private var addressIsFocused: Bool
     @ScaledMetric(relativeTo: .caption) private var statusHeight = 52.0
 
@@ -36,7 +39,24 @@ struct WebtoonBrowserView: View {
                     Button("Ouvrir", action: loadAddress)
                         .buttonStyle(.borderedProminent)
                 }
+                HStack {
+                    Button("Lire le chapitre", action: requestPublicChapter)
+                        .buttonStyle(.bordered)
+                        .disabled(chapter.isLoading)
+                        .accessibilityIdentifier("v2.readChapter")
+                    Text("Images publiques chargees par ton Mac")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
+                if !chapter.hasChapter, !chapter.status.isEmpty {
+                    Text(chapter.status)
+                        .font(.caption)
+                        .foregroundStyle(chapter.hasError ? Color.red : Color.secondary)
+                        .accessibilityIdentifier("v2.chapterStatus")
+                }
+
+                if !chapter.hasChapter {
                 HStack(spacing: 12) {
                     Button(action: browser.goBack) { Image(systemName: "chevron.left") }
                         .disabled(!browser.canGoBack)
@@ -109,14 +129,18 @@ struct WebtoonBrowserView: View {
                         .accessibilityIdentifier("v2.status")
                 }
                 .frame(height: statusHeight, alignment: .top)
+                }
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
             .background(Color(uiColor: .secondarySystemBackground))
 
-            NativeWebtoonBrowser(controller: browser)
+            ZStack {
+                NativeWebtoonBrowser(controller: browser)
+                    .opacity(chapter.hasChapter ? 0 : 1)
+                    .allowsHitTesting(!chapter.hasChapter)
                 .overlay {
-                    if browser.currentURL == nil {
+                    if browser.currentURL == nil, !chapter.hasChapter {
                         ContentUnavailableView(
                             "Ouvre ton chapitre",
                             systemImage: "safari",
@@ -125,6 +149,13 @@ struct WebtoonBrowserView: View {
                         .allowsHitTesting(false)
                     }
                 }
+                if chapter.hasChapter {
+                    PublicChapterReaderView(reader: chapter) {
+                        chapter.close()
+                        browser.setActive(scenePhase == .active)
+                    }
+                }
+            }
         }
         .confirmationDialog("Envoyer le texte OCR a ton Mac ?", isPresented: $showsConsent, titleVisibility: .visible) {
             Button("Autoriser ce backend local") {
@@ -139,6 +170,15 @@ struct WebtoonBrowserView: View {
             }
         } message: {
             Text("Destination : \(SharedSettingsStore.shared.backendBaseURLString). Seuls le texte reconnu, ses coordonnees, le style et le glossaire sont envoyes. Les captures restent ici ; ni cookies, ni formulaires, ni identifiants ne sont transmis.")
+        }
+        .confirmationDialog("Lire les images publiques sur ton Mac ?", isPresented: $showsPublicConsent, titleVisibility: .visible) {
+            Button("Autoriser la lecture publique") {
+                SharedSettingsStore.shared.setPublicChapterConsent(true)
+                if let requestedPublicURL { beginPublicChapter(requestedPublicURL) }
+            }
+            Button("Garder le navigateur", role: .cancel) {}
+        } message: {
+            Text("Chapitre : \(requestedPublicURL?.absoluteString ?? ""). Destination : \(SharedSettingsStore.shared.backendBaseURLString). Le Mac charge cette URL et ses images publiques, puis analyse leurs fenetres et masques. Des crops de ces seules images publiques peuvent etre transmis au Mac. Aucun cookie du navigateur, identifiant ou capture privee n'est envoye. Ce consentement est distinct du texte OCR des captures.")
         }
         .sheet(isPresented: $showsTranscript) {
             NavigationStack {
@@ -173,10 +213,15 @@ struct WebtoonBrowserView: View {
         .onAppear {
             settingsRevision += 1
             configureTranslation()
-            browser.setActive(scenePhase == .active)
+            browser.setActive(scenePhase == .active && !chapter.hasChapter)
+            chapter.setActive(scenePhase == .active)
         }
-        .onDisappear { browser.setActive(false) }
-        .onChange(of: scenePhase) { _, phase in browser.setActive(phase == .active) }
+        .onDisappear { browser.setActive(false); chapter.setActive(false) }
+        .onChange(of: scenePhase) { _, phase in
+            browser.setActive(phase == .active && !chapter.hasChapter)
+            chapter.setActive(phase == .active)
+        }
+        .onChange(of: chapter.hasChapter) { _, hasChapter in browser.setActive(scenePhase == .active && !hasChapter) }
         .onChange(of: translationContext) { _, _ in configureTranslation() }
         .onChange(of: browser.currentURL) { _, url in
             if !addressIsFocused, let url { address = url.absoluteString }
@@ -219,10 +264,39 @@ struct WebtoonBrowserView: View {
             let url = try BrowserAddress.parse(address)
             addressIsFocused = false
             address = url.absoluteString
+            chapter.close()
             browser.open(url)
         } catch {
             browser.report(error)
         }
+    }
+
+    private func requestPublicChapter() {
+        do {
+            let url = try PublicChapterURL.parse(address)
+            let settings = SharedSettingsStore.shared
+            guard !settings.backendBaseURLString.isEmpty else { throw TranslationClientError.missingBackend }
+            _ = try LocalBackendAddress.parse(settings.backendBaseURLString)
+            requestedPublicURL = url
+            addressIsFocused = false
+            if settings.hasPublicChapterConsent {
+                beginPublicChapter(url)
+            } else {
+                showsPublicConsent = true
+            }
+        } catch {
+            browser.report(error)
+        }
+    }
+
+    private func beginPublicChapter(_ url: URL) {
+        let profile = profiles.first { $0.id == selectedSeriesID }
+        let activeTerms = selectedSeriesID.isEmpty ? terms : terms.filter { $0.seriesID == selectedSeriesID }
+        chapter.start(
+            url, sourceLanguage: profile?.sourceLanguage ?? "auto",
+            glossary: GlossaryResolver.instructions(from: activeTerms),
+            style: profile?.stylePrompt ?? SharedSettingsStore.shared.defaultStylePrompt
+        )
     }
 
     private func requestTranslation() {

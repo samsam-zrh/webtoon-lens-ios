@@ -1,8 +1,8 @@
 # Webtoon Lens V2 — lecteur iPhone personnel
 
-**V2 est une version separee de V1.** Elle ouvre normalement un site dans une `WKWebView`, conserve sa session de navigation et traduit une **capture locale de la zone visible**, sans recuperer les URL d'images par une seconde requete. L'original du site n'est jamais modifie.
+**V2 est une version separee de V1, avec deux parcours complementaires.** **Lire le chapitre** conserve l'efficacite de V1 pour les images publiques extractibles : OCR par fenetres sur le Mac, masques V1 et traduction Qwen locale. **Ouvrir / Traduire** garde le navigateur WKWebView, sa session et la capture privee de sa zone visible, sans retelecharger ses images. L'original du site n'est jamais modifie.
 
-**La version personnelle est compilee et executee sur un simulateur iPhone 18 Pro / iOS 27.0**, avec Xcode 27.0. Le parcours reel capture WKWebView → Vision iOS → API Qwen locale → presentation francaise a ete verifie sur des dialogues originaux de test. Ce n'est pas une promesse de compatibilite avec « n'importe quel site », de remplacement de bulles de qualite Mac, ni de publication App Store. La signature et l'installation sur un iPhone physique restent a effectuer.
+**La version personnelle est compilee et executee sur un simulateur iPhone 18 Pro / iOS 27.0**, avec Xcode 27.0. **NanoMachine 332 fonctionne dans le nouveau mode chapitre** : deux vraies pages et du francais ajuste dans leurs bulles ont ete verifies, pas seulement des menus ou du HTML. Le parcours prive capture WKWebView → Vision iOS → Qwen a aussi ete verifie sur des fixtures originales. Cela ne promet ni compatibilite universelle ni publication App Store. La signature et l'installation sur un iPhone physique restent a effectuer.
 
 ## V1 reste intacte
 
@@ -21,6 +21,22 @@ Les cookies WKWebView, preferences, glossaires, historique SwiftData et captures
 
 ## Parcours de lecture
 
+### Images publiques : Lire le chapitre
+
+Configurer son backend local, coller le lien du chapitre puis toucher **Lire le chapitre**. Le consentement explique que le Mac charge **l'URL et ses images publiques**, et analyse aussi des crops de ces seules images. Il est distinct du consentement texte des captures privees, desactive au depart et lie a l'URL du backend. Changer de backend le revoque. Ni cookies WKWebView, identifiants, captures personnelles ni presse-papiers ne sont transmis.
+
+Le mode utilise les APIs existantes `/v1/webtoon/extract`, `/image` et `/ocr`, sans changer V1. Les images restent dans l'ordre de l'extraction ; logos/icones evidents et ressources trop petites sont filtres par metadonnees puis dimensions, jamais par une URL CDN codee en dur. Une page sans texte reste visible et la suivante continue. Un refus d'extraction ou l'absence d'images garde le navigateur — ou le chapitre deja ouvert — avec une erreur explicite, pas un faux succes.
+
+**Pourquoi l'ancien essai Nano ne marchait pas :** ses pages mesurent environ 690 × 22 000 pixels. L'OCR Vision de l'image entiere peut ne rien reconnaitre apres reduction ; V1 travaillait deja par fenetres. V2 reprend **2 500 pixels naturels de cœur + 400 pixels de halo**, recale `boundingBox`, `rawBoundingBox` et `textBox` sur la page complete, attribue chaque dialogue au cœur correspondant et rapproche les doublons par texte **et recouvrement reel**, pas par le texte seul. Les tests couvrent la fin de page et les petits trous, sans sauter le bas d'une longue bande.
+
+La premiere fenetre de chaque page est prioritaire, avec une premiere requete d'un dialogue puis des lots de trois. Les fenetres restantes avancent ensuite en favorisant la page lue. **Un seul travail reseau/OCR/traduction est actif**, au maximum **trois images** sont montees dans le renderer WK, et les autres images sont sur disque dans un cache V2 propre, non dans une collection de bitmaps decodes. Limites explicites : 80 ressources extraites, 20 Mo / 32 millions de pixels par image et 240 Mo de cache pour la session. Le retour au navigateur annule le travail obsolete et nettoie les fichiers de cette session ; quitter l'onglet met les prochains appels en pause, le retour reprend. Aucune lecture externe ne demarre automatiquement.
+
+Le rendu utilise **`PhonePreview/layout.js` identique a V1**, embarque dans une page WK locale de confiance. Le site source n'execute aucun script dans ce renderer. Alpha `maskData`, restauration `replacementData`, rectangles de texte, offsets, couleurs, style et mesure Canvas sont conserves. Aucun rectangle blanc arbitraire ni `lineLimit(5)` ne remplace un masque manquant. Une traduction qui ne tient pas garde l'image et ouvre le texte integral/source sous la page. Les erreurs par page et dialogue restent explicites ; les autres pages continuent et une page en erreur peut etre reprise. **Original**, precedent/suivant et **Dialogue** permettent de comparer et lire.
+
+La derniere URL publique choisie est seulement memorisee dans le champ : l'app normale peut proposer NanoMachine au prochain lancement, mais ne charge ni ne traduit cette URL sans action de l'utilisateur.
+
+### Navigateur / captures privees
+
 1. Ouvrir un lien HTTP/HTTPS dans **Webtoon**. Retour, avance, rechargement et ouverture dans Safari restent disponibles. Connexion, abonnement et verification du site restent des interactions manuelles normales.
 2. Configurer son backend local dans **Reglages**. L'envoi de texte est desactive au depart. Le consentement nomme cette URL et est revoque si elle change ; aucun backend public de traduction n'est accepte.
 3. Afficher uniquement le chapitre, apres ses choix ordinaires de cookies, puis toucher **Traduire**. Vision fait l'OCR sur l'iPhone ; le backend traduit reellement le texte. Sans backend, texte lisible ou reponse valide, l'original reste affiche avec une erreur, jamais une fausse traduction. Traduire une notice de cookies ou un titre n'est pas une validation de lecture du chapitre.
@@ -32,11 +48,13 @@ Une demande manuelle reste en attente pendant les petits changements de viewport
 
 Un refus serveur `dialogue_translation_failed` est associe uniquement a son `failedSegmentID` connu. Les autres dialogues sont retentes, avec **32 segments au maximum par lot et 5 appels au maximum par lot** ; une limite atteinte est affichee pour chaque dialogue non termine. Chaque reponse conserve la validation complete des IDs du sous-lot restant. Les erreurs generiques/reseau, IDs inconnus ou reponses incompletes ne sont pas escamotes. **Texte** separe les traductions reussies des originaux en erreur. Aucun ID refuse n'est peint ou compte comme francais ; aucun resultat partiel n'est mis en cache comme capture complete. Un refus total conserve l'affichage **Original**, avec ses erreurs consultables, pas une capture identique estampillee « Traduit ».
 
-La largeur demandee a WebKit est exprimee en points puis corrigee du facteur Retina ; les captures sont limitees a 1 600 pixels de large et 4 millions de pixels. Les zones trop petites, peu fiables ou qui se chevauchent conservent leur original. La police n'est pas reduite sous 11 pt pour simuler un texte qui tiendrait. **Pas de masques blancs/noirs/colores, de separation de lobes ni de restauration d'encre comparables au lecteur Mac V1** : la segmentation native existante reste une approximation.
+Dans ce **parcours de capture privee**, la largeur demandee a WebKit est exprimee en points puis corrigee du facteur Retina ; les captures sont limitees a 1 600 pixels de large et 4 millions de pixels. Les zones trop petites, peu fiables ou qui se chevauchent conservent leur original. La police n'est pas reduite sous 11 pt pour simuler un texte qui tiendrait. Sa segmentation Vision native reste une approximation, **distincte des masques Mac V1 reutilises dans le mode chapitre public**.
 
 ## Confidentialite et compatibilite
 
-Le site recoit ses propres requetes normales de navigation et conserve ses cookies dans V2. L'API de traduction utilise une session ephemere distincte, sans cookies, authentification stockee ni suivi de redirection. Elle recoit seulement langue, texte OCR, coordonnees, identifiant de serie, style et glossaire via `POST /v1/webtoon/translate` ; timeout de requete 180 s, erreurs serveur explicites. Les images restent en memoire sur l'iPhone. **Aucun envoi d'image, y compris en fallback ; aucun appel a `/extract`, `/image` ou `/ocr` dans le navigateur V2.**
+Le site recoit ses propres requetes normales de navigation et conserve ses cookies dans V2. Les clients API utilisent des sessions ephemeres distinctes, sans cookies, authentification stockee ni suivi de redirection. **Les captures de navigateur et imports personnels restent text-only** : Vision est local, seul le texte/coordonnees/style/glossaire part a `/translate`, jamais leurs images, meme en fallback.
+
+**Le mode chapitre public a son propre consentement** : le Mac recoit le lien choisi et charge les images publiques ; l'iPhone peut lui transmettre des crops de ces images publiques pour l'OCR et les masques. Ce n'est ni un export de l'ecran, ni une autorisation d'aspirer un site connecte ou protege. Les URL avec identifiants, jetons de session evidents ou adresses privees sont refusees comme sources publiques. L'OCR public emploie `imageUrl` (casse exacte) pour les images courtes et `imageData` uniquement pour les crops publics des longues pages ; jamais une capture privee.
 
 Les formulaires visibles, y compris les champs detectables dans des shadow roots ouverts, challenges connus, frames et videos visibles sont refuses avant l'OCR/export. Ce filtrage prudent ne certifie pas toutes les constructions possibles d'un site : affichez seulement le chapitre et ne traduisez pas un ecran contenant des donnees personnelles. Une capture opaque/vide ou sans texte lisible n'est pas consideree comme un succes.
 
@@ -48,7 +66,7 @@ Safari et l'import manuel d'une capture autorisee dans **Lecteur** restent les s
 
 Si un backend local est deja accessible au telephone, configurez simplement son URL. Un iPhone ne peut pas joindre le `127.0.0.1` du Mac : **localhost sur iPhone designe l'iPhone**.
 
-Le simulateur iOS sur ce Mac peut joindre le backend du Mac sur **`http://127.0.0.1:8787`** : ce transport et l'API textuelle reelle ont ete testes, sans exposition LAN ni tunnel. Le backend choisi reste configure dans V2 a la fin des tests, mais le **consentement texte est revoque** et Auto desactive. L'app normale s'ouvre sur Webtoon, sans lancer automatiquement une page ou une traduction.
+Le simulateur iOS sur ce Mac peut joindre le backend du Mac sur **`http://127.0.0.1:8787`** : ce transport, les APIs de lecture publique et la traduction reelle ont ete testes, sans exposition LAN ni tunnel. Le backend choisi reste configure dans V2 a la fin des tests, mais les **deux consentements sont revoques** et Auto desactive. L'app normale s'ouvre sur Webtoon avec le dernier lien public dans le champ, sans lancer automatiquement une page ou une traduction.
 
 Pour preparer un backend V2 independant, **uniquement dans ce checkout V2**, avec Python deja installe :
 
@@ -112,6 +130,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
   -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
   CODE_SIGNING_ALLOWED=NO test
+
+# Parite publique NanoMachine 332 : extraction / fenetres / masques / Qwen reels.
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2PublicChapter \
+  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
+  -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
+  -only-testing:WebtoonLensCoreTests -only-testing:WebtoonLensUITests/PublicChapterReaderTests \
+  CODE_SIGNING_ALLOWED=NO test
 ```
 
 Le harness compile le core partage et les **memes helpers WebKit de capture/etat** que l'app. Il utilise une vraie WKWebView macOS sans mettre sa fenetre au premier plan, et un serveur de fixtures originales sur un port loopback ephemere, arrete en fin de test. Il couvre URL/consentement, budgets Retina, cache/glossaire/ordre, coordonnees et annulation serialisee, JS/blob/canvas/lazy, sessions, refus de retelechargement sans cookie, DOM intact, scroll imbrique/navigation, formulaires/challenges/frames, pixels opaques, 503/retry/reponse incomplete, redirection et annulation HTTP. Le backend de fixtures est **explicitement synthetique**, pas un traducteur ni une preuve linguistique.
@@ -126,6 +152,13 @@ Validation native du **3 octobre 2026**, sur le seul simulateur iPhone 18 Pro `5
 | `native-complete-sites-20261003.xcresult` | 30 tests passes : SwiftData, vrai parcours de fixture, premier lot de sites et preservation de l'original ; pas 30 preuves de compatibilite chapitre |
 | `native-stability-final-20261003.xcresult` | 26 Core + NanoMachine passes ; erreur de stabilisation explicite a 10 s, pas succes de traduction NanoMachine |
 | `native-typed-recovery-20261003.xcresult` | **34 Core + 2 UI passes** : isolation typed503, IDs complets, lots32, budget5, erreurs reseau, cache partiel refuse et Source/Original preserves |
+| `public-chapter-nano-render-20261003.xcresult` | **45 Core + 1 UI passent** : deux vraies pages NanoMachine, cinq masques ajustes, comparaison Original, aucun logo/menu pris pour un dialogue |
+| `public-chapter-final-20261003.xcresult` | **49 Core + 2 UI passent** : crops naturels/pixels source, couverture/halo/doublons, 200/OCR masques/styles, 403/noimages, pause/reprise/annulation, Nano reel et smoke UI |
+| `public-chapter-parity-verified-20261003.xcresult` | **50 Core + 5 UI passent sur le code final** : Nano reel (41,0 s pour tout le test, reglages/consentement/comparaison inclus), captures privees Vision/Qwen preservees, refus total/partiel et smoke ; zero echec |
+
+Le renderer V1 et sa copie dans le bundle ont le meme SHA-256 : `d125c050dc9e106b2293d42bdba67de099660b2b701e908105f7ecacd85b5ac1`. Le premier essai de ce mode a revele une erreur de specification XcodeGen : l'ancienne cle `resources:` etait ignoree, les scripts/HTML n'etaient pas dans l'app. Les ressources sont maintenant declarees dans `sources` avec `buildPhase: resources`, sans copier Info.plist/entitlements. Un renderer absent ou defaillant arrete la lecture publique et garde le navigateur avec une erreur, plutot que de compter du texte invisible comme un rendu reussi.
+
+Cet ancien essai affichait aussi « 4 pages en erreur », mais sans details journalises ; **leur cause individuelle n'est pas determinee retrospectivement**, et elles ne sont pas attribuees sans preuve aux sites ou au modele. Les erreurs actuelles indiquent page/fenetre/raison typee, conservent les reussites et permettent une reprise. La preuve publiee valide les deux premieres pages et leurs vrais dialogues, **pas la traduction sans erreur de tout le chapitre**.
 
 La fixture originale a produit, via **Vision iOS et Qwen reel**, « Attendez les autres. Nous partons ensemble. », avec une zone francaise native, le texte source consultable, puis retrait via Original. Une seconde fixture de trois bulles injecte seulement un **refus HTTP type de test** ; les deux autres dialogues sont traduits par le vrai backend local, pas remplaces par des phrases codees. Sa variante totalement refusee finit sur Original avec zero segment francais et chaque erreur visible. Les serveurs de fixtures sont sur loopback ephemere et arretes a la fin ; ils ne recuperent aucune page tierce.
 
@@ -137,7 +170,7 @@ Les tests multisites sont dans le scheme **`WebtoonLensV2SiteChecks`**, volontai
 
 | Cas | Navigation native et zone observee | OCR/API et rendu | Conclusion chapitre |
 |---|---|---|---|
-| [NanoMachine 332](https://nanomachin.com/manga/nano-machine-chapter-332/) | WKWebView annonce la page prete, mais mutations continues du viewport initial | Capture annulee explicitement a 10 s ; aucun OCR/API ni francais annonce | **NON VALIDE** : zone stable non obtenue |
+| [NanoMachine 332](https://nanomachin.com/manga/nano-machine-chapter-332/) | Ancien mode navigateur instable ; nouveau mode public charge les vraies images extraites dans l'ordre | **Deux pages de 690 × 21 587 / 22 080 pixels, cinq masques ajustant de vraies traductions francaises** ; original/source comparables | **VALIDE sur ces deux pages en mode public** ; pas une garantie sur tout le chapitre ni le mode navigateur |
 | [WEBTOON / Lore Olympus episode 1](https://www.webtoons.com/en/romance/lore-olympus/episode-1/viewer?title_no=1320&episode_no=1) | Redirection normale vers le lecteur mobile ; refus « Refuser tout » effectif, episode/art d'introduction visibles | Vision et Qwen ont traite du texte d'interface ; six segments dans Texte, aucun remplacement de dialogue demontre | **NON VALIDE pour les dialogues** : l'introduction/UI n'est pas une preuve de traduction du chapitre |
 | [Webnovel / chapitre fourni](https://www.webnovel.com/fr/comic/wait-i-39-m-the-ultimate-demon-king_33398540708901501/chapter-1_89660822980187997) | Redirection mobile normale ; les premiers essais restent sur la notice de cookies, pas sur des bulles | Les deux segments recuperes concernent cette interface et sont exclus du bilan chapitre | **NON VALIDE** : aucune chaine sur un dialogue de chapitre n'a ete demontree |
 

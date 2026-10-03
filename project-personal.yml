@@ -27,8 +27,13 @@ targets:
     sources:
       - App/Sources
       - AppIntents/Sources
-    resources:
-      - App/Resources
+      - path: App/Resources
+        buildPhase: resources
+        excludes:
+          - Info.plist
+          - WebtoonLens.entitlements
+      - path: PhonePreview/layout.js
+        buildPhase: resources
     dependencies:
       - target: WebtoonLensCore
     settings:
@@ -96,3 +101,16 @@ schemes:
         WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787
         WEBTOON_LENS_TEST_SITES: "1"
         WEBTOON_LENS_TEST_READING_VIEWPORT: "1"
+  WebtoonLensV2PublicChapter:
+    build:
+      targets:
+        WebtoonLensV2: all
+        WebtoonLensCoreTests: [test]
+        WebtoonLensUITests: [test]
+    test:
+      targets:
+        - WebtoonLensCoreTests
+        - WebtoonLensUITests
+      environmentVariables:
+        WEBTOON_LENS_TEST_PUBLIC_CHAPTER: "1"
+        WEBTOON_LENS_TEST_BACKEND: http://127.0.0.1:8787

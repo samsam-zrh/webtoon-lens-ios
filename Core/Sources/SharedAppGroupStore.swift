@@ -32,6 +32,8 @@ public final class SharedSettingsStore {
         static let allowImageFallback = "allowImageFallback"
         static let defaultStylePrompt = "defaultStylePrompt"
         static let consentedTextBackend = "v2.consentedTextBackend"
+        static let consentedPublicChapterBackend = "v2.consentedPublicChapterBackend"
+        static let lastPublicChapterURL = "v2.lastPublicChapterURL"
     }
 
     private let defaults: UserDefaults
@@ -58,6 +60,7 @@ public final class SharedSettingsStore {
         set {
             if newValue != backendBaseURLString {
                 defaults.removeObject(forKey: Key.consentedTextBackend)
+                defaults.removeObject(forKey: Key.consentedPublicChapterBackend)
             }
             defaults.set(newValue, forKey: Key.backendBaseURL)
         }
@@ -91,6 +94,35 @@ public final class SharedSettingsStore {
         let url = try LocalBackendAddress.parse(backendBaseURLString)
         guard hasTextTranslationConsent else { throw BrowserCaptureError.textConsentRequired }
         return url
+    }
+
+    public var hasPublicChapterConsent: Bool {
+        guard let url = backendBaseURL else { return false }
+        return defaults.string(forKey: Key.consentedPublicChapterBackend) == url.absoluteString
+    }
+
+    public func setPublicChapterConsent(_ allowed: Bool) {
+        if allowed, let url = backendBaseURL {
+            defaults.set(url.absoluteString, forKey: Key.consentedPublicChapterBackend)
+        } else {
+            defaults.removeObject(forKey: Key.consentedPublicChapterBackend)
+        }
+    }
+
+    public func publicChapterBackend() throws -> URL {
+        guard !backendBaseURLString.isEmpty else { throw TranslationClientError.missingBackend }
+        let url = try LocalBackendAddress.parse(backendBaseURLString)
+        guard hasPublicChapterConsent else { throw PublicChapterError.consentRequired }
+        return url
+    }
+
+    public var lastPublicChapterURL: String {
+        defaults.string(forKey: Key.lastPublicChapterURL) ?? ""
+    }
+
+    public func rememberPublicChapter(_ url: URL) throws {
+        let validated = try PublicChapterURL.parse(url.absoluteString)
+        defaults.set(validated.absoluteString, forKey: Key.lastPublicChapterURL)
     }
 }
 

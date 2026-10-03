@@ -22,7 +22,7 @@ final class PartialTranslationReaderTests: XCTestCase {
         let endpoint = try await server.start()
         defer { server.stop() }
         let app = XCUIApplication()
-        app.launch()
+        ReaderUITestSupport.launch(in: app)
         defer { app.terminate() }
         ReaderUITestSupport.configureLocalBackend(endpoint.absoluteString, in: app)
         app.tabBars.buttons["Webtoon"].tap()

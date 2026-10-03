@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class WebtoonLensUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -7,7 +8,7 @@ final class WebtoonLensUITests: XCTestCase {
 
     func testOnboardingReaderAndSettingsAreReachable() {
         let app = XCUIApplication()
-        app.launch()
+        ReaderUITestSupport.launch(in: app)
 
         XCTAssertTrue(app.navigationBars["Webtoon V2"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.textFields["v2.address"].exists)
