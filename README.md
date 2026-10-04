@@ -2,7 +2,7 @@
 
 **V2 est une version separee de V1, avec une seule commande : Traduire.** Elle essaie d'abord les images publiques du chapitre, avec les fenetres OCR et les masques V1. Si ce chemin refuse l'acces ou ne trouve pas de pages, elle ouvre normalement le site dans WKWebView et traduit le texte OCR de la zone lue. Aucun choix de mode n'est necessaire. L'original du site n'est jamais modifie.
 
-**La version personnelle est compilee et executee sur un simulateur iPhone 18 Pro / iOS 27.0**, avec Xcode 27.0. **NanoMachine 332** est verifie sur deux vraies pages avec masques ajustes. **Le viewport Webnovel du chapitre fourni** est maintenant verifie apres le refus de l'extraction publique : l'image lisible de la session normale produit une traduction francaise visible, pas une notice de cookies. Cela ne promet ni compatibilite universelle ni publication App Store. La signature et l'installation sur un iPhone physique restent a effectuer.
+**La version personnelle est compilee et executee sur simulateur / iOS 27.0**, avec Xcode 27.0. Les essais recents utilisent un iPhone 17 distinct de l'iPhone 18 Pro que l'utilisateur emploie ; aucun cookie ni choix utilisateur n'y est copie. **NanoMachine 332** est verifie sur deux vraies pages avec masques ajustes. **Webnovel est verifie sur une vraie narration : francais stable, defilement de 45 points et retour de la meme traduction**, puis enregistrement dans Historique et selection sans nouvelle traduction. Le correctif de grille de pixels passe 65 Core + 11 UI et cette confirmation reelle separee. Aucune compatibilite universelle ni publication App Store ; la signature et l'installation sur un iPhone physique restent a effectuer. L'appareil actuellement utilise n'est mis a jour qu'apres accord explicite, sans reset de donnees.
 
 ## V1 reste intacte
 
@@ -23,9 +23,9 @@ Les cookies WKWebView, preferences, glossaires, historique SwiftData et captures
 
 ### Trois commandes, un bandeau discret
 
-Coller le lien, puis toucher **Traduire**, juste a cote du champ. Les deux chevrons sont **chapitre precedent / chapitre suivant**, pas les pages d'images ni l'historique du navigateur. Aucun bouton Ouvrir, Lire le chapitre, Auto, Texte, selecteur de mode ou barre d'onglets n'encombre la lecture.
+Coller le lien, puis toucher **Traduire**, juste a cote du champ. Les deux chevrons sont **chapitre precedent / chapitre suivant**, pas les pages d'images ni l'historique du navigateur. Aucun bouton Ouvrir, Lire le chapitre, Auto, Texte ou selecteur de mode n'encombre la lecture. Les deux onglets natifs **Lecture / Historique** sont disponibles avec les commandes deployees et disparaissent pendant la lecture immersive.
 
-Le bandeau mesure environ **98 points de contenu** sur l'iPhone teste, hors barre systeme/safe area, puis **20 points** en defilant. Remonter legerement ou toucher la poignee le reveille. Les transitions sont gelees pendant une capture ; elles ne doivent pas deplacer ses coordonnees. Reduce Motion, Dynamic Type et VoiceOver sont conserves ; les grandes tailles d'accessibilite et VoiceOver gardent les commandes deployees. Les trois cibles principales font au moins 44 points.
+Le bandeau mesure environ **112 points de contenu** sur l'iPhone teste, hors barre systeme/safe area, puis **20 points** en defilant. Remonter legerement ou toucher la poignee le reveille. Les transitions sont gelees pendant une capture ; elles ne doivent pas deplacer ses coordonnees. Reduce Motion, Dynamic Type et VoiceOver sont conserves ; les grandes tailles d'accessibilite et VoiceOver gardent les commandes deployees. Les trois cibles principales font au moins 44 points.
 
 **Maintenir le bandeau** donne acces aux reglages, a l'import, aux series, a l'aide et, si disponible, a l'original / aux traductions et erreurs. Les dialogues complets du chapitre public restent sous les images. Une erreur n'est pas convertie en faux resultat ; sa description est lisible par VoiceOver et dans le contexte d'erreurs. Un backend manquant ouvre la configuration ponctuelle.
 
@@ -45,13 +45,23 @@ Le rendu utilise **`PhonePreview/layout.js` identique a V1**, embarque dans une 
 
 La derniere URL publique choisie est seulement memorisee dans le champ : l'app normale peut proposer NanoMachine au prochain lancement, mais ne charge ni ne traduit cette URL sans action de l'utilisateur.
 
+### Historique local
+
+**Historique** liste les lectures effectivement traduites, avec leur titre/source, date et statut complet ou partiel. Un historique vide l'indique clairement. Choisir une entree remet seulement son lien dans **Lecture** : aucun chargement de site, OCR ou envoi au Mac ne demarre avant de toucher **Traduire**. Les anciens imports restent dans leur stockage existant ; les nouveaux champs facultatifs de l'historique n'importent ni ne migrent les donnees V1.
+
+Les liens publics sans jeton sont conserves localement. Les captures privees et leurs references de verification restent uniquement en memoire ; cet historique ne sauvegarde aucune image de navigateur. Il ne promet pas de restaurer une traduction apres fermeture de l'app.
+
 ### Repli navigateur / captures privees
 
 Lorsqu'il est necessaire, le navigateur ouvre la page normalement puis demande la capture lisible. Connexion, choix ordinaires de cookies, restrictions et verifications restent sous le controle de l'utilisateur. Si l'image n'est pas encore lisible, afficher la zone voulue puis toucher de nouveau **Traduire** : **sur la meme URL en repli, le viewport courant est capture sans refaire l'extraction, recharger la page ni perdre sa session ou son defilement**. Un changement d'URL/configuration invalide ce contexte.
 
-Le bridge est injecte uniquement dans la frame principale, dans un monde JavaScript isole du site. Une seule traduction occupe la file, meme apres annulation jusqu'a la fin du travail precedent. Scroll, zoom, navigation, interactions, changement reel de source et apparition d'un formulaire/challenge sont des invalidations fortes. **Les mutations DOM hors de la zone lue ne sont plus confondues avec un changement de chapitre.** La capture vise le plus grand contenu image/canvas visible quand il existe, plutot que le header publicitaire du site.
+Le bridge est injecte uniquement dans la frame principale, dans un monde JavaScript isole du site. Une seule traduction occupe la file, meme apres annulation jusqu'a la fin du travail precedent. Scroll, zoom, navigation, interactions, changement reel de source et apparition d'un formulaire/challenge invalident les **travaux en cours**, jamais une autorisation de publier leurs anciens resultats. **Les mutations DOM hors de la zone lue ne sont plus confondues avec un changement de chapitre.** L'OCR vise le plus grand contenu image/canvas visible quand il existe, plutot que le header publicitaire du site : un snapshot natif de viewport est recadre localement sur une grille de pixels commune, afin que capture ciblee et verification n'arrondissent pas differemment l'origine de l'image.
 
 Avant publication, document/source/rectangle/viewport et gardes de confidentialite sont reverifies, puis les **pixels RGBA normalises des zones OCR** sont compares — pas les metadonnees d'un PNG ni les badges hors dialogue. Une zone qui change n'est pas traduite/peinte avec un ancien resultat ; ses erreurs restent explicites et les autres zones verifiees peuvent continuer. Un canvas dont le texte change sans mutation DOM reste refuse. Apres affichage, le controle de source/geometrie/pixels des zones peintes retire une traduction devenue perimee. Les overlays sont natifs, **hors de WKWebView** : aucune capture ne contient sa propre traduction.
+
+**Defiler ne supprime plus les traductions terminees.** Leurs rectangles sont ancres dans les coordonnees de l'image, se deplacent avec elle et restent en cache lorsque la zone sort de l'ecran. Revenir retrouve le francais verifie, sans nouvelle requete de traduction pour les dialogues deja couverts. Apres arret du mouvement, de nouvelles zones lisibles du **meme document arme par Traduire** peuvent etre traitees sans retoucher le bouton. Ce suivi s'arrete a la navigation, au changement de configuration/consentement, a Original ou a une garde de confidentialite ; il n'autorise aucun nouveau site silencieusement.
+
+Le cache prive est borne a **40 zones et 16 Mo de references bitmap**, en conservant leurs pixels natifs et leur profil couleur ; le bridge suit au plus 12 images. Les references sont des copies independantes des seules zones OCR et restent sur l'iPhone, en memoire, sans garder tous les bitmaps de viewport. Source/signature et pixels visibles sont verifies avant reutilisation ; un changement reel conserve l'original avec une erreur explicite. Le filtrage des doublons OCR exige texte et recouvrement spatial, y compris quand seule une partie d'un dialogue deja traduit est visible.
 
 Les classes/styles tardifs d'une image ne sont pas des changements de source par eux-memes : leur geometrie et leurs pixels sont verifies. Si **seule la mise en page** de la meme source se termine apres le clavier/header, l'ancien travail est annule et une nouvelle capture peut reprendre automatiquement, au maximum **deux fois dans la fenetre de 10 s de l'intention explicite**. Cela n'active pas un mode Auto persistant. Source/texte modifies, scroll volontaire, nouvelle navigation utilisateur ou PII ne sont pas une autorisation de repeindre l'ancien resultat. Les redirections normales `www` → `m` du meme site conservent l'intention ; une redirection vers un autre site demande une nouvelle action.
 
@@ -129,33 +139,45 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   generate --spec project-personal.yml
 
 # Build et tests ordinaires : les tests de reseau reel sont opt-in.
+# Employer un simulateur d'essai distinct, jamais celui actuellement utilise.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2 \
-  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
-  -derivedDataPath .runtime/ios-build CODE_SIGNING_ALLOWED=NO build test
+  -destination 'platform=iOS Simulator,id=2FC7CB62-6FD7-425E-B6BA-1D9F97711CED' \
+  -derivedDataPath .runtime/isolated-reader-build CODE_SIGNING_ALLOWED=NO build test
 
 # Fixture originale : vrai Vision/Qwen + refus HTTP type controle sur plusieurs dialogues.
 # Le backend 8787 doit deja fonctionner ; aucun service ni modele n'est installe.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2LocalBackend \
-  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
-  -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
+  -destination 'platform=iOS Simulator,id=2FC7CB62-6FD7-425E-B6BA-1D9F97711CED' \
+  -derivedDataPath .runtime/isolated-reader-build -parallel-testing-enabled NO \
   CODE_SIGNING_ALLOWED=NO test
 
 # Parite publique NanoMachine 332 : extraction / fenetres / masques / Qwen reels.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2PublicChapter \
-  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
-  -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
+  -destination 'platform=iOS Simulator,id=2FC7CB62-6FD7-425E-B6BA-1D9F97711CED' \
+  -derivedDataPath .runtime/isolated-reader-build -parallel-testing-enabled NO \
   -only-testing:WebtoonLensCoreTests -only-testing:WebtoonLensUITests/PublicChapterReaderTests \
   CODE_SIGNING_ALLOWED=NO test
 
-# Intention unique, bandeau compact/retracte, fixtures causales et un viewport Webnovel reel.
+# Ancrage/retour, bandeau 112/20, historique et gardes causales, sans site tiers.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2FocusedReader \
-  -destination 'platform=iOS Simulator,id=52F6BB73-EE31-4ACF-8B85-55E7ACEBC388' \
-  -derivedDataPath .runtime/ios-build -parallel-testing-enabled NO \
+  -destination 'platform=iOS Simulator,id=2FC7CB62-6FD7-425E-B6BA-1D9F97711CED' \
+  -derivedDataPath .runtime/isolated-reader-build -parallel-testing-enabled NO \
+  -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 \
+  -collect-test-diagnostics never \
   -only-testing:WebtoonLensCoreTests -only-testing:WebtoonLensUITests/ImmersiveReaderTests \
+  -only-testing:WebtoonLensUITests/ReadingHistoryTests CODE_SIGNING_ALLOWED=NO test
+
+# Un seul Webnovel reel, seulement sur selection explicite :
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project WebtoonLensV2Personal.xcodeproj -scheme WebtoonLensV2FocusedReader \
+  -destination 'platform=iOS Simulator,id=2FC7CB62-6FD7-425E-B6BA-1D9F97711CED' \
+  -derivedDataPath .runtime/isolated-reader-build -parallel-testing-enabled NO \
+  -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 \
+  -collect-test-diagnostics never \
   -only-testing:WebtoonLensUITests/UnifiedWebnovelTests CODE_SIGNING_ALLOWED=NO test
 ```
 
@@ -163,7 +185,7 @@ Le harness compile le core partage et les **memes helpers WebKit de capture/etat
 
 Premier resultat macOS : **98 assertions passees** dans la configuration standard et **99 dans la version personnelle**. Ces anciennes verifications restent distinctes de la validation native suivante.
 
-Validation native du **3 octobre 2026**, sur le seul simulateur iPhone 18 Pro `52F6BB73-EE31-4ACF-8B85-55E7ACEBC388` :
+Validation native historique du **3 octobre 2026** sur iPhone 18 Pro `52F6BB73-EE31-4ACF-8B85-55E7ACEBC388`, puis validation isolee sur iPhone 17 `2FC7CB62-6FD7-425E-B6BA-1D9F97711CED` dans les chemins indiques :
 
 | Preuve locale dans `.runtime/ios-build/Results/` | Resultat |
 |---|---|
@@ -178,10 +200,23 @@ Validation native du **3 octobre 2026**, sur le seul simulateur iPhone 18 Pro `5
 | `immersive-last-guards.xcresult` | Ancien run interrompu a la collecte pour laisser l'appareil utilise libre ; sept cas avaient passe dans le log, mais le bundle est incomplet et **n'est pas compte comme preuve finale** |
 | `.runtime/isolated-reader-build/Results/causal-settling-verified.xcresult` | **59 Core + 8 UI passent, bundle complet** sur un iPhone 17 distinct : classe tardive sans effet, mise en page tardive avec reprise sans retap, badge anime hors dialogue, garde des changements source/canvas/PII et scroll |
 | `.runtime/isolated-reader-build/Results/webnovel-paste-stable.xcresult` | **Un test reel passe, bundle complet** : menu Paste natif, vrai clavier encore actif, repli public/refus puis `www` → `m`, traduction de l'image de chapitre toujours visible cinq secondes apres stabilisation |
+| `.runtime/isolated-reader-build/Results/anchored-reader-validation.xcresult` | Collecte interrompue apres plus de sept minutes sans fin de bundle ; **pas une preuve complete**. Le log montre notamment quatre assertions de retrait au scroll devenues obsoletes, puis un Webnovel sans preuve de chapitre |
+| `.runtime/isolated-reader-build/Results/anchored-guards-final.xcresult` | Bundle complet en echec : une copie PNG de reference changeait les pixels compares et retirait a tort des zones statiques. Echec garde comme regression, corrige sans tolerance permissive |
+| `.runtime/isolated-reader-build/Results/anchored-reference-verified.xcresult` | **10 UI passent** : quatre cas positifs verifies par ID/coordonnees-image, sortie hors ecran sans flottement, retour meme FR et compteur API inchange ; nouvelle image traitee sans tap ; source/PII/canvas refuses, bandeau/onglets/historique vide. Le bundle global contient encore **un echec Core de fixture** : profil etendu construit en 8 bits au lieu de float |
+| `.runtime/isolated-reader-build/Results/anchored-webnovel-final.xcresult` | **64 Core passent**, y compris copies independantes sRGB/P3/float32 et crops partiels. Le test Webnovel echoue : son matcher AX omettait le label descriptif reel du refus, laissant le CMP sur la narration. Les 19 lignes OCR / 5 groupes / 2 acceptes / 3 refuses sont **exclus des preuves de chapitre** |
+| `.runtime/isolated-reader-build/Results/anchored-webnovel-exact-ax.xcresult` | Bundle complet, **1 echec en 26,989 s** : refus exact du CMP et disparition verifies ; vraie narration puis retrait du FR avant les cinq secondes de stabilite. 7 lignes OCR / 3 groupes, 2 acceptes / 1 refuse ; cache retire les ROI 500 × 134 et 103 × 29. **Ni scroll/retour ni historique reel valides dans ce cas** |
+| `.runtime/isolated-reader-build/Results/anchored-local-coherent.xcresult` | **65 Core + 11 UI passent, zero echec, zero skip, bundle complet** : grille commune de pixels, origine fractionnaire, copies couleur, deux images/retour sans appel supplementaire, compteurs/memoire, source/canvas/PII et annulation, historique vide, bandeau 112/20 et deux onglets. **Fixtures originales uniquement ; pas une validation Webnovel** |
+| `.runtime/isolated-reader-build/Results/anchored-webnovel-postfix.xcresult` | **1 UI reel passe en 46,713 s, zero echec, zero skip, bundle complet**, sur exactement le bundle des 76 tests locaux : narration francaise stable cinq secondes, scroll 45 points/retour du meme ID, historique reel et selection field-only avec zero overlay/autoload. Le CMP avait ete refuse effectivement dans le cas exact-AX precedent et est absent dans cette session |
 
 Les tests UI utilisent maintenant des preferences **volatiles isolees**, uniquement sur simulateur Debug, et un stockage SwiftData en memoire. Aucun flag de test n'est present dans le lancement normal. La specification Debug explicite `DEBUG`, que la precedente surcharge de conditions Swift omettait. Avant sa correction, un essai avait change le dernier lien choisi ; **seul ce lien a ete restaure a sa valeur capturee avant essais**, puis backend, les deux consentements et lien ont ete compares apres le run isole et conserves. Aucun effacement global des preferences, cookies, donnees ou caches V1.
 
-Un retour utilisateur reel ulterieur montrait encore « Zone modifiee » sur la narration de Webnovel. L'evenement exact de cette capture historique n'etait pas journalise ; **il n'est pas attribue retrospectivement a un vieux binaire ou a une mutation precise**. Les defauts de code reproductibles — classe/style inoffensif considere comme source modifiee, badge hors dialogue inclus dans le hash global, fin de mise en page sans reprise — ont ete corriges et verifies dans les deux derniers bundles ci-dessus. Ces essais se sont faits **sur un autre simulateur**, sans importer cookies/preferences/credentials ni conduire l'appareil que l'utilisateur utilisait. Les chevrons opaques sont explicitement grises et annonces desactives. Le choix de lien fait par l'utilisateur apres les premiers essais n'est pas remplace par l'ancien bookmark.
+Un retour utilisateur reel ulterieur montrait encore « Zone modifiee » sur la narration de Webnovel. L'evenement exact de cette capture historique n'etait pas journalise ; **il n'est pas attribue retrospectivement a un vieux binaire ou a une mutation precise**. Les defauts de code reproductibles — classe/style inoffensif considere comme source modifiee, badge hors dialogue inclus dans le hash global, fin de mise en page sans reprise — ont ete corriges et verifies dans `causal-settling-verified.xcresult` et `webnovel-paste-stable.xcresult`. Ces essais se sont faits **sur un autre simulateur**, sans importer cookies/preferences/credentials ni conduire l'appareil que l'utilisateur utilisait. Les chevrons opaques sont explicitement grises et annonces desactives. Le choix de lien fait par l'utilisateur apres les premiers essais n'est pas remplace par l'ancien bookmark.
+
+Les tests d'ancrage ne demandent plus d'effacer le francais apres defilement. Ils mesurent ses coordonnees dans l'image, son absence hors ecran, son retour dans la bonne zone et le nombre reel d'appels API. Les references sont copiees sans conversion PNG ni reduction destructive, au format/profil couleur natif, avec budget bitmap total. La verification de cache relit les gardes de confidentialite et document/geometrie **apres** son snapshot asynchrone avant tout placement. Les IDs d'un meme resultat en cache restent distincts lorsqu'il appartient a deux images/documents differents.
+
+Le cas Webnovel exact-AX a revele un deuxieme probleme de reference : la capture ciblee et la verification de viewport n'utilisaient pas la meme origine/grille de pixels. Le recadrage local entier et le mapping de la ROI effective remplacent ces deux rasterisations, avec un snap limite aux erreurs numeriques de coordonnees, **sans tolerance de couleur ni retrait des gardes de source**. Une fixture a origine CSS fractionnaire et les anciennes fixtures de retour passent sur ce code. **L'unique confirmation reelle postfix autorisee passe ensuite**, avec narration stable, retour et historique effectif ; aucun autre site ni lot de performances n'est relance.
+
+Preuves de cette confirmation dans `.runtime/isolated-reader-build/Results/anchored-webnovel-postfix-attachments/` : capture apres retour `ACA5E9B2-52BC-4FA7-B4F8-521908143516.png`, source/rectangle/pixels `438D1DD4-1BB5-4DA8-B38B-93D57DC5DCAA.txt`, ancrage retourne `28F26D74-6D10-4439-8C06-1D355B4C9745.txt`. Une narration de 804 × 1 074 pixels est capturee dans une region `(x:0, y:0,08752, largeur:1, hauteur:0,87034)` ; une zone francaise est ajustee, conserve le meme ID et utilise 264 096 octets de reference. Une petite zone d'interface devenue non verifiable est retiree, sans effacer cette narration. Les autres zones/refus peuvent encore faire des appels : **pas de promesse de zero appel global sur Webnovel**, seulement la reutilisation de la narration couverte et les compteurs stricts des fixtures.
 
 ### Rapidite mesuree, pas promise
 
@@ -210,7 +245,7 @@ Les tests multisites sont dans le scheme **`WebtoonLensV2SiteChecks`**, volontai
 |---|---|---|---|
 | [NanoMachine 332](https://nanomachin.com/manga/nano-machine-chapter-332/) | Ancien mode navigateur instable ; nouveau mode public charge les vraies images extraites dans l'ordre | **Deux pages de 690 × 21 587 / 22 080 pixels, cinq masques ajustant de vraies traductions francaises** ; original/source comparables | **VALIDE sur ces deux pages en mode public** ; pas une garantie sur tout le chapitre ni le mode navigateur |
 | [WEBTOON / Lore Olympus episode 1](https://www.webtoons.com/en/romance/lore-olympus/episode-1/viewer?title_no=1320&episode_no=1) | Redirection normale vers le lecteur mobile ; refus « Refuser tout » effectif, episode/art d'introduction visibles | Vision et Qwen ont traite du texte d'interface ; six segments dans Texte, aucun remplacement de dialogue demontre | **NON VALIDE pour les dialogues** : l'introduction/UI n'est pas une preuve de traduction du chapitre |
-| [Webnovel / chapitre fourni](https://www.webnovel.com/fr/comic/wait-i-39-m-the-ultimate-demon-king_33398540708901501/chapter-1_89660822980187997) | Extraction publique refusee en 403 ; repli normal avec redirection mobile, collage par menu natif et clavier actif verifies dans un simulateur isole | **Narration de l'image de chapitre verifiee**, rectangle lu normalise `(x:0, y:0,0801, largeur:1, hauteur:0,7885)`, capture 804 × 1 074 px, un segment francais ajuste restant visible apres cinq secondes ; les zones en erreur restent originales | **VALIDE pour ce viewport teste**, sans contourner de protection ; pas tout le chapitre ni tous les comptes |
+| [Webnovel / chapitre fourni](https://www.webnovel.com/fr/comic/wait-i-39-m-the-ultimate-demon-king_33398540708901501/chapter-1_89660822980187997) | Extraction publique 403 ; repli mobile normal, collage natif et clavier actif. Refus exact du CMP effectif dans la session d'essai, absent lors de la confirmation | **Narration 804 × 1 074 px, un FR ajuste stable cinq secondes, meme ID apres scroll 45 points/retour**, historique chapitre reel et selection sans autoload ; source originale et erreurs partielles conservees | **VALIDE pour cette narration et ce scroll/retour testes**, sans contourner de protection ; pas tout le chapitre ni tous les comptes |
 
 Le lot historique `native-reading-controls-final-20261003.xcresult` avait echoue **dans XCUITest avant la capture de lecture**, sur une cible image dont le « visible frame is empty ». Ces echecs sont conserves, pas maquilles en tests passes. La correction immersive a ensuite traite le **viewport Webnovel reel montre par l'utilisateur** : `UnifiedWebnovelTests` passe dans `immersive-delivery.xcresult`, avec capture et metadonnees de l'image de chapitre, pas d'une notice de cookies. Le cas WEBTOON historique n'a pas ete reexecute ; sa lecture de dialogues reste non validee.
 

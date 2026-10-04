@@ -95,6 +95,9 @@ public final class TranslationJob: Identifiable {
     public var status: String
     public var createdAt: Date
     public var durationMilliseconds: Int
+    public var sourceURL: String?
+    public var sourceTitle: String?
+    public var readingKey: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -104,7 +107,10 @@ public final class TranslationJob: Identifiable {
         targetLanguage: String,
         status: String,
         createdAt: Date = Date(),
-        durationMilliseconds: Int
+        durationMilliseconds: Int,
+        sourceURL: String? = nil,
+        sourceTitle: String? = nil,
+        readingKey: String? = nil
     ) {
         self.id = id
         self.seriesID = seriesID
@@ -114,6 +120,9 @@ public final class TranslationJob: Identifiable {
         self.status = status
         self.createdAt = createdAt
         self.durationMilliseconds = durationMilliseconds
+        self.sourceURL = sourceURL
+        self.sourceTitle = sourceTitle
+        self.readingKey = readingKey
     }
 }
 

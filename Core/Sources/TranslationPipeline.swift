@@ -124,7 +124,9 @@ public actor TranslationCache {
 }
 
 #if canImport(UIKit)
+import OSLog
 public actor WebtoonTranslationPipeline {
+    private static let logger = Logger(subsystem: "com.example.webtoonlens.v2", category: "PrivateTextPipeline")
     private let ocr: OCRRecognizing
     private let client: TranslationClientProtocol
     private let cache: TranslationCache
@@ -146,7 +148,8 @@ public actor WebtoonTranslationPipeline {
         sourceLanguage: String = WebtoonLensConstants.autoSourceLanguage,
         targetLanguage: String = WebtoonLensConstants.defaultTargetLanguage,
         glossary: [GlossaryTermInstruction],
-        style: String
+        style: String,
+        alreadyTranslated: [TranslationSourceSegment] = []
     ) async throws -> TranslationResult {
         try Task.checkCancellation()
         let startedAt = Date()
@@ -158,7 +161,8 @@ public actor WebtoonTranslationPipeline {
         let cacheKey = TranslationCacheKey(
             imageHash: imageHash, targetLanguage: targetLanguage, glossaryChecksum: glossaryChecksum,
             sourceLanguage: sourceLanguage, seriesID: seriesID,
-            styleChecksum: ImageHasher.sha256Hex(Data(style.utf8)), clientNamespace: client.cacheNamespace
+            styleChecksum: ImageHasher.sha256Hex(Data(style.utf8)) + (alreadyTranslated.isEmpty ? "" : ":" +
+                ImageHasher.sha256Hex(try JSONEncoder().encode(alreadyTranslated))), clientNamespace: client.cacheNamespace
         )
 
         if let cached = await cache.value(for: cacheKey) {
@@ -166,7 +170,9 @@ public actor WebtoonTranslationPipeline {
             return cached
         }
 
+        Self.logger.notice("Vision OCR started.")
         let ocrSegments = try await ocr.recognizeText(in: image, mode: .accurate)
+        Self.logger.notice("Vision OCR completed: \(ocrSegments.count) regions.")
         try Task.checkCancellation()
         guard !ocrSegments.isEmpty else {
             throw TranslationPipelineError.noTextRecognized
@@ -181,6 +187,11 @@ public actor WebtoonTranslationPipeline {
                 confidence: bubble.segments.map(\.confidence).reduce(0, +) / Double(max(1, bubble.segments.count)),
                 readingOrder: bubble.readingOrder
             )
+        }.filter { source in !alreadyTranslated.contains { OCRCoverage.matches(source, existing: $0) } }
+
+        if sourceSegments.isEmpty {
+            return TranslationResult(imageHash: imageHash, detectedSourceLanguage: nil, targetLanguage: targetLanguage,
+                segments: [], glossaryUpdates: [], durationMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1000))
         }
 
         let request = TranslationRequest(
@@ -191,7 +202,9 @@ public actor WebtoonTranslationPipeline {
             segments: sourceSegments,
             glossary: glossary
         )
+        Self.logger.notice("Text translation requested: \(sourceSegments.count) dialogues.")
         let response = try await TranslationBatchProcessor(client: client).translate(request)
+        Self.logger.notice("Text translation completed: \(response.segments.count) accepted, \(response.failures.count) refused.")
         try Task.checkCancellation()
 
         let duration = Int(Date().timeIntervalSince(startedAt) * 1000)

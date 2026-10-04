@@ -61,13 +61,13 @@ final class ImmersiveReadingController {
             return browser.hasError ? browser.status : "Ouverture du chapitre dans le navigateur…"
         }
         if showPublic {
-            return chapter.hasError ? chapter.status : "\(chapter.pageCount) pages · \(chapter.translationCount) dialogues traduits"
+            return chapter.hasError ? chapter.status : "\(ReadingCopy.pages(chapter.pageCount)) · \(ReadingCopy.translated(chapter.translationCount))"
         }
         if browser.isTranslating { return "Traduction de la zone lue…" }
         if browser.isLoading { return "Chargement du site…" }
         if browser.hasError { return browser.status }
         if let result = browser.result {
-            return "\(result.segments.count) dialogues traduits\(result.failures.isEmpty ? "" : " · \(result.failures.count) erreurs")"
+            return "\(ReadingCopy.translated(result.segments.count))\(result.failures.isEmpty ? "" : " · \(result.failures.count) erreurs")"
         }
         if fallbackContext != nil { return browser.status }
         return message
@@ -83,7 +83,7 @@ final class ImmersiveReadingController {
             let result = try await WebtoonTranslationPipeline(client: WebtoonTranslationClient(baseURL: backend)).translate(
                 image: capture.image, imageData: capture.data, seriesID: options.seriesID,
                 sourceLanguage: options.sourceLanguage, targetLanguage: options.targetLanguage,
-                glossary: options.glossary, style: options.style
+                glossary: options.glossary, style: options.style, alreadyTranslated: capture.alreadyTranslated
             )
             guard try SharedSettingsStore.shared.translationBackend() == backend else {
                 throw BrowserCaptureError.textConsentRequired
@@ -101,6 +101,13 @@ final class ImmersiveReadingController {
         address = value
         invalidateIntent()
         errorMessage = nil
+    }
+
+    func selectHistoryURL(_ url: URL) {
+        invalidateIntent()
+        address = url.absoluteString
+        errorMessage = nil
+        revealHeader()
     }
 
     func translate() {
@@ -163,6 +170,7 @@ final class ImmersiveReadingController {
     }
 
     func moveToDialogue() { chapter.moveToDialogue() }
+    func recordingFailed(_ error: Error) { errorMessage = "Historique non enregistre : \(error.localizedDescription)" }
 
     private func begin(_ url: URL, options: ReaderTranslationOptions) {
         let settings = SharedSettingsStore.shared
@@ -271,7 +279,7 @@ final class ImmersiveReadingController {
 
     private func scrolled(to offset: Double) {
         defer { lastScroll = offset }
-        guard !browser.isCapturePending else { return }
+        guard !browser.isTranslating else { return }
         let delta = offset - lastScroll
         if delta * scrollTrend < 0 { scrollTrend = 0 }
         scrollTrend += delta

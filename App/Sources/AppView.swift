@@ -7,6 +7,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case reader
     case series
     case settings
+    case history
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .reader: "Lecteur"
         case .series: "Series"
         case .settings: "Reglages"
+        case .history: "Historique"
         }
     }
 
@@ -27,6 +29,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .reader: "text.viewfinder"
         case .series: "book.closed"
         case .settings: "gearshape"
+        case .history: "clock"
         }
     }
 }
@@ -36,7 +39,16 @@ struct AppView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        WebtoonBrowserView()
+        @Bindable var appModel = appModel
+        TabView(selection: $appModel.selectedTab) {
+            WebtoonBrowserView()
+                .tabItem { Label("Lecture", systemImage: "book") }
+                .tag(AppTab.webtoon)
+                .toolbar(appModel.readingChromeCollapsed ? .hidden : .visible, for: .tabBar)
+            NavigationStack { ReadingHistoryView() }
+                .tabItem { Label("Historique", systemImage: "clock") }
+                .tag(AppTab.history)
+        }
         .fullScreenCover(isPresented: Binding(
             get: { appModel.selectedTab == .reader },
             set: { if !$0 { appModel.selectedTab = .webtoon } }

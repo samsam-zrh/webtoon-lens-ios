@@ -8,8 +8,11 @@ struct WebtoonBrowserView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AppModel.self) private var appModel
     @Query(sort: \SeriesProfile.updatedAt, order: .reverse) private var profiles: [SeriesProfile]
     @Query(sort: \TermMemoryEntry.updatedAt, order: .reverse) private var terms: [TermMemoryEntry]
+    @Query(sort: \TranslationJob.createdAt, order: .reverse) private var jobs: [TranslationJob]
     @State private var reader = ImmersiveReadingController()
     @State private var selectedSeriesID = ""
     @State private var settingsRevision = 0
@@ -57,6 +60,8 @@ struct WebtoonBrowserView: View {
                     ReaderTestValue(identifier: "v2.chapterMasks", value: reader.chapter.renderProof)
                     ReaderTestValue(identifier: "v2.headerHeight", value: "\(headerHeight)")
                     ReaderTestValue(identifier: "v2.browserProof", value: reader.browser.captureProof)
+                    ReaderTestValue(identifier: "v2.anchorCache", value: reader.browser.anchorCacheProof)
+                    ReaderTestValue(identifier: "v2.browserState", value: reader.browser.diagnosticState)
                 }
                 .frame(width: 5, height: 1)
             }
@@ -86,6 +91,27 @@ struct WebtoonBrowserView: View {
         .onChange(of: reader.needsConfiguration) { _, needed in
             if needed { panel = .settings; reader.needsConfiguration = false }
         }
+        .onChange(of: reader.headerCollapsed) { _, value in appModel.readingChromeCollapsed = value }
+        .onChange(of: appModel.pendingHistoryURL) { _, url in
+            if let url {
+                reader.selectHistoryURL(url)
+                appModel.pendingHistoryURL = nil
+            }
+        }
+        .onChange(of: reader.browser.result) { _, result in
+            if let result, !result.segments.isEmpty, !reader.showPublic {
+                recordReading(url: reader.browser.currentURL, title: reader.browser.pageTitle,
+                              key: "browser:\(reader.browser.documentIdentifier ?? "")",
+                              source: result.detectedSourceLanguage ?? "auto", partial: !result.failures.isEmpty)
+            }
+        }
+        .onChange(of: reader.chapter.translationCount) { _, count in
+            if count > 0, reader.showPublic {
+                recordReading(url: reader.chapter.displaySourceURL, title: nil,
+                              key: "chapter:\(reader.chapter.displaySourceURL?.absoluteString ?? "")", source: "auto",
+                              partial: reader.chapter.hasError)
+            }
+        }
         .onAppear { refreshSettings(); reader.setActive(scenePhase == .active) }
         .onDisappear { reader.setActive(false) }
         .onChange(of: scenePhase) { _, value in reader.setActive(value == .active) }
@@ -113,7 +139,7 @@ struct WebtoonBrowserView: View {
                 .accessibilityAction(named: "Afficher les commandes") { reader.revealHeader() }
                 .accessibilityIdentifier("v2.headerHandle")
         } else {
-            VStack(spacing: 2) {
+            VStack(spacing: 4) {
                 HStack(spacing: 6) {
                     TextField("Lien du chapitre", text: Binding(
                         get: { reader.address }, set: { reader.editAddress($0) }
@@ -151,8 +177,8 @@ struct WebtoonBrowserView: View {
                 .buttonStyle(.plain)
                 .contextMenu { contextualActions }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
     }
 
@@ -241,6 +267,24 @@ struct WebtoonBrowserView: View {
         ))
     }
 
+    private func recordReading(url: URL?, title: String?, key: String, source: String, partial: Bool) {
+        guard let url, (try? PublicChapterURL.parse(url.absoluteString)) != nil else { return }
+        let name = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let record = jobs.first { $0.readingKey == key } ?? TranslationJob(
+            seriesID: selectedSeriesID.isEmpty ? nil : selectedSeriesID,
+            imageHash: ImageHasher.sha256Hex(Data(url.absoluteString.utf8)),
+            sourceLanguage: source, targetLanguage: "fr", status: partial ? "partial" : "completed",
+            durationMilliseconds: 0, sourceURL: url.absoluteString,
+            sourceTitle: name?.isEmpty == false ? name : "\(url.host ?? "Chapitre") · \(ChapterURLNavigation.derive(url.absoluteString).label)",
+            readingKey: key
+        )
+        if !jobs.contains(where: { $0.id == record.id }) { modelContext.insert(record) }
+        record.createdAt = Date()
+        record.status = partial ? "partial" : "completed"
+        do { try modelContext.save() }
+        catch { reader.recordingFailed(error) }
+    }
+
     private var currentSettingsSnapshot: String {
         let settings = SharedSettingsStore.shared
         return [settings.backendBaseURLString, settings.defaultStylePrompt,
@@ -264,7 +308,7 @@ private enum ReaderPanel: String, Identifiable {
 
 private struct ReaderHeaderHeight: PreferenceKey {
     static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct ChapterStepControl: UIViewRepresentable {

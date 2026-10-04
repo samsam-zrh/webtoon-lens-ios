@@ -2,6 +2,27 @@ import CoreGraphics
 import Foundation
 
 public enum ReadingPixelFingerprint {
+    public static func independentCopy(of image: CGImage) throws -> CGImage {
+        guard image.width > 0, image.height > 0, image.width * image.height <= 4_000_000,
+              let space = image.colorSpace,
+              let context = CGContext(data: nil, width: image.width, height: image.height,
+                bitsPerComponent: image.bitsPerComponent, bytesPerRow: 0, space: space,
+                bitmapInfo: image.bitmapInfo.rawValue) else {
+            throw BrowserCaptureError.unreadableSnapshot
+        }
+        context.setBlendMode(.copy)
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let copy = context.makeImage(), let provider = copy.dataProvider,
+              let reference = CGImage(width: copy.width, height: copy.height,
+                bitsPerComponent: copy.bitsPerComponent, bitsPerPixel: copy.bitsPerPixel,
+                bytesPerRow: copy.bytesPerRow, space: space, bitmapInfo: copy.bitmapInfo,
+                provider: provider, decode: nil, shouldInterpolate: image.shouldInterpolate, intent: image.renderingIntent) else {
+            throw BrowserCaptureError.unreadableSnapshot
+        }
+        return reference
+    }
+
     public static func value(for image: CGImage, region: NormalizedRect) throws -> String {
         guard region.isInsideImage else { throw BrowserCaptureError.invalidViewport }
         let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)

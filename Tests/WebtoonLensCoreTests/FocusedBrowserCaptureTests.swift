@@ -39,6 +39,40 @@ final class FocusedBrowserCaptureTests: XCTestCase {
         XCTAssertNotEqual(try ReadingPixelFingerprint.value(for: image(120)), try ReadingPixelFingerprint.value(for: image(121)))
     }
 
+    func testIndependentROIReferencePreservesNativePixelsAndPartialCrops() throws {
+        let width = 585, height = 220
+        let pixels = Data((0..<(width * height)).flatMap { index -> [UInt8] in
+            [UInt8(index % 253), UInt8((index / width) % 247), UInt8((index * 3) % 251), 255]
+        })
+        let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
+        for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+            let image = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: width * 4, space: XCTUnwrap(CGColorSpace(name: name)),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+            let copy = try ReadingPixelFingerprint.independentCopy(of: image)
+            XCTAssertEqual(copy.width, width)
+            XCTAssertEqual(copy.height, height)
+            XCTAssertEqual(copy.bitsPerComponent, image.bitsPerComponent)
+            XCTAssertEqual(try ReadingPixelFingerprint.value(for: copy), try ReadingPixelFingerprint.value(for: image))
+            let partial = NormalizedRect(x: 0, y: 0.35, width: 1, height: 0.4)
+            XCTAssertEqual(try ReadingPixelFingerprint.value(for: copy, region: partial),
+                           try ReadingPixelFingerprint.value(for: image, region: partial))
+        }
+        let extended = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedSRGB))
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 32,
+            bytesPerRow: width * 16, space: extended,
+            bitmapInfo: CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue |
+                CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(try XCTUnwrap(CGColor(colorSpace: extended, components: [1.2, 0.35, 0.2, 1])))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let extendedImage = try XCTUnwrap(context.makeImage())
+        let extendedCopy = try ReadingPixelFingerprint.independentCopy(of: extendedImage)
+        XCTAssertEqual(extendedCopy.bitsPerComponent, 32)
+        XCTAssertEqual(try ReadingPixelFingerprint.value(for: extendedCopy),
+                       try ReadingPixelFingerprint.value(for: extendedImage))
+    }
+
     func testRestabilizationIsBoundedAndNeverAcceptsPixelOnlyOrPrivacyChanges() {
         let original = document()
         let moved = document(region: NormalizedRect(x: 0, y: 0.16, width: 1, height: 0.7))

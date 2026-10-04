@@ -38,6 +38,8 @@ struct WebtoonLensApp: App {
 final class AppModel {
     var selectedTab: AppTab = .webtoon
     var handoffRefreshToken = UUID()
+    var readingChromeCollapsed = false
+    var pendingHistoryURL: URL?
 
     func routeForPendingHandoffs() {
         if SharedHandoffStore.hasPendingImage {

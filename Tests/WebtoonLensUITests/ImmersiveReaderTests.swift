@@ -17,11 +17,14 @@ final class ImmersiveReaderTests: XCTestCase {
         XCTAssertFalse(app.buttons["Lire le chapitre"].exists)
         XCTAssertFalse(app.buttons["Texte"].exists)
         XCTAssertFalse(app.switches["Auto"].exists)
-        XCTAssertEqual(app.tabBars.count, 0)
+        XCTAssertEqual(app.tabBars.count, 1)
+        XCTAssertTrue(app.tabBars.buttons["Lecture"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Historique"].exists)
         XCTAssertFalse(app.segmentedControls["v2.presentation"].exists)
         let header = app.otherElements["v2.header"]
         XCTAssertTrue(header.exists)
         let measured = Double(app.staticTexts["v2.headerHeight"].value as? String ?? "") ?? .infinity
+        XCTAssertGreaterThanOrEqual(measured, 108)
         XCTAssertLessThanOrEqual(measured, 120, "Measure app header content, excluding the system status-bar safe area.")
         XCTAssertGreaterThanOrEqual(app.buttons["v2.previousChapter"].frame.height, 44)
         XCTAssertGreaterThanOrEqual(app.buttons["v2.nextChapter"].frame.height, 44)
@@ -59,6 +62,14 @@ final class ImmersiveReaderTests: XCTestCase {
         try await runCausalCase(.changingBadge)
     }
 
+    func testScrollTranslatesNewImageAndReturnsCachedFrenchWithoutRetap() async throws {
+        try await runCausalCase(.twoPages)
+    }
+
+    func testFractionalImageOriginUsesTheSameVerifiedPixelGridOnReturn() async throws {
+        try await runCausalCase(.fractionalImage)
+    }
+
     private func runCausalCase(_ scenario: ReadingCausalServer.Scenario) async throws {
         guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else {
             throw XCTSkip("Causal native tests use the explicit real-local-backend scheme.")
@@ -74,7 +85,7 @@ final class ImmersiveReaderTests: XCTestCase {
         app.buttons["v2.translate"].tap()
         let overlays = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
         let status = app.staticTexts["v2.status"]
-        if [.offscreen, .lateClass, .lateLayout, .changingBadge].contains(scenario) {
+        if [.offscreen, .lateClass, .lateLayout, .changingBadge, .twoPages, .fractionalImage].contains(scenario) {
             let complete = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in overlays.count > 0 }, object: status)
             let result = await XCTWaiter.fulfillment(of: [complete], timeout: 40)
             XCTAssertEqual(result, .completed, status.label)
@@ -99,7 +110,24 @@ final class ImmersiveReaderTests: XCTestCase {
             screenshot.name = "Focused native French capture unaffected by offscreen DOM timers"
             screenshot.lifetime = .keepAlways
             add(screenshot)
-            app.webViews.firstMatch.swipeUp()
+            let first = overlays.element(boundBy: 0)
+            let firstID = first.identifier
+            let cachedID = String(firstID.dropFirst("v2.translatedSegment.".count))
+            let initial = try anchorProof(in: app)
+            let initialZone = try XCTUnwrap(initial.entries.first { $0.id == cachedID })
+            XCTAssertTrue(initialZone.visible && initialZone.sourceVerified)
+            XCTAssertLessThanOrEqual(initial.count, 40)
+            XCTAssertGreaterThan(initial.referenceBytes, 0)
+            XCTAssertLessThanOrEqual(initial.referenceBytes, 16_000_000)
+            let beforeScroll = await server.recorder.snapshot()
+            let web = app.webViews.firstMatch
+            if scenario == .twoPages {
+                web.swipeUp()
+            } else {
+                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+                    .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)),
+                           withVelocity: .slow, thenHoldForDuration: 0.3)
+            }
             XCTAssertTrue(app.otherElements["v2.headerHandle"].waitForExistence(timeout: 5) ||
                           app.staticTexts["v2.headerHandle"].waitForExistence(timeout: 1))
             let measured = Double(app.staticTexts["v2.headerHeight"].value as? String ?? "") ?? .infinity
@@ -108,7 +136,69 @@ final class ImmersiveReaderTests: XCTestCase {
             collapsed.name = "Immersive header collapsed to a 20-point strip"
             collapsed.lifetime = .keepAlways
             add(collapsed)
-            XCTAssertEqual(overlays.count, 0)
+            let moved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard let proof = try? self.anchorProof(in: app),
+                      let zone = proof.entries.first(where: { $0.id == cachedID }) else { return false }
+                return proof.scrollY > initial.scrollY + 40 && !zone.visible
+            }, object: status)
+            let movedResult = await XCTWaiter.fulfillment(of: [moved], timeout: 8)
+            XCTAssertEqual(movedResult, .completed,
+                "Completed French must move out of view with its image, while remaining cached.")
+            let scrolled = try anchorProof(in: app)
+            let scrolledZone = try XCTUnwrap(scrolled.entries.first { $0.id == cachedID })
+            XCTAssertEqual(scrolledZone.anchorID, initialZone.anchorID)
+            XCTAssertEqual(scrolledZone.imageRect, initialZone.imageRect)
+            XCTAssertFalse(scrolledZone.visible)
+            let visibleFirst = app.staticTexts[firstID]
+            XCTAssertFalse(visibleFirst.exists && visibleFirst.frame.intersects(web.frame),
+                "An offscreen dialogue must not float over the next source.")
+            if scenario == .twoPages {
+                XCTAssertEqual(overlays.count, 0, "The first image's French must move offscreen with that image, not stay fixed to the viewport.")
+                let fresh = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    overlays.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("Astra") }
+                }, object: status)
+                let nextResult = await XCTWaiter.fulfillment(of: [fresh], timeout: 35)
+                XCTAssertEqual(nextResult, .completed)
+                let second = overlays.allElementsBoundByIndex.first { $0.label.localizedCaseInsensitiveContains("Astra") }
+                XCTAssertNotNil(second)
+                let afterSecond = await server.recorder.snapshot()
+                XCTAssertEqual(afterSecond.pageLoads, 1)
+                app.webViews.firstMatch.swipeDown()
+                let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    overlays.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("ensemble") }
+                }, object: status)
+                let returnResult = await XCTWaiter.fulfillment(of: [returned], timeout: 15)
+                XCTAssertEqual(returnResult, .completed)
+                let afterReturn = await server.recorder.snapshot()
+                XCTAssertEqual(afterReturn.translations, afterSecond.translations,
+                    "Returning must reuse French: \(app.staticTexts["v2.anchorCache"].value ?? "")")
+            } else {
+                web.swipeDown()
+                let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    let label = app.staticTexts[firstID]
+                    return label.exists && label.label == french && label.frame.intersects(web.frame)
+                }, object: status)
+                let returnResult = await XCTWaiter.fulfillment(of: [returned], timeout: 15)
+                XCTAssertEqual(returnResult, .completed, app.staticTexts["v2.anchorCache"].value as? String ?? "")
+                try await Task.sleep(for: .seconds(2))
+                let afterReturn = await server.recorder.snapshot()
+                XCTAssertEqual(afterReturn.pageLoads, 1)
+                XCTAssertEqual(afterReturn.translations, beforeScroll.translations,
+                    "Scroll and return must reuse the completed French, not translate it again.")
+                let restored = try anchorProof(in: app)
+                let restoredZone = try XCTUnwrap(restored.entries.first { $0.id == cachedID })
+                XCTAssertEqual(restoredZone.imageRect, initialZone.imageRect)
+                XCTAssertTrue(restoredZone.visible && restoredZone.sourceVerified)
+            }
+            let metrics = XCTAttachment(string: app.staticTexts["v2.anchorCache"].value as? String ?? "")
+            metrics.name = "Verified document/image anchors, native scroll coverage and bounded cache counters"
+            metrics.lifetime = .keepAlways
+            add(metrics)
+            let finalCounts = await server.recorder.snapshot()
+            let counters = XCTAttachment(string: String(decoding: try JSONEncoder().encode(finalCounts), as: UTF8.self))
+            counters.name = "Native fixture API counters after cached scroll and return"
+            counters.lifetime = .keepAlways
+            add(counters)
         } else {
             let rejected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 status.label.contains("formulaire") || status.label.contains("Zone modifiee") ||
@@ -132,10 +222,31 @@ final class ImmersiveReaderTests: XCTestCase {
         app.launch()
         return app
     }
+
+    private func anchorProof(in app: XCUIApplication) throws -> AnchorProof {
+        let value = try XCTUnwrap(app.staticTexts["v2.anchorCache"].value as? String)
+        return try JSONDecoder().decode(AnchorProof.self, from: Data(value.utf8))
+    }
+
+    private struct AnchorProof: Decodable {
+        let documentID: String
+        let scrollY: Double
+        let count: Int
+        let referenceBytes: Int
+        let entries: [Zone]
+
+        struct Zone: Decodable {
+            let id: String
+            let anchorID: String
+            let imageRect: NormalizedRect
+            let visible: Bool
+            let sourceVerified: Bool
+        }
+    }
 }
 
 actor ReadingCausalRecorder {
-    struct State {
+    struct State: Codable, Sendable {
         var pageLoads = 0
         var translations = 0
         var forwardedCookies = false
@@ -147,7 +258,7 @@ actor ReadingCausalRecorder {
 }
 
 final class ReadingCausalServer {
-    enum Scenario: String { case offscreen, imageChange, privacyForm, canvasChange, lateClass, lateLayout, changingBadge }
+    enum Scenario: String { case offscreen, imageChange, privacyForm, canvasChange, lateClass, lateLayout, changingBadge, twoPages, fractionalImage }
     let recorder = ReadingCausalRecorder()
     private let listener: NWListener
     private let queue = DispatchQueue(label: "WebtoonLensV2.focused-reading-fixture")
@@ -253,6 +364,14 @@ final class ReadingCausalServer {
           if('\(scenario.rawValue)'!=='canvasChange')document.querySelector('#reading').src=canvas.toDataURL('image/png');
         }
         paint(false);let count=0;
+        if('\(scenario.rawValue)'==='fractionalImage')document.querySelector('#reading').style.marginTop='37.25px';
+        if('\(scenario.rawValue)'==='twoPages'){
+          const next=document.createElement('img');next.id='next';next.style.marginTop='60px';
+          context.fillStyle='#f1fff5';context.fillRect(0,0,360,640);
+          context.fillStyle='#111111';context.font='bold 24px sans-serif';
+          context.fillText('WE WILL FIND ASTRA.',20,110);
+          next.src=canvas.toDataURL('image/png');document.querySelector('#reading').after(next);
+        }
         setInterval(()=>document.querySelector('#timer').textContent='Offscreen '+(++count),110);
         if('\(scenario.rawValue)'==='imageChange')setTimeout(()=>paint(true),1600);
         if('\(scenario.rawValue)'==='canvasChange')setTimeout(()=>paint(true),1600);

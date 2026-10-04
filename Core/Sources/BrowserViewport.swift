@@ -164,12 +164,15 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
     public let contentRevision: Int?
     public let captureRegion: NormalizedRect?
     public let readingSource: String?
+    public let readingAnchor: BrowserImageAnchor?
+    public let trackedAnchors: [BrowserImageAnchor]?
 
     public init(
         documentID: String, revision: Int, url: String, scrollX: Double, scrollY: Double,
         viewportWidth: Double, viewportHeight: Double, viewportLeft: Double,
         viewportTop: Double, viewportScale: Double, blockedReason: String?,
-        contentRevision: Int? = nil, captureRegion: NormalizedRect? = nil, readingSource: String? = nil
+        contentRevision: Int? = nil, captureRegion: NormalizedRect? = nil, readingSource: String? = nil,
+        readingAnchor: BrowserImageAnchor? = nil, trackedAnchors: [BrowserImageAnchor]? = nil
     ) {
         self.documentID = documentID
         self.revision = revision
@@ -185,6 +188,8 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
         self.contentRevision = contentRevision
         self.captureRegion = captureRegion
         self.readingSource = readingSource
+        self.readingAnchor = readingAnchor
+        self.trackedAnchors = trackedAnchors
     }
 
     public func validateForCapture() throws {
@@ -210,6 +215,14 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
             viewportLeft == other.viewportLeft && viewportTop == other.viewportTop &&
             viewportScale == other.viewportScale && blockedReason == other.blockedReason &&
             captureRegion == other.captureRegion && readingSource == other.readingSource
+    }
+
+    public func capturing(in region: NormalizedRect) -> BrowserDocumentState {
+        BrowserDocumentState(documentID: documentID, revision: revision, url: url, scrollX: scrollX, scrollY: scrollY,
+            viewportWidth: viewportWidth, viewportHeight: viewportHeight, viewportLeft: viewportLeft,
+            viewportTop: viewportTop, viewportScale: viewportScale, blockedReason: blockedReason,
+            contentRevision: contentRevision, captureRegion: region, readingSource: readingSource,
+            readingAnchor: readingAnchor, trackedAnchors: trackedAnchors)
     }
 }
 

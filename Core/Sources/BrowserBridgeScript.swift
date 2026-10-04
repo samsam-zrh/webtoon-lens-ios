@@ -13,6 +13,7 @@ public enum BrowserBridgeScript {
       let disposed = false;
       const listeners = [];
       const sourceIDs = new WeakMap();
+      const trackedImages = new Map();
       let sourceSequence = 0;
       let softTimer = 0;
       let lastBlock = null;
@@ -69,13 +70,27 @@ public enum BrowserBridgeScript {
           .sort((a, b) => b.width * b.height - a.width * a.height);
         const reading = candidates[0];
         readingElement = reading?.element || null;
-        let readingSource = null, captureRegion = null;
+        const anchorFor = element => {
+          const rect = element.getBoundingClientRect();
+          const id = String(sourceIDs.get(element));
+          return { id, signature: `${element.tagName}:${element.currentSrc || ''}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`,
+            bounds: { x: (rect.left - left) / width, y: (rect.top - top) / height, width: rect.width / width, height: rect.height / height } };
+        };
+        let readingSource = null, captureRegion = null, readingAnchor = null;
         if (reading) {
           if (!sourceIDs.has(reading.element)) sourceIDs.set(reading.element, ++sourceSequence);
           const element = reading.element;
+          trackedImages.set(String(sourceIDs.get(element)), element);
+          while (trackedImages.size > 12) trackedImages.delete(trackedImages.keys().next().value);
+          readingAnchor = anchorFor(element);
           readingSource = `${sourceIDs.get(element)}:${element.tagName}:${element.currentSrc || ''}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`;
           captureRegion = { x: (reading.x - left) / width, y: (reading.y - top) / height,
             width: reading.width / width, height: reading.height / height };
+        } else {
+          readingAnchor = { id: 'document', signature: `DOCUMENT:${documentID}`,
+            bounds: { x: -scrollX / width, y: -scrollY / height,
+              width: document.documentElement.scrollWidth / width, height: document.documentElement.scrollHeight / height } };
+          captureRegion = { x: 0, y: 0, width: 1, height: 1 };
         }
         return {
           documentID, revision, contentRevision, url: location.href, scrollX, scrollY,
@@ -84,7 +99,11 @@ public enum BrowserBridgeScript {
           viewportLeft: v ? v.offsetLeft : 0,
           viewportTop: v ? v.offsetTop : 0,
           viewportScale: v ? v.scale : 1,
-          blockedReason: blockedReason(), captureRegion, readingSource
+          blockedReason: blockedReason(), captureRegion, readingSource, readingAnchor,
+          trackedAnchors: [ { id: 'document', signature: `DOCUMENT:${documentID}`,
+            bounds: { x: -scrollX / width, y: -scrollY / height,
+              width: document.documentElement.scrollWidth / width, height: document.documentElement.scrollHeight / height } },
+            ...Array.from(trackedImages.values()).filter(element => element.isConnected).map(anchorFor) ]
         };
       }
       function changed(reason = 'initial') {
@@ -148,6 +167,7 @@ public enum BrowserBridgeScript {
         state,
         dispose() {
           disposed = true;
+          trackedImages.clear();
           clearTimeout(softTimer);
           mutations.disconnect();
           sizes.disconnect();
