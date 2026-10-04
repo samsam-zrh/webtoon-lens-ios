@@ -70,6 +70,255 @@ final class ImmersiveReaderTests: XCTestCase {
         try await runCausalCase(.fractionalImage)
     }
 
+    func testPartiallyVisibleGraphicCaptionSurvivesFractionalScrollAndReturn() async throws {
+        try await runPartialGraphicCase(nested: false)
+    }
+
+    func testNestedGraphicScrollKeepsFrenchBoundToTheImage() async throws {
+        try await runPartialGraphicCase(nested: true)
+    }
+
+    func testReadingWindowRotatesBeyondTwelveImagesAndReturnsCachedFrench() async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else { throw XCTSkip("Local backend fixture.") }
+        let server = try ReadingCausalServer(scenario: .manyImages)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let labels = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            labels.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("ensemble") }
+        }, object: app)
+        let first = await XCTWaiter.fulfillment(of: [ready], timeout: 35)
+        XCTAssertEqual(first, .completed, app.staticTexts["v2.status"].label)
+        let old = try XCTUnwrap(labels.allElementsBoundByIndex.first { $0.label.localizedCaseInsensitiveContains("ensemble") })
+        let oldID = old.identifier
+        let cacheID = String(oldID.dropFirst("v2.translatedSegment.".count))
+        let original = try XCTUnwrap(try anchorProof(in: app).entries.first { $0.id == cacheID })
+        let web = app.webViews.firstMatch
+        for _ in 0..<17 { web.swipeUp() }
+        let last = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            labels.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("Astra") }
+        }, object: app)
+        let lastResult = await XCTWaiter.fulfillment(of: [last], timeout: 25)
+        XCTAssertEqual(lastResult, .completed, app.staticTexts["v2.status"].label)
+        XCTAssertNotNil(try anchorProof(in: app).entries.first { $0.id == cacheID }, "Rotation of the twelve-node window must not retire a valid source.")
+        let counts = await server.recorder.snapshot()
+        for _ in 0..<17 { web.swipeDown() }
+        let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.staticTexts[oldID].exists }, object: app)
+        let returnedResult = await XCTWaiter.fulfillment(of: [returned], timeout: 15)
+        XCTAssertEqual(returnedResult, .completed, app.staticTexts["v2.anchorCache"].value as? String ?? "")
+        let restored = try XCTUnwrap(try anchorProof(in: app).entries.first { $0.id == cacheID })
+        XCTAssertEqual(restored.imageRect, original.imageRect)
+        let final = await server.recorder.snapshot()
+        XCTAssertEqual(final.pageLoads, 1)
+        XCTAssertEqual(final.translations, counts.translations, "Returning across more than twelve source images must reuse the first French.")
+    }
+
+    func testWhiteBlackAndColoredBubbleSurfacesUseLocalSourceColors() async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else { throw XCTSkip("Local backend fixture.") }
+        let server = try ReadingCausalServer(scenario: .bubbleSurfaces)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let labels = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in labels.count >= 3 }, object: app)
+        let result = await XCTWaiter.fulfillment(of: [ready], timeout: 40)
+        XCTAssertEqual(result, .completed, app.staticTexts["v2.status"].label)
+        let proof = try anchorProof(in: app)
+        let colors = proof.entries.compactMap(\.fill)
+        XCTAssertTrue(colors.contains { $0.red >= 245 && $0.green >= 245 && $0.blue >= 245 })
+        XCTAssertTrue(colors.contains { $0.red < 35 && $0.green < 35 && $0.blue < 35 })
+        XCTAssertTrue(colors.contains { $0.red > 230 && $0.green > 190 && $0.blue < 190 })
+        for entry in proof.entries where entry.visuallyReplaceable == true {
+            let fill = try XCTUnwrap(entry.fill), ink = try XCTUnwrap(entry.ink)
+            XCTAssertGreaterThanOrEqual(fill.contrast(with: ink), 4.5)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "Actual native white, black and colored source bubbles with local alpha erasure and fitted French"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let metadata = XCTAttachment(string: app.staticTexts["v2.anchorCache"].value as? String ?? "")
+        metadata.name = "Actual detected source fill/ink colors and conservative visual eligibility"
+        metadata.lifetime = .keepAlways
+        add(metadata)
+    }
+
+    func testUnreplaceableStyledTextOnArtKeepsOriginalWithExplicitTranscript() async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else { throw XCTSkip("Local backend fixture.") }
+        let server = try ReadingCausalServer(scenario: .styledArt)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.staticTexts["v2.status"].label.contains("Texte traduit disponible")
+        }, object: app)
+        let result = await XCTWaiter.fulfillment(of: [ready], timeout: 40)
+        XCTAssertEqual(result, .completed, app.staticTexts["v2.status"].label)
+        let proof = try anchorProof(in: app)
+        XCTAssertGreaterThan(proof.count, 0, "The real translated text remains available even when its art is not safely replaceable.")
+        XCTAssertTrue(proof.entries.allSatisfy { $0.visuallyReplaceable == false })
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment.")).count, 0)
+        app.staticTexts["v2.status"].press(forDuration: 1)
+        app.descendants(matching: .any)["Texte et erreurs"].tap()
+        XCTAssertGreaterThan(app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedText.")).count, 0)
+    }
+
+    func testCanvasMutationAfterPublicationRetiresOldFrench() async throws {
+        try await runPublishedGuardCase(.publishedCanvasChange)
+    }
+
+    func testPrivacyAppearingAfterPublicationStopsAndRemovesFrench() async throws {
+        try await runPublishedGuardCase(.publishedPrivacy)
+    }
+
+    func testGeometryRevisionWithSameSVGSourceButChangedWordsRejectsCachedFrench() async throws {
+        try await runComposedImageGuardCase(.movingAnimatedText)
+    }
+
+    func testGeometryRevisionWithSameSVGSourceButChangedFillRejectsCachedMask() async throws {
+        try await runComposedImageGuardCase(.movingAnimatedFill)
+    }
+
+    private func runComposedImageGuardCase(_ scenario: ReadingCausalServer.Scenario) async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else { throw XCTSkip("Local backend fixture.") }
+        let server = try ReadingCausalServer(scenario: scenario)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let labels = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            labels.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("ensemble") }
+        }, object: app)
+        let initial = await XCTWaiter.fulfillment(of: [ready], timeout: 30)
+        XCTAssertEqual(initial, .completed, app.staticTexts["v2.status"].label)
+        let old = try XCTUnwrap(labels.allElementsBoundByIndex.first { $0.label.localizedCaseInsensitiveContains("ensemble") })
+        let oldID = old.identifier
+        let cacheID = String(oldID.dropFirst("v2.translatedSegment.".count))
+        let rejected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let proof = try? self.anchorProof(in: app) else { return false }
+            return proof.scrollY > 0 && !proof.entries.contains(where: { $0.id == cacheID }) &&
+                !app.staticTexts[oldID].exists
+        }, object: app)
+        let result = await XCTWaiter.fulfillment(of: [rejected], timeout: 20)
+        XCTAssertEqual(result, .completed, app.staticTexts["v2.anchorCache"].value as? String ?? "")
+        let metadata = XCTAttachment(string: app.staticTexts["v2.anchorCache"].value as? String ?? "")
+        metadata.name = "Composed geometry change with unchanged image URI: old source mask rejected"
+        metadata.lifetime = .keepAlways
+        add(metadata)
+    }
+
+    private func runPublishedGuardCase(_ scenario: ReadingCausalServer.Scenario) async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else { throw XCTSkip("Local backend fixture.") }
+        let server = try ReadingCausalServer(scenario: scenario)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let labels = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in labels.count > 0 }, object: app)
+        let initial = await XCTWaiter.fulfillment(of: [ready], timeout: 35)
+        XCTAssertEqual(initial, .completed, app.staticTexts["v2.status"].label)
+        let before = await server.recorder.snapshot()
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            labels.count == 0 && (app.staticTexts["v2.status"].label.contains("change") ||
+                app.staticTexts["v2.status"].label.contains("formulaire"))
+        }, object: app)
+        let result = await XCTWaiter.fulfillment(of: [removed], timeout: 15)
+        XCTAssertEqual(result, .completed, app.staticTexts["v2.status"].label)
+        try await Task.sleep(for: .seconds(2))
+        XCTAssertEqual(labels.count, 0, "A canvas mutation or visible private form must not restore an old result.")
+        let after = await server.recorder.snapshot()
+        XCTAssertEqual(after.translations, before.translations)
+    }
+
+    private func runPartialGraphicCase(nested: Bool) async throws {
+        guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else {
+            throw XCTSkip("This original graphic fixture uses the configured real local backend.")
+        }
+        let server = try ReadingCausalServer(scenario: nested ? .nestedGraphic : .graphicPartial)
+        let endpoint = try await server.start()
+        defer { server.stop() }
+        let app = launchIsolated(backend: endpoint.absoluteString)
+        defer { app.terminate() }
+        let field = app.textFields["v2.address"]
+        field.tap()
+        field.typeText(endpoint.appendingPathComponent("chapter").absoluteString)
+        app.buttons["v2.translate"].tap()
+        let overlays = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "v2.translatedSegment."))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            overlays.allElementsBoundByIndex.contains { $0.label.localizedCaseInsensitiveContains("ensemble") }
+        }, object: app)
+        let firstResult = await XCTWaiter.fulfillment(of: [ready], timeout: 40)
+        XCTAssertEqual(firstResult, .completed, app.staticTexts["v2.status"].label)
+        try await Task.sleep(for: .seconds(2))
+        let label = try XCTUnwrap(overlays.allElementsBoundByIndex.first { $0.label.localizedCaseInsensitiveContains("ensemble") })
+        let identifier = label.identifier
+        let id = String(identifier.dropFirst("v2.translatedSegment.".count))
+        let initial = try anchorProof(in: app)
+        let original = try XCTUnwrap(initial.entries.first { $0.id == id })
+        let counts = await server.recorder.snapshot()
+        let web = app.webViews.firstMatch
+        let displacement = label.frame.minY - web.frame.minY + label.frame.height * 0.35
+        let start = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -displacement - 0.375)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+        try await Task.sleep(for: .seconds(3))
+        let partial = try anchorProof(in: app)
+        let partialZone = try XCTUnwrap(partial.entries.first { $0.id == id },
+            "An unchanged, partially visible source must not lose its finished translation: \(app.staticTexts["v2.anchorCache"].value ?? "")")
+        XCTAssertEqual(partialZone.imageRect, original.imageRect)
+        XCTAssertTrue(partialZone.visible && partialZone.sourceVerified)
+        XCTAssertTrue(app.staticTexts[identifier].exists)
+        let expected = try XCTUnwrap(partialZone.viewportRect)
+        XCTAssertEqual(app.staticTexts[identifier].frame.minY, web.frame.minY + expected.y * web.frame.height, accuracy: 2,
+            "French must follow its source image, including a nested scrolling container.")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = nested ? "Original graphic in nested scroller with image-bound French" : "Original graphic caption partially visible after fractional scroll"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let back = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        back.press(forDuration: 0.05, thenDragTo: back.withOffset(CGVector(dx: 0, dy: displacement + 0.375)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
+        try await Task.sleep(for: .seconds(3))
+        let restored = try anchorProof(in: app)
+        let returned = try XCTUnwrap(restored.entries.first { $0.id == id },
+            "The same source must restore its cached caption: \(app.staticTexts["v2.anchorCache"].value ?? "")")
+        XCTAssertEqual(returned.imageRect, original.imageRect)
+        XCTAssertTrue(returned.visible && app.staticTexts[identifier].exists)
+        let after = await server.recorder.snapshot()
+        XCTAssertEqual(after.pageLoads, 1)
+        XCTAssertEqual(after.translations, counts.translations, "Partial scroll and return must not retranslate the same graphic caption.")
+        let metrics = XCTAttachment(string: app.staticTexts["v2.anchorCache"].value as? String ?? "")
+        metrics.name = "Partial graphic source coordinates and verified cache after return"
+        metrics.lifetime = .keepAlways
+        add(metrics)
+    }
+
     private func runCausalCase(_ scenario: ReadingCausalServer.Scenario) async throws {
         guard ProcessInfo.processInfo.environment["WEBTOON_LENS_TEST_BACKEND"] != nil else {
             throw XCTSkip("Causal native tests use the explicit real-local-backend scheme.")
@@ -176,10 +425,13 @@ final class ImmersiveReaderTests: XCTestCase {
                 web.swipeDown()
                 let returned = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                     let label = app.staticTexts[firstID]
-                    return label.exists && label.label == french && label.frame.intersects(web.frame)
+                    return label.exists && self.accessibilityText(label.label) == self.accessibilityText(french) &&
+                        label.frame.intersects(web.frame)
                 }, object: status)
                 let returnResult = await XCTWaiter.fulfillment(of: [returned], timeout: 15)
-                XCTAssertEqual(returnResult, .completed, app.staticTexts["v2.anchorCache"].value as? String ?? "")
+                let label = app.staticTexts[firstID]
+                XCTAssertEqual(returnResult, .completed,
+                    "exists=\(label.exists), text=\(label.exists ? label.label : ""), expected=\(french), frame=\(label.exists ? label.frame : .null), web=\(web.frame); \(app.staticTexts["v2.anchorCache"].value ?? "")")
                 try await Task.sleep(for: .seconds(2))
                 let afterReturn = await server.recorder.snapshot()
                 XCTAssertEqual(afterReturn.pageLoads, 1)
@@ -228,6 +480,10 @@ final class ImmersiveReaderTests: XCTestCase {
         return try JSONDecoder().decode(AnchorProof.self, from: Data(value.utf8))
     }
 
+    private func accessibilityText(_ value: String) -> String {
+        value.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     private struct AnchorProof: Decodable {
         let documentID: String
         let scrollY: Double
@@ -239,8 +495,12 @@ final class ImmersiveReaderTests: XCTestCase {
             let id: String
             let anchorID: String
             let imageRect: NormalizedRect
+            let viewportRect: NormalizedRect?
             let visible: Bool
             let sourceVerified: Bool
+            let fill: BubbleRGB?
+            let ink: BubbleRGB?
+            let visuallyReplaceable: Bool?
         }
     }
 }
@@ -258,7 +518,7 @@ actor ReadingCausalRecorder {
 }
 
 final class ReadingCausalServer {
-    enum Scenario: String { case offscreen, imageChange, privacyForm, canvasChange, lateClass, lateLayout, changingBadge, twoPages, fractionalImage }
+    enum Scenario: String { case offscreen, imageChange, privacyForm, canvasChange, lateClass, lateLayout, changingBadge, twoPages, fractionalImage, graphicPartial, nestedGraphic, manyImages, bubbleSurfaces, styledArt, publishedCanvasChange, publishedPrivacy, movingAnimatedText, movingAnimatedFill }
     let recorder = ReadingCausalRecorder()
     private let listener: NWListener
     private let queue = DispatchQueue(label: "WebtoonLensV2.focused-reading-fixture")
@@ -351,7 +611,8 @@ final class ReadingCausalServer {
         <script>
         const canvas=document.createElement('canvas');canvas.width=360;canvas.height=640;
         const context=canvas.getContext('2d');
-        if('\(scenario.rawValue)'==='canvasChange'){
+        const usesCanvas=['canvasChange','publishedCanvasChange'].includes('\(scenario.rawValue)');
+        if(usesCanvas){
           document.querySelector('#reading').style.display='none';
           canvas.style='display:block;width:100%;max-width:360px;height:auto';
           document.body.prepend(canvas);
@@ -361,9 +622,28 @@ final class ReadingCausalServer {
           context.fillStyle='#111111';context.font='bold 24px sans-serif';
           context.fillText(second?'OUR PAGE HAS CHANGED.':'WAIT FOR THE OTHERS.',20,110);
           context.fillText(second?'KEEP THIS ORIGINAL.':'WE LEAVE TOGETHER.',20,150);
-          if('\(scenario.rawValue)'!=='canvasChange')document.querySelector('#reading').src=canvas.toDataURL('image/png');
+          if(!usesCanvas)document.querySelector('#reading').src=canvas.toDataURL('image/png');
         }
         paint(false);let count=0;
+        if(['graphicPartial','nestedGraphic'].includes('\(scenario.rawValue)')){
+          canvas.width=480;canvas.height=1900;
+          const gradient=context.createLinearGradient(0,0,480,1900);
+          gradient.addColorStop(0,'#496476');gradient.addColorStop(1,'#173248');
+          context.fillStyle=gradient;context.fillRect(0,0,480,1900);
+          for(let y=0;y<1900;y+=27){context.fillStyle=y%54?'#886048':'#64806b';context.fillRect(15+(y%130),y,45,13);}
+          context.fillStyle='#163338';context.beginPath();context.ellipse(240,150,208,98,0,0,Math.PI*2);context.fill();
+          context.strokeStyle='#f6eacd';context.lineWidth=3;context.stroke();
+          context.fillStyle='#ffffff';context.font='bold 28px sans-serif';
+          context.fillText('WAIT FOR THE OTHERS.',65,132);context.fillText('WE LEAVE TOGETHER.',70,174);
+          const image=document.querySelector('#reading');
+          image.src=canvas.toDataURL('image/jpeg',0.9);
+          image.style.width='calc(100% - 0.375px)';image.style.maxWidth='none';
+          document.body.style.padding='20.25px';
+          if('\(scenario.rawValue)'==='nestedGraphic'){
+            const scroller=document.createElement('div');scroller.style='height:calc(100vh - 44px);overflow-y:auto;overscroll-behavior:contain';
+            image.before(scroller);scroller.append(image);document.body.style.minHeight='0';
+          }
+        }
         if('\(scenario.rawValue)'==='fractionalImage')document.querySelector('#reading').style.marginTop='37.25px';
         if('\(scenario.rawValue)'==='twoPages'){
           const next=document.createElement('img');next.id='next';next.style.marginTop='60px';
@@ -372,6 +652,52 @@ final class ReadingCausalServer {
           context.fillText('WE WILL FIND ASTRA.',20,110);
           next.src=canvas.toDataURL('image/png');document.querySelector('#reading').after(next);
         }
+        if('\(scenario.rawValue)'==='manyImages'){
+          document.body.style.minHeight='0';
+          let previous=document.querySelector('#reading');
+          for(let page=1;page<14;page++){
+            context.fillStyle=page%2?'#f1fff5':'#fff3df';context.fillRect(0,0,360,640);
+            context.fillStyle='#b9d7c2';context.fillRect(40,80,280,360);
+            if(page===13){
+              context.fillStyle='#ffffff';context.fillRect(0,60,360,100);
+              context.fillStyle='#111111';context.font='bold 24px sans-serif';context.fillText('WE WILL FIND ASTRA.',20,110);
+            }
+            const next=document.createElement('img');next.style.marginTop='8px';next.src=canvas.toDataURL('image/png');
+            previous.after(next);previous=next;
+          }
+        }
+        if('\(scenario.rawValue)'==='bubbleSurfaces'){
+          context.fillStyle='#3e596d';context.fillRect(0,0,360,640);
+          for(const [top,fill,ink,line] of [[30,'#ffffff','#111111','WAIT FOR THE OTHERS.'],[190,'#121212','#ffffff','WE WILL FIND ASTRA.'],[350,'#f6df9b','#111111','PLEASE WAIT FOR US.']]){
+            context.fillStyle=fill;context.beginPath();context.ellipse(180,top+65,160,60,0,0,Math.PI*2);context.fill();
+            context.strokeStyle=ink;context.lineWidth=2;context.stroke();
+            context.fillStyle=ink;context.font='bold 23px sans-serif';context.fillText(line,40,top+72);
+          }
+          document.querySelector('#reading').src=canvas.toDataURL('image/png');
+        }
+        if('\(scenario.rawValue)'==='styledArt'){
+          const gradient=context.createLinearGradient(0,0,360,640);
+          gradient.addColorStop(0,'#c8393c');gradient.addColorStop(.3,'#6a8599');gradient.addColorStop(1,'#195f31');
+          context.fillStyle=gradient;context.fillRect(0,0,360,640);
+          for(let y=0;y<640;y+=16){context.fillStyle=y%32?'#976144':'#465a85';context.fillRect(0,y,360,8);}
+          context.font='italic bold 24px sans-serif';context.strokeStyle='#111111';context.lineWidth=4;
+          context.strokeText('WAIT FOR THE OTHERS.',20,110);context.strokeText('WE LEAVE TOGETHER.',20,150);
+          context.fillStyle='#ffffff';context.fillText('WAIT FOR THE OTHERS.',20,110);context.fillText('WE LEAVE TOGETHER.',20,150);
+          document.querySelector('#reading').src=canvas.toDataURL('image/png');
+        }
+        if(['movingAnimatedText','movingAnimatedFill'].includes('\(scenario.rawValue)')){
+          const changedWords='\(scenario.rawValue)'==='movingAnimatedText';
+          const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="640">
+            <rect width="360" height="640" fill="white">${changedWords?'':'<set attributeName="fill" to="#163338" begin="8s" fill="freeze"/>'}</rect>
+            <g fill="#111111" font-family="Arial,sans-serif" font-size="24" font-weight="bold">
+              ${changedWords?'<set attributeName="visibility" to="hidden" begin="8s" fill="freeze"/>':''}
+              <text x="20" y="110">WAIT FOR THE OTHERS.</text><text x="20" y="150">WE LEAVE TOGETHER.</text>
+            </g>
+            ${changedWords?'<g visibility="hidden" fill="#111111" font-family="Arial,sans-serif" font-size="24" font-weight="bold"><set attributeName="visibility" to="visible" begin="8s" fill="freeze"/><text x="20" y="110">OUR PAGE HAS CHANGED.</text><text x="20" y="150">KEEP THIS ORIGINAL.</text></g>':''}
+          </svg>`;
+          document.querySelector('#reading').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+          setTimeout(()=>window.scrollBy(0,5.375),8100);
+        }
         setInterval(()=>document.querySelector('#timer').textContent='Offscreen '+(++count),110);
         if('\(scenario.rawValue)'==='imageChange')setTimeout(()=>paint(true),1600);
         if('\(scenario.rawValue)'==='canvasChange')setTimeout(()=>paint(true),1600);
@@ -379,6 +705,11 @@ final class ReadingCausalServer {
           const field=document.createElement('input');field.type='password';field.value='SYNTHETIC-PRIVATE';
           field.style='position:fixed;top:160px;left:20px';document.body.append(field);
         },1600);
+        if('\(scenario.rawValue)'==='publishedCanvasChange')canvas.addEventListener('pointerup',()=>paint(true),{once:true});
+        if('\(scenario.rawValue)'==='publishedPrivacy')document.querySelector('#reading').addEventListener('pointerup',()=>{
+          const field=document.createElement('input');field.type='password';field.value='SYNTHETIC-PRIVATE';
+          field.style='position:fixed;top:160px;left:20px';document.body.append(field);
+        },{once:true});
         if('\(scenario.rawValue)'==='lateClass')setTimeout(()=>document.querySelector('#reading').className='chapter-loaded',3500);
         if('\(scenario.rawValue)'==='lateLayout')setTimeout(()=>document.querySelector('#reading').style.marginTop='32px',1600);
         if('\(scenario.rawValue)'==='changingBadge'){

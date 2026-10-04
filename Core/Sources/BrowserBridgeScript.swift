@@ -10,15 +10,31 @@ public enum BrowserBridgeScript {
         ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
       let revision = 0;
       let contentRevision = 0;
+      let geometryRevision = 0;
       let disposed = false;
       const listeners = [];
       const sourceIDs = new WeakMap();
-      const trackedImages = new Map();
+      const sourceVersions = new WeakMap();
+      const knownImages = new Map();
       let sourceSequence = 0;
       let softTimer = 0;
+      let scrollFrame = 0;
       let lastBlock = null;
       let readingElement = null;
       const viewport = () => window.visualViewport;
+      function clippedRect(element) {
+        const rect = element.getBoundingClientRect();
+        const v = viewport();
+        let left = Math.max(rect.left, v ? v.offsetLeft : 0), top = Math.max(rect.top, v ? v.offsetTop : 0);
+        let right = Math.min(rect.right, (v ? v.offsetLeft + v.width : innerWidth));
+        let bottom = Math.min(rect.bottom, (v ? v.offsetTop + v.height : innerHeight));
+        for (let parent = element.parentElement, depth = 0; parent && depth < 128; parent = parent.parentElement, depth++) {
+          const style = getComputedStyle(parent), clip = parent.getBoundingClientRect();
+          if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+          if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+        }
+        return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+      }
       function visible(element) {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -56,34 +72,67 @@ public enum BrowserBridgeScript {
         const v = viewport();
         const left = v ? v.offsetLeft : 0, top = v ? v.offsetTop : 0;
         const width = v ? v.width : innerWidth, height = v ? v.height : innerHeight;
-        const candidates = Array.from(document.querySelectorAll('img, canvas')).filter(element => {
-          if (!visible(element)) return false;
+        const images = Array.from(document.querySelectorAll('img, canvas')).filter(element => {
           const rect = element.getBoundingClientRect();
           return rect.width >= 140 && rect.height >= 160 &&
             (element.tagName !== 'IMG' || (element.complete && element.naturalWidth >= 140));
-        }).map(element => {
-          const rect = element.getBoundingClientRect();
-          const x = Math.max(left, rect.left), y = Math.max(top, rect.top);
-          const right = Math.min(left + width, rect.right), bottom = Math.min(top + height, rect.bottom);
-          return { element, x, y, width: right - x, height: bottom - y };
+        });
+        function identify(element) {
+          if (!sourceIDs.has(element)) sourceIDs.set(element, ++sourceSequence);
+          const id = String(sourceIDs.get(element));
+          knownImages.delete(id);
+          knownImages.set(id, new WeakRef(element));
+          while (knownImages.size > 40) knownImages.delete(knownImages.keys().next().value);
+          return id;
+        }
+        function signature(element) {
+          const source = element.currentSrc || '';
+          let previous = sourceVersions.get(element);
+          if (!previous || previous.source !== source) {
+            previous = { source, version: (previous?.version || 0) + 1 };
+            sourceVersions.set(element, previous);
+          }
+          return `${element.tagName}:v${previous.version}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`;
+        }
+        const candidates = images.filter(visible).map(element => {
+          const rect = clippedRect(element);
+          return { element, x: rect.left, y: rect.top, width: rect.width, height: rect.height };
         }).filter(candidate => candidate.width >= 140 && candidate.height >= 120)
           .sort((a, b) => b.width * b.height - a.width * a.height);
         const reading = candidates[0];
         readingElement = reading?.element || null;
         const anchorFor = element => {
           const rect = element.getBoundingClientRect();
-          const id = String(sourceIDs.get(element));
-          return { id, signature: `${element.tagName}:${element.currentSrc || ''}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`,
-            bounds: { x: (rect.left - left) / width, y: (rect.top - top) / height, width: rect.width / width, height: rect.height / height } };
+          const id = identify(element);
+          const scale = devicePixelRatio || 1;
+          const x = Math.round((rect.left - left) * scale) / scale;
+          const y = Math.round((rect.top - top) * scale) / scale;
+          const rasterWidth = Math.max(1, Math.round(rect.width * scale));
+          const rasterHeight = Math.max(1, Math.round(rect.height * scale));
+          const clip = clippedRect(element);
+          const clipLeft = Math.ceil((clip.left - left) * scale) / scale, clipTop = Math.ceil((clip.top - top) * scale) / scale;
+          const clipRight = Math.floor((clip.right - left) * scale) / scale, clipBottom = Math.floor((clip.bottom - top) * scale) / scale;
+          return { id, signature: signature(element),
+            bounds: { x: x / width, y: y / height, width: rasterWidth / scale / width, height: rasterHeight / scale / height },
+            pixelWidth: element.naturalWidth || element.width, pixelHeight: element.naturalHeight || element.height,
+            rasterWidth, rasterHeight,
+            rasterPhaseX: (((rect.left - left) * scale) % 1 + 1) % 1,
+            rasterPhaseY: (((rect.top - top) * scale) % 1 + 1) % 1,
+            visibleBounds: { x: clipLeft / width, y: clipTop / height,
+              width: Math.max(0, clipRight - clipLeft) / width, height: Math.max(0, clipBottom - clipTop) / height } };
         };
+        const nearby = images.sort((a, b) => {
+          const distance = element => {
+            const rect = element.getBoundingClientRect();
+            return Math.max(top - rect.bottom, rect.top - top - height, 0);
+          };
+          return distance(a) - distance(b);
+        }).slice(0, 12).map(anchorFor);
         let readingSource = null, captureRegion = null, readingAnchor = null;
         if (reading) {
-          if (!sourceIDs.has(reading.element)) sourceIDs.set(reading.element, ++sourceSequence);
           const element = reading.element;
-          trackedImages.set(String(sourceIDs.get(element)), element);
-          while (trackedImages.size > 12) trackedImages.delete(trackedImages.keys().next().value);
           readingAnchor = anchorFor(element);
-          readingSource = `${sourceIDs.get(element)}:${element.tagName}:${element.currentSrc || ''}:${element.naturalWidth || element.width}:${element.naturalHeight || element.height}`;
+          readingSource = `${readingAnchor.id}:${readingAnchor.signature}`;
           captureRegion = { x: (reading.x - left) / width, y: (reading.y - top) / height,
             width: reading.width / width, height: reading.height / height };
         } else {
@@ -93,7 +142,7 @@ public enum BrowserBridgeScript {
           captureRegion = { x: 0, y: 0, width: 1, height: 1 };
         }
         return {
-          documentID, revision, contentRevision, url: location.href, scrollX, scrollY,
+          documentID, revision, contentRevision, geometryRevision, url: location.href, scrollX, scrollY,
           viewportWidth: v ? v.width : innerWidth,
           viewportHeight: v ? v.height : innerHeight,
           viewportLeft: v ? v.offsetLeft : 0,
@@ -103,15 +152,32 @@ public enum BrowserBridgeScript {
           trackedAnchors: [ { id: 'document', signature: `DOCUMENT:${documentID}`,
             bounds: { x: -scrollX / width, y: -scrollY / height,
               width: document.documentElement.scrollWidth / width, height: document.documentElement.scrollHeight / height } },
-            ...Array.from(trackedImages.values()).filter(element => element.isConnected).map(anchorFor) ]
+            ...nearby ],
+          sourceStates: Array.from(knownImages, ([id, reference]) => {
+            const element = reference.deref();
+            return { id, signature: element ? signature(element) : '', connected: !!element?.isConnected };
+          })
         };
       }
       function changed(reason = 'initial') {
         if (disposed) return;
         revision += 1;
+        if (reason === 'scroll' || reason === 'layout') geometryRevision += 1;
+        if (reason === 'scroll') {
+          if (scrollFrame) return;
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            if (!disposed) window.webkit.messageHandlers.webtoonLensV2Viewport.postMessage({
+              documentID, revision, url: location.href, kind: 'hard', reason, contentRevision,
+              blockedReason: blockedReason(), document: state()
+            });
+          });
+          return;
+        }
         window.webkit.messageHandlers.webtoonLensV2Viewport.postMessage({
           documentID, revision, url: location.href
-          , kind: 'hard', reason, contentRevision, blockedReason: blockedReason()
+          , kind: 'hard', reason, contentRevision, blockedReason: blockedReason(),
+          document: reason === 'reading-source' ? state() : null
         });
       }
       function contentChanged() {
@@ -149,10 +215,10 @@ public enum BrowserBridgeScript {
       listen(viewport(), 'scroll');
       listen(viewport(), 'resize');
       const mutations = new MutationObserver(records => {
-        if (readingElement && records.some(record =>
-            (record.target === readingElement && record.type === 'attributes' &&
+        if (records.some(record =>
+            (sourceIDs.has(record.target) && record.type === 'attributes' &&
               ['src', 'srcset'].includes(record.attributeName)) ||
-            (record.type !== 'attributes' && readingElement.contains(record.target)))) {
+            (readingElement && record.type !== 'attributes' && readingElement.contains(record.target)))) {
           changed('reading-source');
         } else {
           contentChanged();
@@ -167,8 +233,9 @@ public enum BrowserBridgeScript {
         state,
         dispose() {
           disposed = true;
-          trackedImages.clear();
+          knownImages.clear();
           clearTimeout(softTimer);
+          cancelAnimationFrame(scrollFrame);
           mutations.disconnect();
           sizes.disconnect();
           document.removeEventListener('load', contentChanged, true);

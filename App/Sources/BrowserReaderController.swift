@@ -303,6 +303,9 @@ final class BrowserReaderController: NSObject {
         } else if wantsTranslation && autoTranslate && !autoPausedAfterError {
             scheduleCapture()
         }
+        if preserveFinished, anchoredCache.count > 0, active, ready, wantsTranslation {
+            startDisplayGuard()
+        }
     }
 
     @objc private func gestureChanged(_ gesture: UIGestureRecognizer) {
@@ -525,6 +528,20 @@ final class BrowserReaderController: NSObject {
 
     private func snapshot(document: BrowserDocumentState) async throws -> BrowserViewportCapture {
         guard let surface else { throw BrowserCaptureError.unavailablePage }
+        if let anchor = document.readingAnchor, anchor.pixelWidth != nil, anchor.pixelHeight != nil,
+           let visible = document.captureRegion {
+            let plan = try BrowserSourceSnapshotPlan(anchor: anchor, visibleRegion: visible)
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = captureRect(document: document.capturing(in: plan.region))
+            configuration.snapshotWidth = NSNumber(value: Double(plan.pixelWidth) / Double(surface.webView.traitCollection.displayScale))
+            configuration.afterScreenUpdates = true
+            let image = try await WebKitViewportCapture.snapshot(in: surface.webView, configuration: configuration)
+            try Task.checkCancellation()
+            guard Self.isUsable(image), let pixels = image.cgImage,
+                  abs(pixels.width - plan.pixelWidth) <= 1, abs(pixels.height - plan.pixelHeight) <= 1,
+                  let data = image.pngData() else { throw BrowserCaptureError.unreadableSnapshot }
+            return BrowserViewportCapture(image: image, data: data, region: plan.region)
+        }
         let rect = surface.webView.bounds
         let configuration = WKSnapshotConfiguration()
         configuration.rect = rect
@@ -611,13 +628,43 @@ final class BrowserReaderController: NSObject {
         guard let surface, armedDocumentID == document.documentID else { throw BrowserCaptureError.changedContent }
         let epoch = lifecycle.epoch
         let geometry = surface.geometry
-        let all = BrowserDocumentState(
-            documentID: document.documentID, revision: document.revision, url: document.url,
-            scrollX: document.scrollX, scrollY: document.scrollY, viewportWidth: document.viewportWidth,
-            viewportHeight: document.viewportHeight, viewportLeft: document.viewportLeft, viewportTop: document.viewportTop,
-            viewportScale: document.viewportScale, blockedReason: document.blockedReason
-        )
-        let verification = try await snapshot(document: all)
+        var removed = anchoredCache.synchronizeSources(document)
+        let anchors = anchoredCache.visibleAnchors(in: document)
+        for anchor in anchors {
+            guard let focus = document.focusing(on: anchor), let visible = focus.captureRegion else { continue }
+            if anchor.pixelWidth != nil, anchor.pixelHeight != nil,
+               (try? BrowserSourceSnapshotPlan(anchor: anchor, visibleRegion: visible)) == nil {
+                anchoredCache.suspend(anchorID: anchor.id)
+                continue
+            }
+            let capture = try await snapshot(document: focus)
+            try Task.checkCancellation()
+            guard active, wantsTranslation, lifecycle.epoch == epoch, geometry.matches(surface.geometry) else { throw CancellationError() }
+            let checked = try await readDocument()
+            try checked.validateForCapture()
+            guard document.matchesReading(checked) else { surface.clearTranslation(); return }
+            guard let pixels = capture.image.cgImage, let region = capture.region else { throw BrowserCaptureError.unreadableSnapshot }
+            let validation = try anchoredCache.validate(focus, image: pixels, captureRegion: region)
+            removed.append(contentsOf: validation.removed)
+            if !validation.pending.isEmpty {
+                surface.presentAnchored(anchoredCache.placements(document, size: surface.webView.bounds.size))
+                let observations = try await VisionOCRService().recognizeText(in: capture.image, mode: .accurate)
+                let fresh = try await snapshot(document: focus)
+                let afterOCR = try await readDocument()
+                try afterOCR.validateForCapture()
+                guard lifecycle.epoch == epoch, geometry.matches(surface.geometry), document.matchesReading(afterOCR),
+                      let freshPixels = fresh.image.cgImage, let freshRegion = fresh.region else { throw CancellationError() }
+                for check in validation.pending {
+                    guard let rect = BrowserImageCoordinates.captureRect(image: check.imageRect, captureRegion: freshRegion, anchor: anchor),
+                          let patch = freshPixels.cropping(to: try BrowserPixelCrop.rect(for: rect, width: freshPixels.width, height: freshPixels.height)) else {
+                        throw BrowserCaptureError.unreadableSnapshot
+                    }
+                    if let invalid = try anchoredCache.finishLocalVerification(check, observations: observations, stablePatch: patch) {
+                        removed.append(invalid)
+                    }
+                }
+            }
+        }
         let current = try await readDocument()
         try Task.checkCancellation()
         try current.validateForCapture()
@@ -627,10 +674,12 @@ final class BrowserReaderController: NSObject {
             surface.clearTranslation()
             return
         }
-        guard let image = verification.image.cgImage else { throw BrowserCaptureError.unreadableSnapshot }
-        let removed = try anchoredCache.validate(current, viewportImage: image)
         anchorCacheProof = try anchoredCache.diagnosticProof(current)
         surface.presentAnchored(anchoredCache.placements(current, size: surface.webView.bounds.size))
+        updateCachedResult(removing: removed)
+    }
+
+    private func updateCachedResult(removing removed: [BrowserAnchoredCache.Entry]) {
         if var result {
             result.segments = anchoredCache.segments
             result.failures.append(contentsOf: removed.filter { entry in
@@ -741,8 +790,14 @@ extension BrowserReaderController: WKNavigationDelegate, WKUIDelegate, WKScriptM
                 case nil:
                     let scrollOrInteraction = ["scroll", "pointerdown", "keydown", "focusin"].contains(change.reason ?? "")
                     viewportChanged(reason: change.reason ?? "document revision", settling: change.reason == "layout",
-                        preserveFinished: scrollOrInteraction || change.reason == "layout",
+                        preserveFinished: scrollOrInteraction || change.reason == "layout" || change.reason == "reading-source",
                         continueDocument: change.reason == "scroll")
+                    if let document = change.document, document.documentID == armedDocumentID {
+                        try document.validateForCapture()
+                        updateCachedResult(removing: anchoredCache.synchronizeSources(document))
+                        surface?.presentAnchored(anchoredCache.placements(document, size: surface?.webView.bounds.size ?? .zero))
+                        anchorCacheProof = try anchoredCache.diagnosticProof(document)
+                    }
                 default: viewportChanged(reason: change.reason ?? "document revision")
                 }
             }
@@ -760,6 +815,7 @@ private struct PageChange: Decodable {
     let contentRevision: Int?
     let blockedReason: String?
     let reason: String?
+    let document: BrowserDocumentState?
 }
 
 private struct BrowserReadingProof: Encodable {
@@ -826,32 +882,17 @@ final class BrowserSurfaceView: UIView {
 
     func present(capture: UIImage, result: TranslationResult, in region: CGRect) -> Int {
         clearTranslation()
-        let source = UIImageView(image: capture)
-        source.frame = region
-        source.contentMode = .scaleToFill
-        source.isAccessibilityElement = false
-        translationLayer.addSubview(source)
         var occupied: [CGRect] = []
         for segment in result.segments {
             guard let localFrame = ViewportOverlayLayout.frame(for: segment, in: region.size) else { continue }
             let frame = localFrame.offsetBy(dx: region.minX, dy: region.minY)
-            guard
-                  !occupied.contains(where: { $0.intersects(frame) }),
-                  let font = fittingFont(for: segment.translatedText, in: frame.size) else { continue }
-            let label = UILabel(frame: frame)
-            label.text = segment.translatedText
-            label.accessibilityIdentifier = "v2.translatedSegment.\(segment.id)"
-            label.font = font
-            label.textAlignment = .center
-            label.numberOfLines = 0
-            label.lineBreakMode = .byWordWrapping
-            label.backgroundColor = .white
-            label.textColor = .black
-            label.layer.cornerRadius = 2
-            label.layer.masksToBounds = true
-            label.layer.borderWidth = 0.5
-            label.layer.borderColor = UIColor.black.withAlphaComponent(0.25).cgColor
-            translationLayer.addSubview(label)
+            guard !occupied.contains(where: { $0.intersects(frame) }), let pixels = capture.cgImage,
+                  let crop = pixels.cropping(to: CGRect(x: segment.boundingBox.x * Double(pixels.width),
+                    y: segment.boundingBox.y * Double(pixels.height), width: segment.boundingBox.width * Double(pixels.width),
+                    height: segment.boundingBox.height * Double(pixels.height))),
+                  let surface = try? LocalBubbleSurface.detect(in: crop, sourceText: segment.sourceText),
+                  let bubble = makeBubble(BrowserAnchoredPlacement(segment: segment, frame: frame, clipFrame: region, surface: surface)) else { continue }
+            translationLayer.addSubview(bubble)
             occupied.append(frame)
             presentedSegmentIDs.insert(segment.id)
         }
@@ -861,26 +902,28 @@ final class BrowserSurfaceView: UIView {
     }
 
     @discardableResult
-    func presentAnchored(_ placements: [(TranslatedSegmentPayload, CGRect)]) -> Int {
-        clearTranslation()
+    func presentAnchored(_ placements: [BrowserAnchoredPlacement]) -> Int {
         var occupied: [CGRect] = []
-        for (segment, frame) in placements {
-            guard segment.confidence >= 0.7, !occupied.contains(where: { $0.intersects(frame) }),
-                  let font = fittingFont(for: segment.translatedText, in: frame.size) else { continue }
-            let label = UILabel(frame: frame)
-            label.text = segment.translatedText
-            label.accessibilityIdentifier = "v2.translatedSegment.\(segment.id)"
-            label.font = font
-            label.textAlignment = .center
-            label.numberOfLines = 0
-            label.backgroundColor = .white
-            label.textColor = .black
-            label.layer.cornerRadius = 2
-            label.layer.masksToBounds = true
-            translationLayer.addSubview(label)
+        var accepted = Set<String>()
+        for placement in placements {
+            let segment = placement.segment, frame = placement.frame
+            guard segment.confidence >= 0.7, !occupied.contains(where: { $0.intersects(frame) }) else { continue }
+            if let existing = translationLayer.subviews.first(where: { $0.accessibilityIdentifier == "v2.bubble.\(segment.id)" }),
+               abs(existing.bounds.width - frame.width) < 0.01, abs(existing.bounds.height - frame.height) < 0.01 {
+                existing.frame = frame
+                (existing.subviews.first { $0 is UIImageView } as? UIImageView)?.image = UIImage(cgImage: placement.surface.replacement)
+                applyClip(to: existing, placement: placement)
+            } else {
+                translationLayer.subviews.filter { $0.accessibilityIdentifier == "v2.bubble.\(segment.id)" }.forEach { $0.removeFromSuperview() }
+                guard let bubble = makeBubble(placement) else { continue }
+                translationLayer.addSubview(bubble)
+            }
             occupied.append(frame)
-            presentedSegmentIDs.insert(segment.id)
+            accepted.insert(segment.id)
         }
+        translationLayer.subviews.filter { !accepted.contains(String(($0.accessibilityIdentifier ?? "").dropFirst("v2.bubble.".count))) }
+            .forEach { $0.removeFromSuperview() }
+        presentedSegmentIDs = accepted
         translationLayer.isHidden = presentedSegmentIDs.isEmpty
         return presentedSegmentIDs.count
     }
@@ -889,9 +932,43 @@ final class BrowserSurfaceView: UIView {
         for view in translationLayer.subviews { view.frame = view.frame.offsetBy(dx: dx, dy: dy) }
     }
 
-    private func fittingFont(for text: String, in size: CGSize) -> UIFont? {
+    private func makeBubble(_ placement: BrowserAnchoredPlacement) -> UIView? {
+        let segment = placement.segment, frame = placement.frame, surface = placement.surface
+        let maximum = min(26, max(11, frame.height / Double(surface.sourceLineCount) / 1.3))
+        guard let font = fittingFont(for: segment.translatedText, in: frame.size, maximum: maximum) else { return nil }
+        let bubble = UIView(frame: frame)
+        bubble.accessibilityIdentifier = "v2.bubble.\(segment.id)"
+        let replacement = UIImageView(image: UIImage(cgImage: surface.replacement))
+        replacement.frame = bubble.bounds
+        replacement.contentMode = .scaleToFill
+        replacement.isAccessibilityElement = false
+        bubble.addSubview(replacement)
+        let label = UILabel(frame: bubble.bounds)
+        label.text = segment.translatedText
+        label.accessibilityIdentifier = "v2.translatedSegment.\(segment.id)"
+        label.font = font
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.backgroundColor = .clear
+        label.textColor = UIColor(red: Double(surface.ink.red) / 255, green: Double(surface.ink.green) / 255,
+                                 blue: Double(surface.ink.blue) / 255, alpha: 1)
+        bubble.addSubview(label)
+        applyClip(to: bubble, placement: placement)
+        return bubble
+    }
+
+    private func applyClip(to bubble: UIView, placement: BrowserAnchoredPlacement) {
+        let visible = placement.frame.intersection(placement.clipFrame)
+        let mask = CAShapeLayer()
+        mask.frame = bubble.bounds
+        mask.path = CGPath(rect: visible.offsetBy(dx: -placement.frame.minX, dy: -placement.frame.minY), transform: nil)
+        bubble.layer.mask = mask
+    }
+
+    private func fittingFont(for text: String, in size: CGSize, maximum: Double = 20) -> UIFont? {
         guard size.width > 8, size.height > 8 else { return nil }
-        for points in stride(from: 20, through: 11, by: -1) {
+        for points in stride(from: Int(maximum), through: 11, by: -1) {
             let font = UIFont.systemFont(ofSize: CGFloat(points), weight: .semibold)
             let measured = (text as NSString).boundingRect(
                 with: CGSize(width: size.width - 4, height: .greatestFiniteMagnitude),

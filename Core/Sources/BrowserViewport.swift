@@ -166,13 +166,16 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
     public let readingSource: String?
     public let readingAnchor: BrowserImageAnchor?
     public let trackedAnchors: [BrowserImageAnchor]?
+    public let sourceStates: [BrowserImageSourceState]?
+    public let geometryRevision: Int?
 
     public init(
         documentID: String, revision: Int, url: String, scrollX: Double, scrollY: Double,
         viewportWidth: Double, viewportHeight: Double, viewportLeft: Double,
         viewportTop: Double, viewportScale: Double, blockedReason: String?,
         contentRevision: Int? = nil, captureRegion: NormalizedRect? = nil, readingSource: String? = nil,
-        readingAnchor: BrowserImageAnchor? = nil, trackedAnchors: [BrowserImageAnchor]? = nil
+        readingAnchor: BrowserImageAnchor? = nil, trackedAnchors: [BrowserImageAnchor]? = nil,
+        sourceStates: [BrowserImageSourceState]? = nil, geometryRevision: Int? = nil
     ) {
         self.documentID = documentID
         self.revision = revision
@@ -190,6 +193,8 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
         self.readingSource = readingSource
         self.readingAnchor = readingAnchor
         self.trackedAnchors = trackedAnchors
+        self.sourceStates = sourceStates
+        self.geometryRevision = geometryRevision
     }
 
     public func validateForCapture() throws {
@@ -214,7 +219,7 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
             viewportWidth == other.viewportWidth && viewportHeight == other.viewportHeight &&
             viewportLeft == other.viewportLeft && viewportTop == other.viewportTop &&
             viewportScale == other.viewportScale && blockedReason == other.blockedReason &&
-            captureRegion == other.captureRegion && readingSource == other.readingSource
+            captureRegion == other.captureRegion && readingSource == other.readingSource && readingAnchor == other.readingAnchor
     }
 
     public func capturing(in region: NormalizedRect) -> BrowserDocumentState {
@@ -222,7 +227,20 @@ public struct BrowserDocumentState: Codable, Hashable, Sendable {
             viewportWidth: viewportWidth, viewportHeight: viewportHeight, viewportLeft: viewportLeft,
             viewportTop: viewportTop, viewportScale: viewportScale, blockedReason: blockedReason,
             contentRevision: contentRevision, captureRegion: region, readingSource: readingSource,
-            readingAnchor: readingAnchor, trackedAnchors: trackedAnchors)
+            readingAnchor: readingAnchor, trackedAnchors: trackedAnchors, sourceStates: sourceStates, geometryRevision: geometryRevision)
+    }
+
+    public func focusing(on anchor: BrowserImageAnchor) -> BrowserDocumentState? {
+        let visible = anchor.visibleBounds ?? anchor.bounds
+        let x = max(0, visible.minX), y = max(0, visible.minY)
+        let width = min(1, visible.maxX) - x, height = min(1, visible.maxY) - y
+        guard width > 0, height > 0 else { return nil }
+        return BrowserDocumentState(documentID: documentID, revision: revision, url: url, scrollX: scrollX, scrollY: scrollY,
+            viewportWidth: viewportWidth, viewportHeight: viewportHeight, viewportLeft: viewportLeft,
+            viewportTop: viewportTop, viewportScale: viewportScale, blockedReason: blockedReason,
+            contentRevision: contentRevision, captureRegion: NormalizedRect(x: x, y: y, width: width, height: height),
+            readingSource: "\(anchor.id):\(anchor.signature)", readingAnchor: anchor,
+            trackedAnchors: trackedAnchors, sourceStates: sourceStates, geometryRevision: geometryRevision)
     }
 }
 

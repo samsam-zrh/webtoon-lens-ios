@@ -66,8 +66,8 @@ final class ImmersiveReadingController {
         if browser.isTranslating { return "Traduction de la zone lue…" }
         if browser.isLoading { return "Chargement du site…" }
         if browser.hasError { return browser.status }
-        if let result = browser.result {
-            return "\(ReadingCopy.translated(result.segments.count))\(result.failures.isEmpty ? "" : " · \(result.failures.count) erreurs")"
+        if browser.result != nil {
+            return browser.status
         }
         if fallbackContext != nil { return browser.status }
         return message

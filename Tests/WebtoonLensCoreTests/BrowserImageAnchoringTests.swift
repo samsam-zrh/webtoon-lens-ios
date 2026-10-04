@@ -72,4 +72,21 @@ final class BrowserImageAnchoringTests: XCTestCase {
         XCTAssertEqual(fullPixels, pixelSegment.offsetBy(dx: pixelFocus.minX, dy: pixelFocus.minY))
         XCTAssertEqual(try BrowserPixelCrop.rect(for: viewport, width: width, height: height), fullPixels)
     }
+
+    func testSourceSamplingGridDoesNotChangeWithFractionalOrNestedScroll() throws {
+        let anchor = BrowserImageAnchor(id: "jpeg", signature: "unchanged", bounds: NormalizedRect(x: 0.05, y: 0.02, width: 0.9, height: 2.4),
+            pixelWidth: 480, pixelHeight: 1900)
+        let visible = NormalizedRect(x: 0.05, y: 0.02, width: 0.9, height: 0.98)
+        let before = try BrowserSourceSnapshotPlan(anchor: anchor, visibleRegion: visible)
+        let moved = BrowserImageAnchor(id: anchor.id, signature: anchor.signature,
+            bounds: NormalizedRect(x: 0.05, y: -0.175375, width: 0.9, height: 2.4), pixelWidth: 480, pixelHeight: 1900)
+        let after = try BrowserSourceSnapshotPlan(anchor: moved, visibleRegion: NormalizedRect(x: 0.05, y: 0, width: 0.9, height: 1))
+        XCTAssertEqual(before.pixelWidth, 480)
+        XCTAssertEqual(after.pixelWidth, 480)
+        let source = try BrowserImageCoordinates.imageRect(captured: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            captureRegion: after.region, anchor: moved)
+        XCTAssertEqual(source.y * 1900, (source.y * 1900).rounded(), accuracy: 0.000001)
+        XCTAssertEqual(source.height * 1900, Double(after.pixelHeight), accuracy: 0.000001)
+        XCTAssertGreaterThan(source.y, 0)
+    }
 }
