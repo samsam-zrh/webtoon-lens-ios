@@ -325,6 +325,21 @@ public extension NormalizedRect {
         [x, y, width, height].allSatisfy(\.isFinite) && x >= 0 && y >= 0 &&
             width > 0 && height > 0 && maxX <= 1 && maxY <= 1
     }
+
+    /// Les masques du Mac debordent parfois legerement du bord de l'image (padding).
+    /// Ramene le rectangle dans l'image quand la zone visible reste majoritaire ;
+    /// nil quand le rectangle est degenere ou principalement hors image.
+    var clampedInsideImage: NormalizedRect? {
+        guard [x, y, width, height].allSatisfy(\.isFinite), width > 0, height > 0 else { return nil }
+        if isInsideImage { return self }
+        let minX = max(0, x)
+        let minY = max(0, y)
+        let clamped = NormalizedRect(x: minX, y: minY,
+                                     width: min(1, x + width) - minX, height: min(1, y + height) - minY)
+        guard clamped.width >= 0.002, clamped.height >= 0.002,
+              clamped.width >= width * 0.6, clamped.height >= height * 0.6 else { return nil }
+        return clamped
+    }
 }
 
 public enum ViewportOverlayLayout {

@@ -228,7 +228,7 @@ final class BrowserAnchoredCache {
     func placements(_ document: BrowserDocumentState, size: CGSize) -> [BrowserAnchoredPlacement] {
         let anchors = Dictionary((document.trackedAnchors ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return entries.compactMap { entry in
-            guard entry.verified, let surface = entry.surface, entry.documentID == document.documentID,
+            guard entry.verified, entry.documentID == document.documentID,
                   let anchor = anchors[entry.anchorID], anchor.signature == entry.signature else { return nil }
             let box = BrowserImageCoordinates.viewportRect(image: entry.imageRect, anchor: anchor)
             let frame = CGRect(x: box.x * size.width, y: box.y * size.height, width: box.width * size.width, height: box.height * size.height)
@@ -236,7 +236,7 @@ final class BrowserAnchoredCache {
             let clip = anchor.visibleBounds ?? NormalizedRect(x: 0, y: 0, width: 1, height: 1)
             let clipFrame = CGRect(x: clip.x * size.width, y: clip.y * size.height, width: clip.width * size.width, height: clip.height * size.height)
             guard frame.intersects(clipFrame) else { return nil }
-            return BrowserAnchoredPlacement(segment: entry.payload, frame: frame, clipFrame: clipFrame, surface: surface)
+            return BrowserAnchoredPlacement(segment: entry.payload, frame: frame, clipFrame: clipFrame, surface: entry.surface)
         }
     }
 
@@ -304,5 +304,6 @@ struct BrowserAnchoredPlacement {
     let segment: TranslatedSegmentPayload
     let frame: CGRect
     let clipFrame: CGRect
-    let surface: LocalBubbleSurface
+    // nil when local erasure was refused: the zone is still presented as an explicit caption.
+    let surface: LocalBubbleSurface?
 }

@@ -131,9 +131,23 @@ public struct PublicOCRSegment: Codable, Hashable, Sendable, Identifiable {
         guard !id.isEmpty, !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PublicChapterError.invalidSegment(id, "identifiant ou texte absent")
         }
-        guard boundingBox.isInsideImage else { throw PublicChapterError.invalidSegment(id, "rectangle de remplacement hors image") }
-        guard rawBoundingBox.map(\.isInsideImage) ?? true else { throw PublicChapterError.invalidSegment(id, "rectangle source hors image") }
-        guard textBox.map(\.isInsideImage) ?? true else { throw PublicChapterError.invalidSegment(id, "rectangle de texte hors image") }
+        var segment = self
+        guard let box = boundingBox.clampedInsideImage else {
+            throw PublicChapterError.invalidSegment(id, "rectangle de remplacement hors image")
+        }
+        segment.boundingBox = box
+        if let raw = rawBoundingBox {
+            guard let clamped = raw.clampedInsideImage else {
+                throw PublicChapterError.invalidSegment(id, "rectangle source hors image")
+            }
+            segment.rawBoundingBox = clamped
+        }
+        if let text = textBox {
+            guard let clamped = text.clampedInsideImage else {
+                throw PublicChapterError.invalidSegment(id, "rectangle de texte hors image")
+            }
+            segment.textBox = clamped
+        }
         guard confidence.isFinite, (0...1).contains(confidence) else {
             throw PublicChapterError.invalidSegment(id, "confiance OCR invalide")
         }
@@ -145,7 +159,7 @@ public struct PublicOCRSegment: Codable, Hashable, Sendable, Identifiable {
                 throw PublicChapterError.invalidGeometry
             }
         }
-        return self
+        return segment
     }
 
     public var translationSource: TranslationSourceSegment {

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public protocol PublicChapterClientProtocol: Sendable {
     func extract(_ source: URL) async throws -> PublicChapterExtraction
@@ -28,6 +29,8 @@ public final class PublicChapterClient: PublicChapterClientProtocol {
     }
 
     deinit { if ownsSession { session.invalidateAndCancel() } }
+
+    private static let logger = Logger(subsystem: "com.example.webtoonlens.v2", category: "PublicChapterClient")
 
     public func extract(_ source: URL) async throws -> PublicChapterExtraction {
         _ = try PublicChapterURL.parse(source.absoluteString)
@@ -59,7 +62,14 @@ public final class PublicChapterClient: PublicChapterClientProtocol {
         guard (request.imageUrl != nil) != (request.imageData != nil) else { throw PublicChapterError.invalidImage }
         let data = try await self.request(path: "v1/webtoon/ocr", body: JSONEncoder().encode(request))
         let response = try JSONDecoder().decode(PublicOCRResponse.self, from: data)
-        return try response.segments.map { try $0.validated() }
+        // Un segment illisible n'invalide plus toute la fenetre : il est ignore
+        // individuellement et les autres bulles restent traduisibles.
+        return response.segments.compactMap { segment in
+            do { return try segment.validated() } catch {
+                Self.logger.error("OCR segment \(segment.id, privacy: .public) ignore: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
+        }
     }
 
     public func warmup() async throws {

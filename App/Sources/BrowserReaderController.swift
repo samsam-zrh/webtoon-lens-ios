@@ -80,6 +80,7 @@ final class BrowserReaderController: NSObject {
     @ObservationIgnored private var navigationUserInitiated = false
     @ObservationIgnored private let anchoredCache = BrowserAnchoredCache()
     @ObservationIgnored private var armedDocumentID: String?
+    @ObservationIgnored private var offsetAccumulator: CGFloat = 0
     @ObservationIgnored private var translate: (@MainActor (BrowserViewportCapture) async throws -> TranslationResult)?
 
     private static let contentWorld = WKContentWorld.world(name: "WebtoonLensV2")
@@ -103,12 +104,26 @@ final class BrowserReaderController: NSObject {
             scrollView.observe(\.contentOffset, options: [.old, .new]) { [weak self] scroll, change in
                 guard change.oldValue != change.newValue else { return }
                 MainActor.assumeIsolated {
+                    guard let self else { return }
+                    var delta: CGFloat = 0
                     if let old = change.oldValue, let new = change.newValue {
-                        self?.surface?.shiftAnchoredTranslations(dx: old.x - new.x, dy: old.y - new.y)
+                        self.surface?.shiftAnchoredTranslations(dx: old.x - new.x, dy: old.y - new.y)
+                        delta = max(abs(old.x - new.x), abs(old.y - new.y))
                     }
-                    self?.viewportChanged(reason: "offset", settling: !scroll.isDragging && !scroll.isDecelerating,
-                                          preserveFinished: true, continueDocument: true)
-                    if scroll.isDragging || scroll.isDecelerating { self?.onScroll?(Double(scroll.contentOffset.y)) }
+                    // Sub-pixel settle noise keeps anchored shifting above but must not cancel captures.
+                    self.offsetAccumulator += delta
+                    let userDriven = scroll.isTracking || scroll.isDragging || scroll.isDecelerating
+                    if userDriven, self.offsetAccumulator >= 0.5 {
+                        self.offsetAccumulator = 0
+                        self.viewportChanged(reason: "offset", settling: !scroll.isDragging && !scroll.isDecelerating,
+                                             preserveFinished: true, continueDocument: true)
+                    } else if !userDriven, self.offsetAccumulator >= 24 {
+                        // Programmatic jump (script navigation, inset change): revalidate without
+                        // re-arming, so Original stays original and sheets cannot restart work.
+                        self.offsetAccumulator = 0
+                        self.viewportChanged(reason: "offset", settling: true, preserveFinished: true)
+                    }
+                    if scroll.isDragging || scroll.isDecelerating { self.onScroll?(Double(scroll.contentOffset.y)) }
                 }
             },
             scrollView.observe(\.zoomScale, options: [.old, .new]) { [weak self] _, change in
@@ -215,6 +230,13 @@ final class BrowserReaderController: NSObject {
 
     func translateVisible() {
         guard ready, currentURL != nil else { report(BrowserCaptureError.unavailablePage); return }
+        if activeTask != nil, wantsTranslation, !hasError {
+            // A capture/translation run is already in flight for this page: a repeat tap must
+            // not discard its progress. Keep the manual intent armed so a refusal retries.
+            manualCaptureRequested = true
+            explicitCaptureIntent = true
+            return
+        }
         invalidate(clearFinished: false, disarmDocument: false)
         wantsTranslation = true
         isCapturePending = true
@@ -230,6 +252,7 @@ final class BrowserReaderController: NSObject {
     }
 
     func report(_ error: Error, keepFinished: Bool = false) {
+        Self.logger.error("Reader error reported: \(error.localizedDescription, privacy: .public)")
         invalidate(clearFinished: !keepFinished, disarmDocument: !keepFinished)
         autoPausedAfterError = true
         status = "\(error.localizedDescription) Original conserve."
@@ -309,6 +332,11 @@ final class BrowserReaderController: NSObject {
     }
 
     @objc private func gestureChanged(_ gesture: UIGestureRecognizer) {
+        // Real finger scrolls re-arm through the contentOffset observer while tracking.
+        // A bare touch (menu scrim, sheet dismissal) must neither cancel an in-flight
+        // zone nor re-arm one after "Voir l'original".
+        guard gesture.state == .ended, let scroll = surface?.webView.scrollView,
+              scroll.isDragging || scroll.isDecelerating else { return }
         viewportChanged(reason: "gesture", preserveFinished: true, continueDocument: true)
     }
 
@@ -412,23 +440,81 @@ final class BrowserReaderController: NSObject {
             guard let sourcePixels = capture.image.cgImage, let verificationPixels = verification.image.cgImage else {
                 throw BrowserCaptureError.unreadableSnapshot
             }
-            var accepted: [TranslatedSegmentPayload] = []
+            // The page can settle between capture and verification (headers collapse, images
+            // decode). Identical pixels are only provable when both rasters cover the same
+            // region; otherwise each box is re-read on the raster that actually contains it.
+            let verificationRegion = verification.region ?? afterTranslation.captureRegion ?? capturedRegion
+            let regionsAligned = abs(verificationRegion.x - capturedRegion.x) <= 1e-6
+                && abs(verificationRegion.y - capturedRegion.y) <= 1e-6
+                && abs(verificationRegion.width - capturedRegion.width) <= 1e-6
+                && abs(verificationRegion.height - capturedRegion.height) <= 1e-6
+                && sourcePixels.width == verificationPixels.width
+                && sourcePixels.height == verificationPixels.height
+            let verificationBox: (NormalizedRect) -> NormalizedRect? = { box in
+                if regionsAligned { return box }
+                guard let captureAnchor = document.readingAnchor, let verifyAnchor = afterTranslation.readingAnchor,
+                      let image = try? BrowserImageCoordinates.imageRect(
+                        captured: box, captureRegion: capturedRegion, anchor: captureAnchor)
+                else { return nil }
+                return BrowserImageCoordinates.captureRect(
+                    image: image, captureRegion: verificationRegion, anchor: verifyAnchor)
+            }
+            var accepted: [(segment: TranslatedSegmentPayload, verifiedBox: NormalizedRect)] = []
+            var suspects: [TranslatedSegmentPayload] = []
             for segment in translated.segments {
-                if try ReadingPixelFingerprint.value(for: sourcePixels, region: segment.boundingBox) ==
+                if regionsAligned,
+                   try ReadingPixelFingerprint.value(for: sourcePixels, region: segment.boundingBox) ==
                     ReadingPixelFingerprint.value(for: verificationPixels, region: segment.boundingBox) {
-                    accepted.append(segment)
+                    accepted.append((segment, segment.boundingBox))
                 } else {
-                    translated.failures.append(SegmentTranslationFailure(
-                        source: TranslationSourceSegment(id: segment.id, text: segment.sourceText,
-                            boundingBox: segment.boundingBox, confidence: segment.confidence, readingOrder: segment.readingOrder),
-                        message: "Cette zone a change pendant la traduction ; son original est conserve.", kind: .sourceChanged
-                    ))
+                    suspects.append(segment)
                 }
             }
+            if !suspects.isEmpty {
+                // Image decode, lazy-load or page settle can move pixels without changing the text.
+                // Accept only segments whose source text is re-read identically on the fresh raster.
+                Self.logger.notice("Capture stage: \(suspects.count) regions re-verified by local OCR after raster drift.")
+                let observations = try await VisionOCRService().recognizeText(in: verification.image, mode: .accurate)
+                let afterReOCR = try await readDocument()
+                try ensureCurrent(captureToken, document: afterReOCR)
+                for segment in suspects {
+                    let fallbackSource = TranslationSourceSegment(
+                        id: segment.id, text: segment.sourceText, boundingBox: segment.boundingBox,
+                        confidence: segment.confidence, readingOrder: segment.readingOrder
+                    )
+                    guard let verifiedBox = verificationBox(segment.boundingBox) else {
+                        translated.failures.append(SegmentTranslationFailure(
+                            source: fallbackSource,
+                            message: "Cette zone a change pendant la traduction ; son original est conserve.", kind: .sourceChanged
+                        ))
+                        continue
+                    }
+                    let source = TranslationSourceSegment(
+                        id: segment.id, text: segment.sourceText, boundingBox: verifiedBox,
+                        confidence: segment.confidence, readingOrder: segment.readingOrder
+                    )
+                    if BrowserSourceTextVerification.matches(source: source, observations: observations, isClipped: false) {
+                        accepted.append((segment, verifiedBox))
+                        Self.logger.notice("Region \(segment.id, privacy: .public) accepted: raster drifted, source text identical.")
+                    } else {
+                        translated.failures.append(SegmentTranslationFailure(
+                            source: source,
+                            message: "Cette zone a change pendant la traduction ; son original est conserve.", kind: .sourceChanged
+                        ))
+                    }
+                }
+                accepted.sort { $0.segment.readingOrder < $1.segment.readingOrder }
+            }
             guard !accepted.isEmpty || translated.segments.isEmpty else { throw BrowserCaptureError.changedContent }
-            translated.segments = accepted
+            translated.segments = accepted.map(\.segment)
             let rect = captureRect(document: pixelDocument)
-            for segment in accepted { try anchoredCache.store(segment, document: pixelDocument, image: sourcePixels) }
+            // Store in verification space: those are the pixels the cache crops and repaints.
+            let verifiedDocument = afterTranslation.capturing(in: verificationRegion)
+            for (segment, verifiedBox) in accepted {
+                var stored = segment
+                stored.boundingBox = verifiedBox
+                try anchoredCache.store(stored, document: verifiedDocument, image: verificationPixels)
+            }
             anchorCacheProof = try anchoredCache.diagnosticProof(document)
             let count: Int
             if document.readingAnchor != nil {
@@ -447,8 +533,12 @@ final class BrowserReaderController: NSObject {
             result = translated
             hasError = !translated.failures.isEmpty
             if translated.segments.isEmpty {
-                wantsTranslation = false
-                status = "Aucun dialogue traduit. \(translated.failures.count) en erreur ; original conserve, details dans Texte."
+                if translated.failures.isEmpty {
+                    // Stay armed: scrolling to the next panel must keep translating without a new tap.
+                    status = "Aucun dialogue lisible dans cette zone. Defile puis laisse la zone se stabiliser."
+                } else {
+                    status = "Aucun dialogue traduit. \(translated.failures.count) en erreur ; original conserve, details dans Texte."
+                }
             } else if !translated.failures.isEmpty {
                 status = "\(ReadingCopy.translated(translated.segments.count)) · \(translated.failures.count) en erreur. Originaux conserves."
             } else if count == 0 {
@@ -461,8 +551,8 @@ final class BrowserReaderController: NSObject {
                 startDisplayGuard()
                 if !accepted.isEmpty { onTranslated?() }
             } else if count > 0 {
-                displayedCapture = (captureToken, try accepted.filter { surface.presentedSegmentIDs.contains($0.id) }.map {
-                    ($0.boundingBox, try ReadingPixelFingerprint.value(for: sourcePixels, region: $0.boundingBox))
+                displayedCapture = (captureToken, try accepted.filter { surface.presentedSegmentIDs.contains($0.segment.id) }.map {
+                    ($0.verifiedBox, try ReadingPixelFingerprint.value(for: verificationPixels, region: $0.verifiedBox))
                 })
                 startDisplayGuard()
                 onTranslated?()
@@ -911,7 +1001,9 @@ final class BrowserSurfaceView: UIView {
             if let existing = translationLayer.subviews.first(where: { $0.accessibilityIdentifier == "v2.bubble.\(segment.id)" }),
                abs(existing.bounds.width - frame.width) < 0.01, abs(existing.bounds.height - frame.height) < 0.01 {
                 existing.frame = frame
-                (existing.subviews.first { $0 is UIImageView } as? UIImageView)?.image = UIImage(cgImage: placement.surface.replacement)
+                if let surface = placement.surface {
+                    (existing.subviews.first { $0 is UIImageView } as? UIImageView)?.image = UIImage(cgImage: surface.replacement)
+                }
                 applyClip(to: existing, placement: placement)
             } else {
                 translationLayer.subviews.filter { $0.accessibilityIdentifier == "v2.bubble.\(segment.id)" }.forEach { $0.removeFromSuperview() }
@@ -933,7 +1025,8 @@ final class BrowserSurfaceView: UIView {
     }
 
     private func makeBubble(_ placement: BrowserAnchoredPlacement) -> UIView? {
-        let segment = placement.segment, frame = placement.frame, surface = placement.surface
+        guard let surface = placement.surface else { return makeCaption(placement) }
+        let segment = placement.segment, frame = placement.frame
         let maximum = min(26, max(11, frame.height / Double(surface.sourceLineCount) / 1.3))
         guard let font = fittingFont(for: segment.translatedText, in: frame.size, maximum: maximum) else { return nil }
         let bubble = UIView(frame: frame)
@@ -958,8 +1051,52 @@ final class BrowserSurfaceView: UIView {
         return bubble
     }
 
+    // Explicit caption for zones whose artwork cannot be safely erased: the original stays
+    // visible and the French appears as a clearly styled translation chip, never fake repaint.
+    private func makeCaption(_ placement: BrowserAnchoredPlacement) -> UIView? {
+        let segment = placement.segment, frame = placement.frame, clip = placement.clipFrame
+        let chipWidth = min(max(frame.width, 190), max(60, clip.width - 12), 360)
+        guard chipWidth >= 60 else { return nil }
+        let inset: CGFloat = 9
+        guard let font = fittingFont(for: segment.translatedText,
+                                     in: CGSize(width: chipWidth - inset * 2 + 4, height: 148), maximum: 14) else { return nil }
+        let measured = (segment.translatedText as NSString).boundingRect(
+            with: CGSize(width: chipWidth - inset * 2, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font], context: nil
+        )
+        let chipSize = CGSize(width: ceil(measured.width) + inset * 2, height: ceil(measured.height) + 14)
+        var origin = CGPoint(x: frame.midX - chipSize.width / 2, y: frame.midY - chipSize.height / 2)
+        origin.x = min(max(origin.x, clip.minX + 4), max(clip.minX + 4, clip.maxX - chipSize.width - 4))
+        origin.y = min(max(origin.y, clip.minY + 4), max(clip.minY + 4, clip.maxY - chipSize.height - 4))
+        let container = UIView(frame: frame)
+        container.accessibilityIdentifier = "v2.bubble.\(segment.id)"
+        let chip = UIView(frame: CGRect(origin: CGPoint(x: origin.x - frame.minX, y: origin.y - frame.minY), size: chipSize))
+        chip.accessibilityIdentifier = "v2.caption.\(segment.id)"
+        chip.backgroundColor = UIColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 0.92)
+        chip.layer.cornerRadius = 10
+        chip.layer.cornerCurve = .continuous
+        chip.layer.borderWidth = 1
+        chip.layer.borderColor = UIColor(white: 1, alpha: 0.22).cgColor
+        let label = UILabel(frame: chip.bounds.insetBy(dx: inset, dy: 7))
+        label.text = segment.translatedText
+        label.accessibilityIdentifier = "v2.translatedSegment.\(segment.id)"
+        label.font = font
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.textColor = .white
+        chip.addSubview(label)
+        container.addSubview(chip)
+        applyClip(to: container, placement: placement)
+        return container
+    }
+
     private func applyClip(to bubble: UIView, placement: BrowserAnchoredPlacement) {
-        let visible = placement.frame.intersection(placement.clipFrame)
+        // Painted bubbles stay inside their zone; explicit captions may extend to the
+        // image's visible bounds but never past them.
+        let visible = placement.surface == nil
+            ? placement.clipFrame
+            : placement.frame.intersection(placement.clipFrame)
         let mask = CAShapeLayer()
         mask.frame = bubble.bounds
         mask.path = CGPath(rect: visible.offsetBy(dx: -placement.frame.minX, dy: -placement.frame.minY), transform: nil)

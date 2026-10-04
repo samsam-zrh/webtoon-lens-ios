@@ -93,12 +93,27 @@ final class PublicChapterController: NSObject {
                 var accepted = 0
                 var skipped = 0
                 var sessionBytes = 0
-                for image in extraction.images {
+                var prefetch: (index: Int, task: Task<Data, Error>)?
+                defer { prefetch?.task.cancel() }
+                func startPrefetch(_ nextIndex: Int) {
+                    guard nextIndex < extraction.images.count, prefetch?.index != nextIndex,
+                          let next = try? PublicChapterURL.parse(extraction.images[nextIndex].url) else { return }
+                    prefetch = (nextIndex, Task { try await client.image(next, referer: referer) })
+                }
+                for (position, image) in extraction.images.enumerated() {
                     try await self.activity.waitUntilActive()
                     try self.check(id)
                     do {
                         let url = try PublicChapterURL.parse(image.url)
-                        let data = try await client.image(url, referer: referer)
+                        let data: Data
+                        if let pending = prefetch, pending.index == position {
+                            prefetch = nil
+                            data = try await pending.task.value
+                        } else {
+                            data = try await client.image(url, referer: referer)
+                        }
+                        // Download the next page while this one is analyzed and translated.
+                        startPrefetch(position + 1)
                         try await self.activity.waitUntilActive()
                         try self.check(id)
                         let metadata = try PublicImageMetadata(data: data)
@@ -161,7 +176,7 @@ final class PublicChapterController: NSObject {
                 }), let (url, metadata, file) = self.retryPages[page] {
                     try self.check(id)
                     do {
-                        try await self.analyze(url: url, data: Data(contentsOf: file), metadata: metadata, page: page, id: id, firstWindowOnly: true)
+                        try await self.analyze(url: url, data: Data(contentsOf: file), metadata: metadata, page: page, id: id, firstWindowOnly: false)
                     } catch is CancellationError { throw CancellationError() }
                     catch {
                         self.pageErrors[page] = error.localizedDescription
@@ -170,7 +185,7 @@ final class PublicChapterController: NSObject {
                         Self.logger.error("Page \(page + 1), following public window: \(error.localizedDescription, privacy: .public)")
                     }
                 }
-                self.status = "\(accepted) pages · \(self.translationCount) dialogues traduits. \(self.pageErrors.count) pages en erreur · \(self.sourceErrors.count) ressources indisponibles\(skipped > 0 ? " · \(skipped) petites decorations ignorees" : "")."
+                self.status = "\(accepted) pages · \(self.translationCount) dialogues traduits. \(self.pageErrors.count) pages en erreur · \(self.sourceErrors.count) ressources indisponibles\(skipped > 0 ? (skipped == 1 ? " · 1 petite decoration ignoree" : " · \(skipped) petites decorations ignorees") : "")."
             } catch is CancellationError {
             } catch {
                 if self.generation.accepts(id) {
@@ -286,27 +301,45 @@ final class PublicChapterController: NSObject {
         let windows = firstWindowOnly ? Array(pending.prefix(1)) : pending
         var accounted = pageSegments[page] ?? []
         var translatedOnPage = 0
-        for window in windows {
-            try await activity.waitUntilActive()
-            try check(id)
-            let request: PublicOCRRequest
+        func ocrRequest(for window: PublicOCRWindow) throws -> PublicOCRRequest {
             if allWindows.count == 1 {
-                request = PublicOCRRequest(imageURL: url, referer: referer, language: sourceLanguage)
-            } else {
-                let crop = try PublicImageCropper.crop(publicImage: data, metadata: metadata, window: window)
-                request = PublicOCRRequest(publicCrop: crop, referer: referer, language: sourceLanguage,
-                    cacheKey: "v2-public:\(url.absoluteString):\(window.coreTop)-\(window.coreBottom)")
+                return PublicOCRRequest(imageURL: url, referer: referer, language: sourceLanguage)
             }
-            let recognized = try await client.ocr(request)
+            let crop = try PublicImageCropper.crop(publicImage: data, metadata: metadata, window: window)
+            return PublicOCRRequest(publicCrop: crop, referer: referer, language: sourceLanguage,
+                cacheKey: "v2-public:\(url.absoluteString):\(window.coreTop)-\(window.coreBottom)")
+        }
+        var nextOCR: Task<[PublicOCRSegment], Error>?
+        defer { nextOCR?.cancel() }
+        for (position, window) in windows.enumerated() {
             try await activity.waitUntilActive()
             try check(id)
-            let segments = try recognized.compactMap { try window.map($0, page: page, metadata: metadata) }
+            let recognized: [PublicOCRSegment]
+            if let pending = nextOCR {
+                nextOCR = nil
+                recognized = try await pending.value
+            } else {
+                recognized = try await client.ocr(try ocrRequest(for: window))
+            }
+            // The Mac can OCR the next window while Ollama translates this one.
+            if position + 1 < windows.count {
+                let request = try ocrRequest(for: windows[position + 1])
+                nextOCR = Task { try await client.ocr(request) }
+            }
+            try await activity.waitUntilActive()
+            try check(id)
+            let segments = recognized.compactMap { source -> PublicOCRSegment? in
+                do { return try window.map(source, page: page, metadata: metadata) } catch {
+                    Self.logger.error("Page \(page + 1) segment \(source.id, privacy: .public) ignore: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+            }
                 .filter { segment in !accounted.contains { $0.isSameDialogue(as: segment) } }
             var start = 0
             while start < segments.count {
                 try await activity.waitUntilActive()
                 try check(id)
-                let batch = Array(segments[start..<min(start + (start == 0 ? 1 : 3), segments.count)])
+                let batch = Array(segments[start..<min(start + (start == 0 ? 1 : 6), segments.count)])
                 start += batch.count
                 let fresh = batch.filter { candidate in !accounted.contains(where: { $0.id == candidate.id }) }
                 if fresh.isEmpty { continue }

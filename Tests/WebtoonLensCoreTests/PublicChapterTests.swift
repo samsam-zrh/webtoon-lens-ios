@@ -134,6 +134,19 @@ final class PublicChapterTests: XCTestCase {
         XCTAssertThrowsError(try invalid.validated())
     }
 
+    func testMaskPaddingOverflowIsClampedInsideImageInsteadOfRejected() throws {
+        // Valeurs reelles observees sur nanomachin ch.329 image 3 : maxX jusqu'a 1.0206.
+        var overflowing = try fixtureSegment(y: 0.3)
+        overflowing.boundingBox = .init(x: 0.8206, y: 0.3, width: 0.2, height: 0.03)
+        overflowing.rawBoundingBox = .init(x: 0.8281, y: 0.302, width: 0.18, height: 0.025)
+        overflowing.textBox = .init(x: 0.83, y: 0.303, width: 0.178, height: 0.02)
+        let clamped = try overflowing.validated()
+        XCTAssertLessThanOrEqual(clamped.boundingBox.x + clamped.boundingBox.width, 1.0)
+        XCTAssertLessThanOrEqual(clamped.textBox!.x + clamped.textBox!.width, 1.0)
+        XCTAssertGreaterThan(clamped.boundingBox.width, 0.2 * 0.6)
+        XCTAssertEqual(clamped.sourceText, overflowing.sourceText)
+    }
+
     func testOCRWireUsesExactImageUrlAndPublicCropFields() throws {
         let image = URL(string: "https://example.test/chapter.png")!
         let page = URL(string: "https://example.test/chapter")!

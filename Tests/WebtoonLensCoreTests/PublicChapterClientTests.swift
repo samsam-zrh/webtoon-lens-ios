@@ -78,6 +78,29 @@ final class PublicChapterClientTests: XCTestCase {
         XCTAssertEqual(segments[0].fontSizeSource, 32)
     }
 
+    func testOneUnreadableSegmentDoesNotDiscardTheRestOfTheWindow() async throws {
+        let session = fixtureSession()
+        defer { session.invalidateAndCancel() }
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=="
+        let mask = "data:image/png;base64,\(png)"
+        ChapterProtocol.handler = { _ in
+            let response = """
+            {"segments":[
+            {"id":"broken","sourceText":"Broken fixture","boundingBox":{"x":0.1,"y":0.2,"width":4,"height":0.1},
+             "confidence":0.9,"maskData":"\(mask)","renderMode":"replace","imageWidth":690,"imageHeight":2900},
+            {"id":"kept","sourceText":"Kept synthetic dialogue","boundingBox":{"x":0.1,"y":0.5,"width":0.3,"height":0.05},
+             "textBox":{"x":0.11,"y":0.51,"width":0.28,"height":0.03},"confidence":0.9,
+             "maskData":"\(mask)","renderMode":"replace","imageWidth":690,"imageHeight":2900}]}
+            """
+            return (200, Data(response.utf8))
+        }
+        let segments = try await PublicChapterClient(baseURL: URL(string: "http://127.0.0.1:8787")!, session: session)
+            .ocr(PublicOCRRequest(imageURL: URL(string: "https://example.test/1.png")!,
+                                 referer: URL(string: "https://example.test/chapter")!, language: "en"))
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments[0].id, "kept")
+    }
+
     private func fixtureSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ChapterProtocol.self]

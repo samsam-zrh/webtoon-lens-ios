@@ -54,6 +54,18 @@ window.WebtoonLayout = (() => {
     return details;
   }
 
+  function refreshSummary(target, details) {
+    const summary = details.querySelector("summary");
+    if (!summary) return;
+    const entries = details.querySelectorAll(".dialogue-entry").length;
+    const errors = details.querySelectorAll(".dialogue-error").length;
+    const unfit = target.querySelectorAll('.bubble[data-fit="false"]').length;
+    let label = entries > 0 ? `Lire les dialogues et leur original (${entries})` : "Lire les dialogues et leur original";
+    if (unfit > 0) label += ` · ${unfit} non ajustée${unfit > 1 ? "s" : ""}`;
+    if (errors > 0) label += ` · ${errors} erreur${errors > 1 ? "s" : ""}`;
+    summary.textContent = label;
+  }
+
   function removeDialogueItem(details, id) {
     Array.from(details.querySelectorAll(".dialogue-entry, .dialogue-error"))
       .find(entry => entry.dataset.segmentId === id)?.remove();
@@ -72,7 +84,7 @@ window.WebtoonLayout = (() => {
     error.textContent = `Traduction indisponible : ${message}. Les autres dialogues continuent.`;
     item.append(original, error);
     details.append(item);
-    details.open = true;
+    refreshSummary(target, details);
   }
 
   function render(target, segment) {
@@ -155,6 +167,7 @@ window.WebtoonLayout = (() => {
       bubble.hidden = !result;
       hint.textContent = result ? "Traduction ajustée dans la bulle · police approchée."
         : "Original conservé : zone non fiable ou texte trop petit. Traduction intégrale ci-dessus.";
+      refreshSummary(target, details);
       if (!result) return;
       bubble.dataset.maxLineWidth = result.maxWidth;
       bubble.dataset.textWidth = width;
@@ -177,7 +190,6 @@ window.WebtoonLayout = (() => {
       observers.set(target, state);
     }
     update();
-    if (bubble.dataset.fit === "false") details.open = true;
     return bubble;
   }
 

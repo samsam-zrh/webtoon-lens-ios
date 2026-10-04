@@ -190,6 +190,15 @@ final class ImmersiveReadingController {
             requestedURL = url
             requestOptions = options
             showPublic = false
+            let id = intent
+            warmupTask?.cancel()
+            warmupTask = Task { [weak self] in
+                do { try await PublicChapterClient(baseURL: try settings.translationBackend()).warmup() }
+                catch is CancellationError {
+                } catch {
+                    if let self, self.intent == id { self.message = "Prechauffage indisponible ; traduction normale." }
+                }
+            }
             browser.setActive(active)
             browser.translateVisible()
             return
